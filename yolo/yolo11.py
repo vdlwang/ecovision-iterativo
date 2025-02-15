@@ -1,5 +1,5 @@
 from ultralytics import YOLO
 
-model = YOLO("yolo11n.pt")
+model = YOLO("./yolo/yolo11n.pt")
 
-results = model(0, save = True, conf=0.8, show = True)
+results = model(source=0, conf=0.8, show=True, save=False)
