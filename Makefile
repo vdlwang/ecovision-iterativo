@@ -1,2 +1,2 @@
 clean:
-	rm -rf runs/*
+	rm -r scripts/runs/*
