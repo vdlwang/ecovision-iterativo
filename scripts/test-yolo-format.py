@@ -1,18 +1,14 @@
 from ultralytics import YOLO
-from ultralytics.data.converter import convert_coco
-from pathlib import Path
-import tempfile
-import yaml
 
 # Carrega o modelo
 model = YOLO('../yolo_models/taco/yolov8s_100epochs-best.pt')
 
-yaml_path = './YOLO_dataset/data.yaml'
+yaml_path = '../database/tcc-0SF/YOLO_dataset/data.yaml'
 
 # Rodar tesste
 results = model.val(
     data=yaml_path,
-    split='val',
+    split='test',
     verbose=True
 )
 
