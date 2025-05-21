@@ -1,0 +1,11 @@
+names:
+- glass bottle
+- normal paper
+- corrugated carton
+- metal drink can
+- plastic bottle cap
+- plastic bottle
+nc: 6
+test: test/images
+train: train/images
+val: validation/images
