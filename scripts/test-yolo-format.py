@@ -1,14 +1,18 @@
 from ultralytics import YOLO
+from pathlib import Path
+
+# Caminho base do projeto (base onde está o data.yaml)
+script_dir = Path(__file__).resolve().parent
+dataset_dir = script_dir.parent / "database" / "tcc-0SF" / "YOLO_dataset"
+yaml_path = dataset_dir / "data.yaml"
 
 # Carrega o modelo
-model = YOLO('../yolo_models/taco/yolov8s_100epochs-best.pt')
+model = YOLO(script_dir.parent / "yolo_models" / "taco" / "yolov8s_100epochs-best.pt")
 
-yaml_path = '../database/tcc-0SF/YOLO_dataset/data.yaml'
-
-# Rodar tesste
+# Rodar teste
 results = model.val(
-    data=yaml_path,
-    split='test',
+    data=str(yaml_path),
+    split='val',
     verbose=True
 )
 
