@@ -23,3 +23,5 @@ print(f" - mAP@0.5:0.95: {results.box.map:.4f}")
 print(f" - Precisão média (mean precision): {results.box.mp:.4f}")
 print(f" - Precisão por classe: {results.box.p}")
 print(f" - Revocação por classe:    {results.box.r}")
+
+# print(results.box)
