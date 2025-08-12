@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberReciclagem - Sistema de Controle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        :root {
+            --british-racing-green: #034732;
+            --dartmouth-green: #02643d;
+            --sea-green: #008148;
+            --emerald: #48b86c;
+            --light-green: #90ee90;
+            --light-green-2: #abf2ab;
+            
+            --material-green: #196626;
+            --material-red: #960e1a;
+            --material-blue: #163b6f;
+            --material-yellow: #d2b91f;
+            --material-silver: #bcc7c9;
+            --material-moss: #4c5f0d;
+            --material-brown: #2c2a15;
+        }
+        
+        .conveyor-belt {
+            background: linear-gradient(90deg, var(--dartmouth-green) 0%, var(--british-racing-green) 50%, var(--dartmouth-green) 100%);
+            background-size: 40px 100%;
+            animation: beltMove 3s linear infinite;
+        }
+        
+        .conveyor-belt.stopped {
+            animation-play-state: paused;
+        }
+        
+        @keyframes beltMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 40px 0; }
+        }
+        
+        .gate {
+            transition: all 0.3s ease;
+            background-color: var(--material-silver);
+        }
+        
+        .gate.active {
+            background: var(--emerald);
+            box-shadow: 0 0 20px rgba(72, 184, 108, 0.5);
+        }
+        
+        .gate.inactive {
+            background-color: var(--material-red);
+            opacity: 0.7;
+        }
+        
+        .nav-item {
+            transition: all 0.2s ease;
+        }
+        
+        .nav-item:hover {
+            background-color: var(--sea-green);
+        }
+        
+        .nav-item.active {
+            background-color: var(--emerald);
+        }
+        
+        .status-indicator {
+            animation: pulse 2s infinite;
+        }
+        
+        .material-papel { background-color: var(--material-green); }
+        .material-metal { background-color: var(--material-silver); color: black; }
+        .material-plastico { background-color: var(--material-blue); }
+        .material-vidro { background-color: var(--material-yellow); color: black; }
+        
+        .page {
+            display: none;
+        }
+        
+        .page.active {
+            display: block;
+        }
+    </style>
+</head>
+<body style="background: linear-gradient(135deg, var(--british-racing-green) 0%, var(--dartmouth-green) 50%, var(--sea-green) 100%); min-height: 100vh;" class="text-white">
+    <!-- Navigation -->
+    <nav style="background-color: var(--british-racing-green);" class="border-b border-opacity-20 border-white">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl" style="background-color: var(--emerald);">
+                        ♻️
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold">CyberReciclagem</h1>
+                        <p class="text-sm opacity-75">Coleta Seletiva com ML</p>
+                    </div>
+                </div>
+                
+                <div class="flex space-x-2">
+                    <button onclick="showPage('esteira')" class="nav-item px-4 py-2 rounded-lg text-sm font-medium active">
+                        🏭 Esteira
+                    </button>
+                    <button onclick="showPage('ia')" class="nav-item px-4 py-2 rounded-lg text-sm font-medium">
+                        🤖 IA
+                    </button>
+                    <button onclick="showPage('dashboard')" class="nav-item px-4 py-2 rounded-lg text-sm font-medium">
+                        📊 Dashboard
+                    </button>
+                    <button onclick="showPage('logs')" class="nav-item px-4 py-2 rounded-lg text-sm font-medium">
+                        📋 Logs
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-6 py-8">
+        <!-- Dashboard Page -->
+        <div id="dashboard" class="page">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold mb-2">Dashboard - Painel de Acompanhamento</h2>
+                <p class="opacity-75">Visão geral do sistema de reciclagem inteligente</p>
+            </div>
+
+            <!-- Status do Sistema -->
+            <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 mb-8 border border-white border-opacity-20">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-xl font-semibold">Status Geral do Sistema</h3>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 rounded-full status-indicator" style="background-color: var(--light-green);"></div>
+                        <span class="font-medium" style="color: var(--light-green);">Online</span>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--light-green);" id="items-processed">1,247</div>
+                        <div class="text-sm opacity-75">Itens Processados</div>
+                    </div>
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--emerald);" id="avg-accuracy">94.2%</div>
+                        <div class="text-sm opacity-75">Precisão Média</div>
+                    </div>
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--light-green-2);" id="active-gates">3/3</div>
+                        <div class="text-sm opacity-75">Cancelas Ativas</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estatísticas por Material -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-4">Materiais Processados Hoje</h3>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between p-3 rounded-lg material-papel">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xl">📄</span>
+                                <span>Papel/Papelão</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold">342</div>
+                                <div class="text-sm opacity-75">27.4%</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center justify-between p-3 rounded-lg material-metal">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xl">🥫</span>
+                                <span>Metal</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold">198</div>
+                                <div class="text-sm opacity-75">15.9%</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center justify-between p-3 rounded-lg material-plastico">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xl">🍶</span>
+                                <span>Plástico</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold">456</div>
+                                <div class="text-sm opacity-75">36.6%</div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center justify-between p-3 rounded-lg material-vidro">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xl">🍾</span>
+                                <span>Vidro</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold">251</div>
+                                <div class="text-sm opacity-75">20.1%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-4">Performance das Cancelas</h3>
+                    <div class="space-y-4">
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Cancela 1 - Papel/Papelão</span>
+                                <span class="text-sm px-2 py-1 rounded" style="background-color: var(--emerald);" id="gate1-status">Ativa</span>
+                            </div>
+                            <div class="text-2xl font-bold" style="color: var(--material-green);">342 itens</div>
+                            <div class="text-sm opacity-75">Precisão: 96.1%</div>
+                        </div>
+                        
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Cancela 2 - Metal</span>
+                                <span class="text-sm px-2 py-1 rounded" style="background-color: var(--emerald);" id="gate2-status">Ativa</span>
+                            </div>
+                            <div class="text-2xl font-bold" style="color: var(--material-silver);">198 itens</div>
+                            <div class="text-sm opacity-75">Precisão: 94.8%</div>
+                        </div>
+                        
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-medium">Cancela 3 - Plástico</span>
+                                <span class="text-sm px-2 py-1 rounded" style="background-color: var(--emerald);" id="gate3-status">Ativa</span>
+                            </div>
+                            <div class="text-2xl font-bold" style="color: var(--material-blue);">456 itens</div>
+                            <div class="text-sm opacity-75">Precisão: 91.7%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Esteira Page -->
+        <div id="esteira" class="page active">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold mb-2">Configuração da Esteira e Cancelas</h2>
+                <p class="opacity-75">Configure o funcionamento das cancelas e monitore a esteira</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Visualização da Esteira -->
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-6">Visualização da Esteira</h3>
+                    
+                    <div class="mb-6">
+                        <div class="conveyor-belt h-24 rounded-lg relative overflow-hidden">
+                            <div class="absolute inset-0 flex items-center justify-around">
+                                <div id="gate1" class="gate w-14 h-20 rounded-lg border-2 border-white border-opacity-30 flex items-center justify-center active">
+                                    <span class="text-sm font-bold">1</span>
+                                </div>
+                                <div id="gate2" class="gate w-14 h-20 rounded-lg border-2 border-white border-opacity-30 flex items-center justify-center active">
+                                    <span class="text-sm font-bold">2</span>
+                                </div>
+                                <div id="gate3" class="gate w-14 h-20 rounded-lg border-2 border-white border-opacity-30 flex items-center justify-center active">
+                                    <span class="text-sm font-bold">3</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center text-sm opacity-75 mt-2">Esteira Rolante - Direção →</div>
+                    </div>
+
+                    <!-- Controles da Esteira -->
+                    <div class="space-y-4">
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <span class="text-sm font-medium">Status da Esteira</span>
+                                <span id="belt-status" class="text-sm px-3 py-1 rounded font-semibold" style="background-color: var(--emerald);">Funcionando</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <button onclick="startBelt()" id="start-btn" class="text-white font-semibold py-3 px-4 rounded-lg transition-colors" style="background-color: var(--emerald);">
+                                    ▶️ LIGAR
+                                </button>
+                                <button onclick="stopBelt()" id="stop-btn" class="text-white font-semibold py-3 px-4 rounded-lg transition-colors" style="background-color: var(--material-red);">
+                                    ⏹️ PARAR
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configuração das Cancelas -->
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-6">Configuração das Cancelas</h3>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-semibold">Cancela 1</h4>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="gate1-active" class="mr-2" checked onchange="toggleGate(1)">
+                                    <span class="text-sm">Ativa</span>
+                                </label>
+                            </div>
+                            <select id="gate1-material" class="w-full border border-white border-opacity-20 rounded-lg px-3 py-2 text-white" style="background-color: var(--dartmouth-green);" onchange="updateGateConfig(1)">
+                                <option value="papel">📄 Papel/Papelão</option>
+                                <option value="metal">🥫 Metal</option>
+                                <option value="plastico">🍶 Plástico</option>
+                                <option value="vidro">🍾 Vidro</option>
+                            </select>
+                        </div>
+
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-semibold">Cancela 2</h4>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="gate2-active" class="mr-2" checked onchange="toggleGate(2)">
+                                    <span class="text-sm">Ativa</span>
+                                </label>
+                            </div>
+                            <select id="gate2-material" class="w-full border border-white border-opacity-20 rounded-lg px-3 py-2 text-white" style="background-color: var(--dartmouth-green);" onchange="updateGateConfig(2)">
+                                <option value="papel">📄 Papel/Papelão</option>
+                                <option value="metal" selected>🥫 Metal</option>
+                                <option value="plastico">🍶 Plástico</option>
+                                <option value="vidro">🍾 Vidro</option>
+                            </select>
+                        </div>
+
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-semibold">Cancela 3</h4>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="gate3-active" class="mr-2" checked onchange="toggleGate(3)">
+                                    <span class="text-sm">Ativa</span>
+                                </label>
+                            </div>
+                            <select id="gate3-material" class="w-full border border-white border-opacity-20 rounded-lg px-3 py-2 text-white" style="background-color: var(--dartmouth-green);" onchange="updateGateConfig(3)">
+                                <option value="papel">📄 Papel/Papelão</option>
+                                <option value="metal">🥫 Metal</option>
+                                <option value="plastico" selected>🍶 Plástico</option>
+                                <option value="vidro">🍾 Vidro</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- IA Page -->
+        <div id="ia" class="page">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold mb-2">Configurações de Inteligência Artificial</h2>
+                <p class="opacity-75">Configure os parâmetros do modelo de IA para detecção de materiais</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Configurações do Modelo -->
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-6">Parâmetros do Modelo</h3>
+                    
+                    <div class="space-y-6">
+                        <!-- Limite de Acurácia -->
+                        <div>
+                            <label class="block text-sm font-medium mb-3">Limite Mínimo de Acurácia</label>
+                            <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                                <input type="range" id="accuracy-slider" min="50" max="99" value="85" 
+                                       class="w-full h-2 rounded-lg appearance-none cursor-pointer"
+                                       style="background-color: var(--dartmouth-green);"
+                                       oninput="updateAccuracy(this.value)">
+                                <div class="flex justify-between text-sm opacity-75 mt-2">
+                                    <span>50%</span>
+                                    <span id="accuracy-value" style="color: var(--emerald);" class="font-semibold">85%</span>
+                                    <span>99%</span>
+                                </div>
+                                <p class="text-xs opacity-75 mt-2">
+                                    Detecções abaixo deste limite serão rejeitadas
+                                </p>
+                                <button onclick="calibrateIA()" class="w-full mt-4 text-white font-semibold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--emerald);">
+                                    ⚙️ Calibrar IA
+                                </button>
+                            </div>
+                        </div>
+
+
+                    </div>
+                </div>
+
+                <!-- Status da IA -->
+                <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                    <h3 class="text-xl font-semibold mb-6">Status do Modelo IA</h3>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm">Status do Modelo</span>
+                                <span class="text-sm px-2 py-1 rounded" style="background-color: var(--emerald);">Ativo</span>
+                            </div>
+                            <div class="text-lg font-bold" style="color: var(--light-green);">Modelo v2.3.1</div>
+                            <div class="text-sm opacity-75">Última atualização: 15/03/2024</div>
+                        </div>
+                        
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="text-sm mb-2">Performance Atual</div>
+                            <div class="text-2xl font-bold" style="color: var(--emerald);">94.2%</div>
+                            <div class="text-sm opacity-75">Precisão média nas últimas 24h</div>
+                        </div>
+                        
+                        <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                            <div class="text-sm mb-2">Detecções por Minuto</div>
+                            <div class="text-2xl font-bold" style="color: var(--sea-green);">12.4</div>
+                            <div class="text-sm opacity-75">Taxa atual de processamento</div>
+                        </div>
+                    </div>
+
+
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Logs Page -->
+        <div id="logs" class="page">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold mb-2">Logs e Testes do Sistema</h2>
+                <p class="opacity-75">Monitore atividades, erros e execute testes do sistema</p>
+            </div>
+
+            <!-- Estatísticas de Erro -->
+            <div class="mb-8 bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                <h3 class="text-xl font-semibold mb-4">Estatísticas de Erro</h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--material-red);">23</div>
+                        <div class="text-sm opacity-75">Erros nas últimas 24h</div>
+                    </div>
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--material-yellow); color: black; background-color: var(--material-yellow); border-radius: 4px;">156</div>
+                        <div class="text-sm opacity-75">Detecções rejeitadas</div>
+                    </div>
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4 text-center">
+                        <div class="text-2xl font-bold" style="color: var(--light-green);">99.1%</div>
+                        <div class="text-sm opacity-75">Uptime do sistema</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Testes do Sistema -->
+            <div class="mb-8 bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                <h3 class="text-xl font-semibold mb-6">Testes do Sistema</h3>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Teste de Cancelas -->
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Teste de Cancelas</h4>
+                        <p class="text-sm opacity-75 mb-4">Testa o funcionamento das cancelas ativas com suas configurações atuais</p>
+                        
+                        <button onclick="testGates()" class="w-full text-white font-semibold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--sea-green);">
+                            🔧 Executar Teste das Cancelas
+                        </button>
+                    </div>
+                    
+                    <!-- Teste de Esteira -->
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Teste de Esteira</h4>
+                        <p class="text-sm opacity-75 mb-4">Verifica o funcionamento básico da esteira</p>
+                        
+                        <button onclick="testBelt()" class="w-full text-white font-semibold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--dartmouth-green);">
+                            🔧 Executar Teste da Esteira
+                        </button>
+                    </div>
+                    
+                    <!-- Teste de IA -->
+                    <div class="bg-black bg-opacity-30 rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Teste de IA</h4>
+                        <p class="text-sm opacity-75 mb-4">Simula detecções com amostras conhecidas</p>
+                        
+                        <div class="space-y-3 mb-4">
+                            <div>
+                                <label class="block text-xs mb-1">Precisão Mínima Esperada (%)</label>
+                                <input type="number" id="test-accuracy" value="95" min="80" max="99" class="w-full px-2 py-1 rounded text-black text-sm">
+                            </div>
+                        </div>
+                        
+                        <button onclick="testIA()" class="w-full text-white font-semibold py-2 px-4 rounded-lg transition-colors" style="background-color: var(--emerald);">
+                            🤖 Executar Teste
+                        </button>
+                    </div>
+                    
+
+                </div>
+            </div>
+
+            <!-- Log de Atividades -->
+            <div class="bg-black bg-opacity-20 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-xl font-semibold">Log de Atividades</h3>
+                    <button onclick="clearLogs()" class="text-sm px-3 py-1 rounded" style="background-color: var(--material-red);">
+                        🗑️ Limpar
+                    </button>
+                </div>
+                
+                <div class="bg-black bg-opacity-50 rounded-lg p-4 h-80 overflow-y-auto font-mono text-sm" id="activity-log">
+                    <div style="color: var(--light-green);">[14:32:15] Sistema iniciado com sucesso</div>
+                    <div style="color: var(--emerald);">[14:32:18] Cancela 1 configurada para Papel/Papelão</div>
+                    <div style="color: var(--emerald);">[14:32:18] Cancela 2 configurada para Metal</div>
+                    <div style="color: var(--emerald);">[14:32:18] Cancela 3 configurada para Plástico</div>
+                    <div style="color: var(--light-green-2);">[14:32:22] Limite de acurácia definido para 85%</div>
+                    <div style="color: var(--light-green);">[14:32:25] IA detectou: Garrafa Plástica (92%) → Cancela 3</div>
+                    <div style="color: var(--light-green);">[14:32:28] IA detectou: Lata de Metal (96%) → Cancela 2</div>
+                    <div style="color: var(--material-red);">[14:32:31] Material rejeitado: Acurácia 72% < 85%</div>
+                </div>
+            </div>
+
+        </div>
+
+
+    </div>
+
+    <script>
+        let systemPaused = false;
+        let beltRunning = true;
+        let gateConfigs = {
+            1: { active: true, material: 'papel' },
+            2: { active: true, material: 'metal' },
+            3: { active: true, material: 'plastico' }
+        };
+
+        function showPage(pageId) {
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.remove('active');
+            });
+            
+            // Remove active class from all nav items
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Show selected page
+            document.getElementById(pageId).classList.add('active');
+            
+            // Add active class to clicked nav item
+            event.target.classList.add('active');
+        }
+
+        function toggleGate(gateNumber) {
+            const checkbox = document.getElementById(`gate${gateNumber}-active`);
+            const gate = document.getElementById(`gate${gateNumber}`);
+            const statusElement = document.getElementById(`gate${gateNumber}-status`);
+            
+            gateConfigs[gateNumber].active = checkbox.checked;
+            
+            if (checkbox.checked) {
+                gate.classList.remove('inactive');
+                gate.classList.add('active');
+                statusElement.textContent = 'Ativa';
+                statusElement.style.backgroundColor = 'var(--emerald)';
+                addLog(`Cancela ${gateNumber} ativada`, 'green');
+            } else {
+                gate.classList.remove('active');
+                gate.classList.add('inactive');
+                statusElement.textContent = 'Inativa';
+                statusElement.style.backgroundColor = 'var(--material-red)';
+                addLog(`Cancela ${gateNumber} desativada`, 'red');
+            }
+            
+            updateActiveGatesCount();
+        }
+
+        function updateActiveGatesCount() {
+            const activeCount = Object.values(gateConfigs).filter(config => config.active).length;
+            document.getElementById('active-gates').textContent = `${activeCount}/3`;
+        }
+
+        function updateGateConfig(gateNumber) {
+            const select = document.getElementById(`gate${gateNumber}-material`);
+            const material = select.value;
+            
+            // Verificar se o material já está sendo usado em outra cancela
+            const otherGates = Object.keys(gateConfigs).filter(key => key != gateNumber);
+            const materialInUse = otherGates.some(key => gateConfigs[key].material === material);
+            
+            if (materialInUse) {
+                addLog(`Erro: Material ${getMaterialName(material)} já está sendo usado em outra cancela`, 'red');
+                // Reverter para o material anterior
+                select.value = gateConfigs[gateNumber].material;
+                return;
+            }
+            
+            gateConfigs[gateNumber].material = material;
+            
+            addLog(`Cancela ${gateNumber} configurada para ${getMaterialName(material)}`, 'blue');
+            updateSelectOptions();
+        }
+        
+        function getMaterialName(material) {
+            const materialNames = {
+                'papel': 'Papel/Papelão',
+                'metal': 'Metal',
+                'plastico': 'Plástico',
+                'vidro': 'Vidro'
+            };
+            return materialNames[material];
+        }
+        
+        function updateSelectOptions() {
+            // Atualizar as opções disponíveis em cada select
+            for (let i = 1; i <= 3; i++) {
+                const select = document.getElementById(`gate${i}-material`);
+                const currentValue = select.value;
+                const options = select.querySelectorAll('option');
+                
+                options.forEach(option => {
+                    const material = option.value;
+                    const isUsedElsewhere = Object.keys(gateConfigs).some(key => 
+                        key != i && gateConfigs[key].material === material
+                    );
+                    
+                    if (isUsedElsewhere && material !== currentValue) {
+                        option.disabled = true;
+                        option.style.color = '#666';
+                    } else {
+                        option.disabled = false;
+                        option.style.color = '';
+                    }
+                });
+            }
+        }
+
+        function updateAccuracy(value) {
+            document.getElementById('accuracy-value').textContent = value + '%';
+            addLog(`Limite de acurácia definido para ${value}%`, 'yellow');
+        }
+
+        function startBelt() {
+            if (!beltRunning) {
+                beltRunning = true;
+                document.getElementById('belt-status').textContent = 'Funcionando';
+                document.getElementById('belt-status').style.backgroundColor = 'var(--emerald)';
+                document.querySelector('.conveyor-belt').classList.remove('stopped');
+                addLog('Esteira ligada', 'green');
+            }
+        }
+
+        function stopBelt() {
+            if (beltRunning) {
+                beltRunning = false;
+                document.getElementById('belt-status').textContent = 'Parada';
+                document.getElementById('belt-status').style.backgroundColor = 'var(--material-red)';
+                document.querySelector('.conveyor-belt').classList.add('stopped');
+                addLog('Esteira parada', 'yellow');
+            }
+        }
+
+
+
+        function testGates() {
+            // Usar as configurações atuais das cancelas
+            const activeGates = Object.keys(gateConfigs).filter(key => gateConfigs[key].active);
+            
+            if (activeGates.length === 0) {
+                addLog('Erro: Nenhuma cancela ativa para testar', 'red');
+                return;
+            }
+            
+            const configsList = activeGates.map(gateNumber => {
+                const materialName = getMaterialName(gateConfigs[gateNumber].material);
+                return `Cancela ${gateNumber} - ${materialName}`;
+            }).join(', ');
+            
+            addLog(`Iniciando teste das cancelas ativas: ${configsList}...`, 'blue');
+            
+            // Simular teste de cada cancela ativa
+            activeGates.forEach((gateNumber, index) => {
+                const materialName = getMaterialName(gateConfigs[gateNumber].material);
+                
+                setTimeout(() => {
+                    addLog(`Testando Cancela ${gateNumber} com material ${materialName}...`, 'yellow');
+                }, (index + 1) * 1000);
+                
+                setTimeout(() => {
+                    const success = Math.random() > 0.1; // 90% de chance de sucesso
+                    if (success) {
+                        addLog(`✓ Cancela ${gateNumber} - ${materialName}: Funcionando perfeitamente`, 'green');
+                    } else {
+                        addLog(`✗ Cancela ${gateNumber} - ${materialName}: Erro detectado`, 'red');
+                    }
+                }, (index + 2) * 1000);
+            });
+            
+            // Resultado final
+            setTimeout(() => {
+                const successCount = activeGates.length - Math.floor(Math.random() * 2); // Máximo 1 erro
+                addLog(`Teste concluído: ${successCount}/${activeGates.length} cancelas aprovadas`, 'green');
+            }, (activeGates.length + 2) * 1000);
+        }
+        
+
+
+        function testIA() {
+            const expectedAccuracy = document.getElementById('test-accuracy').value;
+            
+            addLog(`Iniciando teste da IA com precisão mínima esperada: ${expectedAccuracy}%...`, 'blue');
+            setTimeout(() => {
+                const actualAccuracy = (Math.random() * 5 + parseFloat(expectedAccuracy) - 2.5).toFixed(1);
+                addLog(`Teste da IA concluído - Precisão alcançada: ${actualAccuracy}%`, 'green');
+            }, 3000);
+        }
+
+        function testBelt() {
+            addLog('Iniciando teste da esteira...', 'blue');
+            setTimeout(() => {
+                addLog('Teste da esteira concluído - Funcionamento normal', 'green');
+            }, 2500);
+        }
+
+
+
+        function retrainModel() {
+            addLog('Iniciando retreinamento do modelo IA...', 'blue');
+            setTimeout(() => {
+                addLog('Modelo retreinado com sucesso - Nova versão: v2.3.2', 'green');
+            }, 5000);
+        }
+
+        function calibrateIA() {
+            addLog('Iniciando calibração da IA...', 'blue');
+            setTimeout(() => {
+                addLog('Calibração concluída - Precisão otimizada', 'green');
+            }, 3000);
+        }
+
+        function clearLogs() {
+            document.getElementById('activity-log').innerHTML = '';
+            addLog('Logs limpos pelo usuário', 'blue');
+        }
+
+        function addLog(message, type) {
+            const logContainer = document.getElementById('activity-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const colorMap = {
+                'green': 'var(--light-green)',
+                'blue': 'var(--emerald)',
+                'yellow': 'var(--light-green-2)',
+                'red': 'var(--material-red)'
+            };
+            
+            const logEntry = document.createElement('div');
+            logEntry.style.color = colorMap[type] || 'white';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Inicializar sistema
+        document.addEventListener('DOMContentLoaded', function() {
+            // Inicializar validação de materiais
+            updateSelectOptions();
+            
+            // Simular detecções da IA periodicamente
+            setInterval(() => {
+                if (!systemPaused && beltRunning) {
+                    const materials = [
+                        { name: 'Garrafa Plástica', emoji: '🍶', type: 'plastico', gate: 3 },
+                        { name: 'Lata de Metal', emoji: '🥫', type: 'metal', gate: 2 },
+                        { name: 'Papel Comum', emoji: '📄', type: 'papel', gate: 1 },
+                        { name: 'Papelão', emoji: '📦', type: 'papel', gate: 1 },
+                        { name: 'Garrafa de Vidro', emoji: '🍾', type: 'vidro', gate: 1 }
+                    ];
+                    
+                    const material = materials[Math.floor(Math.random() * materials.length)];
+                    const accuracy = Math.floor(Math.random() * 30) + 70; // 70-99%
+                    const minAccuracy = parseInt(document.getElementById('accuracy-slider').value);
+                    
+                    // Verificar se a cancela está ativa
+                    const targetGate = Object.keys(gateConfigs).find(key => 
+                        gateConfigs[key].material === material.type && gateConfigs[key].active
+                    );
+                    
+                    if (accuracy >= minAccuracy && targetGate) {
+                        addLog(`IA detectou: ${material.name} (${accuracy}%) → Cancela ${targetGate}`, 'green');
+                    } else if (!targetGate) {
+                        addLog(`Material ${material.name} detectado mas cancela inativa`, 'yellow');
+                    } else {
+                        addLog(`Material rejeitado: Acurácia ${accuracy}% < ${minAccuracy}%`, 'red');
+                    }
+                }
+            }, 6000);
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96dcf520e074f1fe',t:'MTc1NDk3MDA5MS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
