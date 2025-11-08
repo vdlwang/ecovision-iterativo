@@ -1,0 +1,250 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 14px;
+  --background: linear-gradient(135deg, #f8fdf9 0%, #f0f9f4 50%, #f8fdf9 100%);
+  --foreground: oklch(0.145 0 0);
+  --card: #ffffff;
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #008148;
+  --primary-foreground: #ffffff;
+  --secondary: #abf2ab;
+  --secondary-foreground: #034732;
+  --muted: #f0f9f4;
+  --muted-foreground: #6b7280;
+  --accent: #48b86c;
+  --accent-foreground: #ffffff;
+  --destructive: #960e1a;
+  --destructive-foreground: #ffffff;
+  --border: rgba(3, 71, 50, 0.2);
+  --input: transparent;
+  --input-background: #f8fdf9;
+  --switch-background: #cbced4;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #008148;
+  --chart-1: #163b6f;
+  --chart-2: #bcc7c9;
+  --chart-3: #196626;
+  --chart-4: #d2b91f;
+  --chart-5: #4c5f0d;
+  --radius: 0.625rem;
+  --sidebar: #f8fdf9;
+  --sidebar-foreground: #034732;
+  --sidebar-primary: #008148;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #abf2ab;
+  --sidebar-accent-foreground: #034732;
+  --sidebar-border: rgba(3, 71, 50, 0.1);
+  --sidebar-ring: #008148;
+
+  /* Cores específicas do sistema de reciclagem */
+  --recycling-primary: #008148;
+  --recycling-primary-dark: #02643d;
+  --recycling-primary-darker: #034732;
+  --recycling-accent: #48b86c;
+  --recycling-light: #90ee90;
+  --recycling-lighter: #abf2ab;
+  
+  /* Cores dos materiais - CORRIGIDAS */
+  --material-paper: #163b6f;
+  --material-metal: #196626;  /* Corrigido: metal agora é verde */
+  --material-plastic: #dc1f2e; /* Corrigido: plástico agora é vermelho mais vibrante */
+  --material-glass: #d2b91f;
+  --material-organic: #4c5f0d;
+  --material-rejected: #dc1f2e;
+  --material-unknown: #2c2a15;
+}
+
+.dark {
+  --background: linear-gradient(135deg, #034732 0%, #02643d 50%, #034732 100%);
+  --foreground: #abf2ab;
+  --card: #02643d;
+  --card-foreground: #abf2ab;
+  --popover: #02643d;
+  --popover-foreground: #abf2ab;
+  --primary: #48b86c;
+  --primary-foreground: #034732;
+  --secondary: #008148;
+  --secondary-foreground: #abf2ab;
+  --muted: #02643d;
+  --muted-foreground: #90ee90;
+  --accent: #008148;
+  --accent-foreground: #abf2ab;
+  --destructive: #960e1a;
+  --destructive-foreground: #abf2ab;
+  --border: rgba(171, 242, 171, 0.2);
+  --input: #02643d;
+  --ring: #48b86c;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: #163b6f;
+  --chart-2: #bcc7c9;
+  --chart-3: #196626;
+  --chart-4: #d2b91f;
+  --chart-5: #4c5f0d;
+  --sidebar: #034732;
+  --sidebar-foreground: #abf2ab;
+  --sidebar-primary: #48b86c;
+  --sidebar-primary-foreground: #034732;
+  --sidebar-accent: #008148;
+  --sidebar-accent-foreground: #abf2ab;
+  --sidebar-border: rgba(171, 242, 171, 0.1);
+  --sidebar-ring: #48b86c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Classes utilitárias para as cores do sistema de reciclagem */
+  --color-recycling-primary: var(--recycling-primary);
+  --color-recycling-primary-dark: var(--recycling-primary-dark);
+  --color-recycling-primary-darker: var(--recycling-primary-darker);
+  --color-recycling-accent: var(--recycling-accent);
+  --color-recycling-light: var(--recycling-light);
+  --color-recycling-lighter: var(--recycling-lighter);
+  
+  --color-material-paper: var(--material-paper);
+  --color-material-metal: var(--material-metal);
+  --color-material-plastic: var(--material-plastic);
+  --color-material-glass: var(--material-glass);
+  --color-material-organic: var(--material-organic);
+  --color-material-rejected: var(--material-rejected);
+  --color-material-unknown: var(--material-unknown);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    min-height: 100vh;
+  }
+}
+
+/**
+ * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
+ */
+@layer base {
+  :where(:not(:has([class*=" text-"]), :not(:has([class^="text-"])))) {
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    p {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+  }
+}
+
+html {
+  font-size: var(--font-size);
+}
+
+/* Classes utilitárias personalizadas para materiais */
+@layer utilities {
+  .bg-material-paper { background-color: var(--material-paper); }
+  .bg-material-metal { background-color: var(--material-metal); }
+  .bg-material-plastic { background-color: var(--material-plastic); }
+  .bg-material-glass { background-color: var(--material-glass); }
+  .bg-material-organic { background-color: var(--material-organic); }
+  .bg-material-rejected { background-color: var(--material-rejected); }
+  .bg-material-unknown { background-color: var(--material-unknown); }
+  
+  .text-material-paper { color: var(--material-paper); }
+  .text-material-metal { color: var(--material-metal); }
+  .text-material-plastic { color: var(--material-plastic); }
+  .text-material-glass { color: var(--material-glass); }
+  .text-material-organic { color: var(--material-organic); }
+  .text-material-rejected { color: var(--material-rejected); }
+  .text-material-unknown { color: var(--material-unknown); }
+
+  .bg-recycling-primary { background-color: var(--recycling-primary); }
+  .bg-recycling-primary-dark { background-color: var(--recycling-primary-dark); }
+  .bg-recycling-primary-darker { background-color: var(--recycling-primary-darker); }
+  .bg-recycling-accent { background-color: var(--recycling-accent); }
+  .bg-recycling-light { background-color: var(--recycling-light); }
+  .bg-recycling-lighter { background-color: var(--recycling-lighter); }
+}
