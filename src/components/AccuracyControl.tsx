@@ -98,10 +98,23 @@ export function AccuracyControl({
       {/* Seleção de Modelo */}
       <Card className="border-2 border-recycling-primary/20">
         <CardHeader className="bg-recycling-lighter/30">
-          <CardTitle className="flex items-center gap-2 text-recycling-primary-darker">
-            <Cpu className="h-5 w-5 text-recycling-primary" />
-            Versão do Modelo
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-recycling-primary-darker">
+              <Cpu className="h-5 w-5 text-recycling-primary" />
+              Versão do Modelo
+            </CardTitle>
+            {!isSystemRunning && onModelVersionChange && (
+              <Button 
+                size="sm" 
+                onClick={() => {
+                  toast.success(`Modelo ${getModelInfo(modelVersion).name} salvo`);
+                }}
+                className="bg-recycling-primary hover:bg-recycling-primary-dark"
+              >
+                Salvar
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -130,17 +143,6 @@ export function AccuracyControl({
               </SelectContent>
             </Select>
           </div>
-
-          {isSystemRunning && (
-            <div className="bg-material-glass/20 border border-material-glass/40 p-3 rounded-lg">
-              <div className="flex items-center gap-2 text-material-glass">
-                <AlertCircle className="h-4 w-4" />
-                <span className="text-sm font-medium">
-                  Pare o sistema para alterar o modelo
-                </span>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -256,17 +258,6 @@ export function AccuracyControl({
             </div>
           </div>
         </div>
-
-        {isSystemRunning && hasChanges && (
-          <div className="bg-material-glass/20 border border-material-glass/40 p-3 rounded-lg">
-            <div className="flex items-center gap-2 text-material-glass">
-              <AlertCircle className="h-4 w-4" />
-              <span className="text-sm font-medium">
-                Pare o sistema para alterar a configuração de confiança
-              </span>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
     </div>

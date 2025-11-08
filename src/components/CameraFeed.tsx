@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Camera, Video, RefreshCw } from "lucide-react";
+import { Camera, Video, RefreshCw, Play, Pause, AlertTriangle, CheckCircle } from "lucide-react";
 
 interface Detection {
   class: string;
@@ -16,9 +16,11 @@ interface CameraFeedProps {
   onDetection?: (detection: Detection) => void;
   modelVersion: string;
   minConfidence: number;
+  onToggleSystem?: () => void;
+  inline?: boolean;
 }
 
-export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence }: CameraFeedProps) {
+export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence, onToggleSystem, inline = false }: CameraFeedProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string | undefined>(undefined);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -27,6 +29,12 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  
+  // Sincroniza isDetecting com isRunning quando isRunning muda
+  useEffect(() => {
+    setIsDetecting(isRunning);
+  }, [isRunning]);
 
   // Enumera dispositivos de câmera disponíveis
   useEffect(() => {
@@ -111,7 +119,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
 
   // Processa frames e envia para inferência
   useEffect(() => {
-    if (!isRunning || !videoRef.current || !canvasRef.current || !stream) {
+    if (!isDetecting || !videoRef.current || !canvasRef.current || !stream) {
       return;
     }
 
@@ -193,7 +201,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
     }, 1000); // Processa a cada 1 segundo
 
     return () => clearInterval(interval);
-  }, [isRunning, stream, modelVersion, minConfidence, onDetection]);
+  }, [isDetecting, stream, modelVersion, minConfidence, onDetection]);
 
   // Desenha bounding boxes no canvas overlay
   useEffect(() => {
@@ -261,83 +269,117 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
     console.log('[CÂMERA] Dispositivos atualizados:', videoDevices.length);
   };
 
-  return (
-    <Card className="border-2 border-recycling-primary/20">
-      <CardHeader className="bg-recycling-lighter/30 space-y-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-recycling-primary-darker">
+  const cameraContent = (
+    <div className="space-y-4">
+      {/* Título e Status */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-recycling-primary-darker flex items-center gap-2">
             <Camera className="h-5 w-5 text-recycling-primary" />
             Câmera Principal
-          </CardTitle>
-          <Badge variant={isRunning && stream ? "default" : "secondary"} className={isRunning && stream ? "bg-recycling-accent text-white" : ""}>
+          </h3>
+          <Badge variant={stream ? "default" : "secondary"} className={stream ? "bg-recycling-accent text-white" : ""}>
             <Video className="h-3 w-3 mr-1" />
-            {isRunning && stream ? "AO VIVO" : "INATIVO"}
+            {stream ? "AO VIVO" : "INATIVO"}
           </Badge>
         </div>
         
-        {/* Seletor de câmera */}
-        <div className="flex gap-2 items-center">
-          <Select value={selectedDevice || undefined} onValueChange={setSelectedDevice} disabled={isRunning}>
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Selecione uma câmera" />
-            </SelectTrigger>
-            <SelectContent>
-              {devices.length > 0 ? (
-                devices
-                  .filter(device => device.deviceId && device.deviceId.trim() !== '')
-                  .map((device, index) => (
-                    <SelectItem key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Câmera ${index + 1}`}
-                    </SelectItem>
-                  ))
+        {/* Status e Controles */}
+        {stream && selectedDevice && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-white/50 rounded-lg border border-recycling-primary/20">
+            <div className="flex items-center gap-2">
+              {isDetecting ? (
+                <CheckCircle className="h-4 w-4 text-recycling-primary" />
               ) : (
-                <SelectItem value="no-camera-placeholder" disabled>
-                  Nenhuma câmera detectada
-                </SelectItem>
+                <AlertTriangle className="h-4 w-4 text-material-glass" />
               )}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={handleRefreshDevices}
-            disabled={isRunning}
-            title="Atualizar lista de câmeras"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardHeader>
+              <span className="text-sm font-medium text-recycling-primary-darker">
+                {isDetecting ? "Detecção Ativa" : "Detecção Pausada"}
+              </span>
+              <Badge 
+                variant={isDetecting ? "default" : "secondary"}
+                className={isDetecting ? "bg-recycling-accent text-white" : ""}
+              >
+                {isDetecting ? "EM OPERAÇÃO" : "PARADO"}
+              </Badge>
+            </div>
+            <Button 
+              onClick={() => setIsDetecting(!isDetecting)} 
+              variant={isDetecting ? "destructive" : "default"}
+              size="sm"
+              className={isDetecting 
+                ? "bg-material-rejected hover:bg-material-rejected/90" 
+                : "bg-recycling-primary hover:bg-recycling-primary-dark"
+              }
+            >
+              {isDetecting ? <Pause className="h-3 w-3 mr-1.5" /> : <Play className="h-3 w-3 mr-1.5" />}
+              {isDetecting ? "Parar" : "Iniciar"}
+            </Button>
+          </div>
+        )}
+      </div>
       
-      <CardContent className="p-0">
-        <div className="relative bg-gray-900 aspect-video w-full overflow-hidden">
-          {error && (
-            <div className="absolute inset-0 flex items-center justify-center text-red-400 bg-gray-900 z-10">
-              <div className="text-center p-4">
-                <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">{error}</p>
-              </div>
+      {/* Seletor de câmera */}
+      <div className="flex gap-2 items-center">
+        <Select value={selectedDevice || undefined} onValueChange={setSelectedDevice}>
+          <SelectTrigger className="flex-1">
+            <SelectValue placeholder="Selecione uma câmera" />
+          </SelectTrigger>
+          <SelectContent>
+            {devices.length > 0 ? (
+              devices
+                .filter(device => device.deviceId && device.deviceId.trim() !== '')
+                .map((device, index) => (
+                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Câmera ${index + 1}`}
+                  </SelectItem>
+                ))
+            ) : (
+              <SelectItem value="no-camera-placeholder" disabled>
+                Nenhuma câmera detectada
+              </SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleRefreshDevices}
+          title="Atualizar lista de câmeras"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
+      
+      {/* Feed de vídeo */}
+      <div className="relative bg-gray-900 aspect-video w-full overflow-hidden rounded-lg border-2 border-recycling-primary/30">
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center text-red-400 bg-gray-900 z-10">
+            <div className="text-center p-4">
+              <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">{error}</p>
             </div>
-          )}
-          
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
-              <div className="text-center text-white">
-                <div className="w-12 h-12 border-4 border-recycling-primary border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                <p className="text-sm">Iniciando câmera...</p>
-              </div>
+          </div>
+        )}
+        
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
+            <div className="text-center text-white">
+              <div className="w-12 h-12 border-4 border-recycling-primary border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+              <p className="text-sm">Iniciando câmera...</p>
             </div>
-          )}
-          
-          {!isRunning && !isLoading && !error && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-              <div className="text-center">
-                <Camera className="h-16 w-16 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">Sistema Parado</p>
-                <p className="text-xs opacity-75 mt-1">Inicie o sistema para ativar a câmera</p>
-              </div>
+          </div>
+        )}
+        
+        {!stream && !isLoading && !error && (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <Camera className="h-16 w-16 mx-auto mb-3 opacity-50" />
+              <p className="text-sm">Câmera Inativa</p>
+              <p className="text-xs opacity-75 mt-1">Selecione uma câmera acima</p>
             </div>
-          )}
+          </div>
+        )}
 
           {/* Video element */}
           <video
@@ -349,36 +391,50 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
             style={{ display: stream ? 'block' : 'none' }}
           />
 
-          {/* Canvas overlay para bounding boxes */}
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ display: stream ? 'block' : 'none' }}
-          />
+        {/* Canvas overlay para bounding boxes */}
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ display: stream ? 'block' : 'none' }}
+        />
 
-          {/* Info overlay */}
-          {stream && (
-            <>
-              <div className="absolute bottom-3 left-3 text-white text-xs bg-black/70 px-2 py-1 rounded">
-                {devices.find(d => d.deviceId === selectedDevice)?.label || 'Câmera'} | {new Date().toLocaleTimeString()}
-              </div>
-              
-              {detections.length > 0 && (
-                <div className="absolute top-3 right-3 bg-black/70 text-white px-3 py-2 rounded space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                    <span className="text-xs font-medium">DETECTANDO</span>
-                  </div>
-                  {detections.slice(0, 3).map((det, idx) => (
-                    <div key={idx} className="text-xs opacity-90">
-                      {det.class}: {(det.confidence * 100).toFixed(1)}%
-                    </div>
-                  ))}
+        {/* Info overlay */}
+        {stream && (
+          <>
+            <div className="absolute bottom-3 left-3 text-white text-xs bg-black/70 px-2 py-1 rounded">
+              {devices.find(d => d.deviceId === selectedDevice)?.label || 'Câmera'} | {new Date().toLocaleTimeString()}
+            </div>
+            
+            {detections.length > 0 && (
+              <div className="absolute top-3 right-3 bg-black/70 text-white px-3 py-2 rounded space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                  <span className="text-xs font-medium">DETECTANDO</span>
                 </div>
-              )}
-            </>
-          )}
-        </div>
+                {detections.slice(0, 3).map((det, idx) => (
+                  <div key={idx} className="text-xs opacity-90">
+                    {det.class}: {(det.confidence * 100).toFixed(1)}%
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (inline) {
+    return cameraContent;
+  }
+
+  return (
+    <Card className="border-2 border-recycling-primary/20">
+      <CardHeader className="bg-recycling-lighter/30">
+        <CardTitle className="text-recycling-primary-darker">Câmera Principal</CardTitle>
+      </CardHeader>
+      <CardContent className="pt-6">
+        {cameraContent}
       </CardContent>
     </Card>
   );

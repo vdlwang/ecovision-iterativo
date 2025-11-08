@@ -316,43 +316,6 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userId }: Statis
           </div>
         </CardContent>
       </Card>
-
-      {/* Status do sistema */}
-      <Card className="border-recycling-primary/20">
-        <CardHeader className="bg-recycling-lighter/30">
-          <CardTitle className="text-recycling-primary-darker">Status do Sistema</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-recycling-primary-darker">Tempo de Funcionamento</span>
-              <div className="flex items-center gap-2">
-                <Progress value={stats.uptime} className="w-32 [&>div]:bg-recycling-primary" />
-                <span className="text-sm text-recycling-primary-darker">{stats.uptime.toFixed(1)}%</span>
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-recycling-primary-darker">Status</span>
-              <Badge 
-                className={isSystemRunning 
-                  ? "bg-recycling-accent text-white" 
-                  : "bg-gray-300 text-gray-600"
-                }
-              >
-                {isSystemRunning ? "Em Operação" : "Parado"}
-              </Badge>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-recycling-primary-darker">Cancelas Configuradas</span>
-              <span className="text-sm text-recycling-primary">
-                {Object.values(gateConfigs).filter(config => config !== "").length} de 3
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

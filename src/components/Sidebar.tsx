@@ -113,7 +113,7 @@ export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: Sidebar
         )}
     >
       {/* Header */}
-      <div className="p-6 border-b border-white/20 cursor-pointer hover:bg-white/5 transition-colors" onClick={() => handleTabChange("monitor")}>
+      <div className="p-6 border-b border-white/20 cursor-pointer hover:bg-white/5 transition-colors" onClick={toggleSidebar}>
         <div className="flex items-center justify-between">
           {(isExpanded || isMobile) ? (
             <div className="flex items-center gap-3">

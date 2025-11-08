@@ -97,12 +97,6 @@ export function Login({ onDemoMode }: { onDemoMode?: () => void }) {
               Entrar em Modo Demo
             </div>
           </Button>
-
-          <div className="pt-4 border-t border-gray-200">
-            <p className="text-xs text-center text-muted-foreground">
-              Ao fazer login, você concorda com os termos de uso do sistema EcoVision
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>

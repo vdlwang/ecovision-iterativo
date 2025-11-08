@@ -39,6 +39,7 @@ export function MonitorPanel({
   userId
 }: MonitorPanelProps) {
   const [recentDetections, setRecentDetections] = useState<Detection[]>([]);
+  const [beltRunning, setBeltRunning] = useState(false);
   const [gateStates, setGateStates] = useState({
     1: { active: false, lastActivated: null as Date | null },
     2: { active: false, lastActivated: null as Date | null },
@@ -180,57 +181,62 @@ export function MonitorPanel({
 
   return (
     <div className="space-y-6">
-      {/* Status do Sistema */}
+      {/* Card Unificado: Esteira + Câmera */}
       <Card className="border-2 border-recycling-primary/20">
-        <CardHeader className="pb-4 bg-recycling-lighter/30">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <CardTitle className="text-recycling-primary-darker">Status do Sistema</CardTitle>
-              {isRunning ? (
-                <CheckCircle className="h-5 w-5 text-recycling-primary" />
-              ) : (
-                <AlertTriangle className="h-5 w-5 text-material-glass" />
-              )}
-              <Badge 
-                variant={isRunning ? "default" : "secondary"}
-                className={isRunning ? "bg-recycling-accent text-white" : ""}
-              >
-                {isRunning ? "EM OPERAÇÃO" : "PARADO"}
-              </Badge>
-            </div>
-            <Button 
-              onClick={onToggleSystem} 
-              variant={isRunning ? "destructive" : "default"}
-              className={isRunning 
-                ? "bg-material-rejected hover:bg-material-rejected/90" 
-                : "bg-recycling-primary hover:bg-recycling-primary-dark"
-              }
-            >
-              {isRunning ? <Pause className="h-4 w-4 mr-2" /> : <Play className="h-4 w-4 mr-2" />}
-              {isRunning ? "Parar" : "Iniciar"}
-            </Button>
-          </div>
+        <CardHeader className="bg-recycling-lighter/30">
+          <CardTitle className="text-recycling-primary-darker">Monitor do Sistema</CardTitle>
         </CardHeader>
-      </Card>
-
-      {/* Layout Principal: Esteira + Câmera */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Esteira Rolante - Esquerda */}
-        <Card className="border-2 border-recycling-primary/20">
-          <CardHeader className="bg-recycling-lighter/30">
-            <CardTitle className="text-recycling-primary-darker">Esteira Rolante</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            {/* Visualização da esteira */}
-            <div className="relative">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-recycling-primary-darker">Transportador</span>
-                <span className="text-xs text-muted-foreground">Confiança mínima: {minAccuracy}%</span>
+        <CardContent className="pt-6 pb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
+            {/* Coluna Esquerda: Esteira Rolante */}
+            <div className="space-y-4 md:pr-8 md:border-r-2 md:border-recycling-primary/30 pb-6 md:pb-0 border-b-2 md:border-b-0 border-recycling-primary/30">
+              {/* Título e Controles da Esteira */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-recycling-primary-darker">Esteira Rolante</h3>
+                  <Badge variant={beltRunning ? "default" : "secondary"} className={beltRunning ? "bg-recycling-accent text-white" : ""}>
+                    {beltRunning ? "EM MOVIMENTO" : "PARADA"}
+                  </Badge>
+                </div>
+                
+                {/* Controle da Esteira */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-white/50 rounded-lg border border-recycling-primary/20">
+                  <div className="flex items-center gap-2">
+                    {beltRunning ? (
+                      <CheckCircle className="h-4 w-4 text-recycling-primary" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-material-glass" />
+                    )}
+                    <span className="text-sm font-medium text-recycling-primary-darker">
+                      {beltRunning ? "Transportador Ativo" : "Transportador Parado"}
+                    </span>
+                  </div>
+                  <Button 
+                    onClick={() => setBeltRunning(!beltRunning)}
+                    variant={beltRunning ? "destructive" : "default"}
+                    size="sm"
+                    className={beltRunning 
+                      ? "bg-material-rejected hover:bg-material-rejected/90" 
+                      : "bg-recycling-primary hover:bg-recycling-primary-dark"
+                    }
+                  >
+                    {beltRunning ? <Pause className="h-3 w-3 mr-1.5" /> : <Play className="h-3 w-3 mr-1.5" />}
+                    {beltRunning ? "Parar" : "Iniciar"}
+                  </Button>
+                </div>
+                
+                <p className="text-xs text-muted-foreground mt-2">Confiança mínima: {minAccuracy}%</p>
               </div>
+
+              {/* Visualização da esteira */}
+              <div className="relative">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-recycling-primary-darker">Transportador</span>
+                </div>
               
               <div className="relative w-full h-24 bg-gray-300 rounded-lg overflow-hidden border-2 border-recycling-primary/30">
                 {/* Animação de movimento */}
-                {isRunning && (
+                {beltRunning && (
                   <>
                     <div 
                       className="absolute inset-0 opacity-30"
@@ -251,7 +257,7 @@ export function MonitorPanel({
                 {/* Labels */}
                 <div className="absolute top-1/2 left-3 transform -translate-y-1/2 flex items-center gap-2">
                   <span className="text-xs font-medium text-recycling-primary-darker bg-white/80 px-2 py-1 rounded">Entrada</span>
-                  {isRunning && <ArrowRight className="w-4 h-4 text-recycling-primary animate-pulse" />}
+                  {beltRunning && <ArrowRight className="w-4 h-4 text-recycling-primary animate-pulse" />}
                 </div>
                 <div className="absolute top-1/2 right-3 transform -translate-y-1/2">
                   <span className="text-xs font-medium text-recycling-primary-darker bg-white/80 px-2 py-1 rounded">Saída</span>
@@ -285,18 +291,23 @@ export function MonitorPanel({
                   );
                 })}
               </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Câmera Principal - Direita */}
-        <CameraFeed
-          isRunning={isRunning}
-          onDetection={handleCameraDetection}
-          modelVersion={modelVersion}
-          minConfidence={minAccuracy}
-        />
-      </div>
+            {/* Coluna Direita: Câmera Principal */}
+            <div className="space-y-4 md:pl-8">
+              <CameraFeed
+                isRunning={isRunning}
+                onDetection={handleCameraDetection}
+                modelVersion={modelVersion}
+                minConfidence={minAccuracy}
+                onToggleSystem={onToggleSystem}
+                inline={true}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Detecções Recentes */}
       <Card className="border-2 border-recycling-primary/20">
