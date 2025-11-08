@@ -1,0 +1,376 @@
+@startuml EcoVision - Diagrama de Componentes React
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+skinparam componentStyle rectangle
+
+title EcoVision - Estrutura de Componentes React e Props
+
+' ==================== APP PRINCIPAL ====================
+
+package "Root Application" #034732 {
+  
+  [App.tsx] as App #ABF2AB
+  
+  note right of App
+    **Estado Global:**
+    • user: User | null
+    • isDemoMode: boolean
+    • activeTab: "monitor" | "cancelas" | "modelo" | "dashboard" | "perfil"
+    • isSystemRunning: boolean
+    • minAccuracy: number (default: 85)
+    • modelVersion: "YOLOv8n" | "YOLOv8s" | "YOLOv8m"
+    • gateConfigs: { 1: string, 2: string, 3: string }
+    
+    **Handlers:**
+    • handleDemoMode()
+    • handleToggleSystem()
+    • handleAccuracyChange(accuracy)
+    • handleModelVersionChange(version)
+    • handleGateConfigChange(configs)
+  end note
+}
+
+' ==================== AUTENTICAÇÃO ====================
+
+package "Authentication" #E8F4FD {
+  component "Login.tsx" as Login {
+    **Props:**
+    • onDemoMode?: () => void
+    
+    **State:**
+    • isLoading: boolean
+    
+    **Methods:**
+    • handleGoogleLogin()
+    • handleDemoMode()
+  }
+}
+
+' ==================== NAVEGAÇÃO ====================
+
+package "Navigation" #ABF2AB {
+  component "Sidebar.tsx" as Sidebar {
+    **Props:**
+    • activeTab: string
+    • onTabChange: (tab) => void
+    • userEmail: string
+    • onLogout: () => void
+    
+    **Features:**
+    • Menu expansível
+    • 5 abas: Monitor, Cancelas, Modelo, Dashboard, Perfil
+    • Avatar do usuário
+    • Botão de logout
+  }
+}
+
+' ==================== ABA MONITOR ====================
+
+package "Monitor Tab" #EDFEF4 {
+  component "MonitorPanel.tsx" as MonitorPanel {
+    **Props:**
+    • gateConfigs: { [key: number]: string }
+    • minAccuracy: number
+    • isRunning: boolean
+    • onToggleSystem: () => void
+    • modelVersion: string
+    • userId: string
+    
+    **Layout:**
+    • Card único com 2 colunas
+    • Coluna esquerda: Esteira
+    • Coluna direita: Câmera
+  }
+  
+  component "ConveyorSystem.tsx" as Conveyor {
+    **Props:**
+    • isRunning: boolean
+    • gateConfigs: { [key: number]: string }
+    
+    **State:**
+    • conveyorSpeed: number
+    
+    **Features:**
+    • Animação CSS da esteira
+    • 3 cancelas configuráveis
+    • Botão Start/Stop independente
+  }
+  
+  component "CameraFeed.tsx" as Camera {
+    **Props:**
+    • minAccuracy: number
+    • gateConfigs: { [key: number]: string }
+    • modelVersion: string
+    • userId: string
+    
+    **State:**
+    • isActive: boolean
+    • detections: Detection[]
+    • isProcessing: boolean
+    
+    **Refs:**
+    • webcamRef: RefObject<Webcam>
+    • canvasRef: RefObject<HTMLCanvasElement>
+    
+    **Methods:**
+    • startCamera()
+    • stopCamera()
+    • detectObjects()
+    • drawBoxes()
+  }
+}
+
+' ==================== ABA CANCELAS ====================
+
+package "Gates Tab" #196626 {
+  component "GateConfiguration.tsx" as GateConfig {
+    **Props:**
+    • gateConfigs: { [key: number]: string }
+    • onConfigChange: (configs) => void
+    • isSystemRunning: boolean
+    
+    **State:**
+    • localConfigs: { [key: number]: string }
+    • hasChanges: boolean
+    
+    **Features:**
+    • Select para cada cancela
+    • Opções: papel, metal, plastico, vidro, vazio
+    • Validação de duplicatas
+    • Badge colorido por material
+  }
+}
+
+' ==================== ABA MODELO ====================
+
+package "Model Tab" #163B6F {
+  component "AccuracyControl.tsx" as AccuracyCtrl {
+    **Props:**
+    • minAccuracy: number
+    • onAccuracyChange: (accuracy) => void
+    • isSystemRunning: boolean
+    • modelVersion?: string
+    • onModelVersionChange?: (version) => void
+    
+    **State:**
+    • tempAccuracy: number
+    • hasChanges: boolean
+    
+    **Features:**
+    • Slider de confiança (50-100%)
+    • Input numérico
+    • Select de modelo YOLO (n/s/m)
+    • Indicador de precisão
+    • Info sobre impacto
+  }
+}
+
+' ==================== ABA DASHBOARD ====================
+
+package "Dashboard Tab" #D2B91F {
+  component "StatisticsPanel.tsx" as StatsPanel {
+    **Props:**
+    • isSystemRunning: boolean
+    • gateConfigs: { [key: number]: string }
+    • userId: string
+    
+    **State:**
+    • stats: Statistics
+    • lastUpdate: Date | null
+    • loading: boolean
+    
+    **Features:**
+    • Cards de métricas
+    • Gráfico de barras (Recharts)
+    • Gráfico de pizza (Recharts)
+    • Performance por cancela
+    • Auto-refresh (10s quando running)
+  }
+}
+
+' ==================== ABA PERFIL ====================
+
+package "Profile Tab" #DC1F2E {
+  component "UserProfile.tsx" as UserProfile {
+    **Props:**
+    • user: User
+    
+    **Features:**
+    • Avatar
+    • Nome e email
+    • Informações do sistema
+    • Histórico (futuro)
+  }
+}
+
+' ==================== COMPONENTES SHADCN/UI ====================
+
+package "Shadcn/UI Components" #FFF9E8 {
+  component [Card]
+  component [Button]
+  component [Badge]
+  component [Select]
+  component [Slider]
+  component [Input]
+  component [Progress]
+  component [Switch]
+  component [Tabs]
+  component [Toaster]
+  component [Avatar]
+}
+
+' ==================== UTILITÁRIOS ====================
+
+package "Utils & Hooks" #008148 {
+  component "SupabaseClient" as Supabase {
+    • getSupabaseClient()
+    • auth.signInWithOAuth()
+    • auth.signOut()
+    • auth.getSession()
+  }
+  
+  component "API Helpers" as API {
+    • projectId
+    • publicAnonKey
+    • fetch() para endpoints
+  }
+}
+
+' ==================== RELACIONAMENTOS - HIERARQUIA ====================
+
+App --> Login : "renderiza quando !user"
+App --> Sidebar : "sempre renderiza"
+App -down-> MonitorPanel : "activeTab === 'monitor'"
+App -down-> GateConfig : "activeTab === 'cancelas'"
+App -down-> AccuracyCtrl : "activeTab === 'modelo'"
+App -down-> StatsPanel : "activeTab === 'dashboard'"
+App -down-> UserProfile : "activeTab === 'perfil'"
+
+MonitorPanel --> Conveyor : "lado esquerdo"
+MonitorPanel --> Camera : "lado direito"
+
+' ==================== RELACIONAMENTOS - PROPS ====================
+
+App ..> MonitorPanel : "props: gateConfigs,\nminAccuracy,\nisRunning,\nmodelVersion,\nuserId"
+
+App ..> GateConfig : "props: gateConfigs,\nonConfigChange,\nisSystemRunning"
+
+App ..> AccuracyCtrl : "props: minAccuracy,\nonAccuracyChange,\nmodelVersion,\nonModelVersionChange"
+
+App ..> StatsPanel : "props: isSystemRunning,\ngateConfigs,\nuserId"
+
+App ..> UserProfile : "props: user"
+
+MonitorPanel ..> Conveyor : "props: isRunning,\ngateConfigs"
+
+MonitorPanel ..> Camera : "props: minAccuracy,\ngateConfigs,\nmodelVersion,\nuserId"
+
+' ==================== RELACIONAMENTOS - USO ====================
+
+Login --> Supabase : "usa para auth"
+App --> Supabase : "verifica sessão"
+Sidebar --> Supabase : "logout"
+
+MonitorPanel --> API : "fetch /esteira/ligar"
+Camera --> API : "fetch /modelo/processar"
+GateConfig --> API : "fetch /config"
+AccuracyCtrl --> API : "fetch /modelo/calibrar"
+StatsPanel --> API : "fetch /dashboard/stats"
+
+' ==================== USO DE COMPONENTES UI ====================
+
+MonitorPanel --> [Card]
+MonitorPanel --> [Button]
+Conveyor --> [Card]
+Conveyor --> [Button]
+Conveyor --> [Badge]
+Camera --> [Card]
+Camera --> [Button]
+GateConfig --> [Card]
+GateConfig --> [Select]
+GateConfig --> [Badge]
+GateConfig --> [Button]
+AccuracyCtrl --> [Card]
+AccuracyCtrl --> [Slider]
+AccuracyCtrl --> [Input]
+AccuracyCtrl --> [Select]
+AccuracyCtrl --> [Badge]
+StatsPanel --> [Card]
+StatsPanel --> [Progress]
+StatsPanel --> [Badge]
+StatsPanel --> [Button]
+UserProfile --> [Card]
+UserProfile --> [Avatar]
+Sidebar --> [Avatar]
+
+App --> [Toaster] : "notificações globais"
+
+' ==================== NOTAS IMPORTANTES ====================
+
+note bottom of Camera
+  **Fluxo de Detecção:**
+  1. startCamera() -> getUserMedia()
+  2. setInterval(detectObjects, 3000)
+  3. Captura frame do webcam
+  4. POST /modelo/processar
+  5. drawBoxes() no canvas
+  6. Exibe toast com resultado
+end note
+
+note bottom of Conveyor
+  **Controle Independente:**
+  Botão Start/Stop controla
+  apenas a animação CSS.
+  NÃO controla sistema real.
+end note
+
+note bottom of MonitorPanel
+  **Layout Responsivo:**
+  Desktop: 2 colunas lado a lado
+  Mobile: 2 colunas empilhadas
+  Card único "Monitor do Sistema"
+end note
+
+note bottom of GateConfig
+  **Validação:**
+  • Não permite duplicatas
+  • Exibe preview visual
+  • Desabilita quando sistema running
+end note
+
+note bottom of AccuracyCtrl
+  **Cartões Separados:**
+  1. Seleção de Modelo YOLO
+  2. Controle de Confiança
+  Ambos com info de impacto
+end note
+
+note bottom of StatsPanel
+  **Auto-refresh:**
+  Quando isSystemRunning = true,
+  atualiza stats a cada 10s
+end note
+
+' ==================== LEGENDA ====================
+
+legend right
+  **Convenções:**
+  —> Hierarquia (renderização)
+  ..> Passagem de Props
+  --> Uso / Chamada
+  
+  **Cores:**
+  |<#034732>  | Componente Principal |
+  |<#ABF2AB>  | Componentes de UI |
+  |<#E8F4FD>  | Autenticação |
+  |<#EDFEF4>  | Aba Monitor |
+  |<#196626>  | Aba Cancelas |
+  |<#163B6F>  | Aba Modelo |
+  |<#D2B91F>  | Aba Dashboard |
+  |<#DC1F2E>  | Aba Perfil |
+  |<#FFF9E8>  | Shadcn/UI |
+  |<#008148>  | Utilitários |
+endlegend
+
+@enduml

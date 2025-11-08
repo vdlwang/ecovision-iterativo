@@ -1,0 +1,242 @@
+@startuml EcoVision - Arquitetura de Três Camadas
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+title EcoVision - Arquitetura de Três Camadas (Frontend -> Server -> Database)
+
+' ==================== CAMADA 1: FRONTEND ====================
+
+rectangle "CAMADA 1: FRONTEND (React + Tailwind)" #EDFEF4 {
+  
+  rectangle "App.tsx\n(Componente Principal)" as AppMain #034732 {
+    [Estado Global]
+    [Roteamento de Abas]
+    [Gerenciamento de Auth]
+  }
+  
+  rectangle "Componentes de Tela" #ABF2AB {
+    component "Login" as LoginComp
+    component "MonitorPanel" as MonitorComp
+    component "GateConfiguration" as GateComp
+    component "AccuracyControl" as AccuracyComp
+    component "StatisticsPanel" as StatsComp
+    component "UserProfile" as ProfileComp
+  }
+  
+  rectangle "Componentes de UI" #ABF2AB {
+    component "Sidebar" as SidebarComp
+    component "CameraFeed" as CameraComp
+    component "ConveyorSystem" as ConveyorComp
+    component "Shadcn/UI" as ShadcnComp
+  }
+  
+  rectangle "Hooks & Utils" #008148 {
+    component "useWebcam" as WebcamHook
+    component "useDetection" as DetectionHook
+  }
+}
+
+' ==================== CAMADA 2: SERVER ====================
+
+rectangle "CAMADA 2: SERVER (Hono + Deno)" #FEF4ED {
+  
+  rectangle "Edge Function\n/supabase/functions/server" as EdgeFunction #196626 {
+    
+    rectangle "index.tsx\n(API REST)" as ServerAPI {
+      [Endpoints HTTP]
+      [Middleware CORS]
+      [Logger]
+    }
+    
+    rectangle "models.tsx\n(Classes de Domínio)" as Models {
+      [Camera]
+      [Esteira]
+      [Cancela]
+      [ModeloIA]
+      [ControladorSerial]
+      [Dashboard]
+      [BancoDeDados]
+      [Autenticacao]
+    }
+    
+    rectangle "kv_store.tsx\n(Persistência)" as KVStore {
+      [get/set]
+      [mget/mset]
+      [getByPrefix]
+    }
+  }
+}
+
+' ==================== CAMADA 3: DATABASE ====================
+
+rectangle "CAMADA 3: DATABASE (Supabase)" #E8F4FD {
+  
+  database "PostgreSQL" as PostgresDB #163B6F {
+    rectangle "Tabela: kv_store_ea835390" as KVTable {
+      [key: string (PK)]
+      [value: jsonb]
+      [created_at: timestamp]
+    }
+  }
+  
+  rectangle "Supabase Auth" as SupabaseAuth #163B6F {
+    [Google OAuth]
+    [Sessões]
+    [Tokens JWT]
+  }
+  
+  rectangle "Supabase Storage\n(Opcional)" as SupabaseStorage #163B6F {
+    [Imagens]
+    [Vídeos]
+    [Logs]
+  }
+}
+
+' ==================== HARDWARE/EXTERNAL ====================
+
+rectangle "HARDWARE EXTERNO" #FFF9E8 {
+  
+  rectangle "ESP32" as ESP32 {
+    [Porta Serial]
+    [Comandos: 1 bit esteira + 2 bits cancela]
+  }
+  
+  rectangle "Webcam" as Webcam {
+    [MediaDevices API]
+    [Video Stream]
+  }
+  
+  rectangle "Python Inference Server" as PythonServer {
+    [inference_server.py]
+    [Modelos YOLO (.pt)]
+    [Ultralytics]
+  }
+  
+  rectangle "Atuadores Físicos" as Atuadores {
+    [Motor Esteira]
+    [Servo Cancela 1]
+    [Servo Cancela 2]
+    [Servo Cancela 3]
+  }
+}
+
+' ==================== CONEXÕES ====================
+
+' Frontend para Server
+AppMain --> ServerAPI : "HTTP REST\nhttps://{projectId}.supabase.co/\nfunctions/v1/make-server-ea835390"
+LoginComp --> SupabaseAuth : "OAuth Google"
+MonitorComp --> ServerAPI : "POST /esteira/ligar\nPOST /modelo/processar"
+GateComp --> ServerAPI : "POST /config"
+AccuracyComp --> ServerAPI : "POST /modelo/calibrar"
+StatsComp --> ServerAPI : "GET /dashboard/stats"
+CameraComp --> Webcam : "getUserMedia()"
+
+' Frontend Components
+AppMain --> LoginComp
+AppMain --> MonitorComp
+AppMain --> GateComp
+AppMain --> AccuracyComp
+AppMain --> StatsComp
+AppMain --> ProfileComp
+AppMain --> SidebarComp
+MonitorComp --> CameraComp
+MonitorComp --> ConveyorComp
+CameraComp --> WebcamHook
+CameraComp --> DetectionHook
+
+' Server para Database
+ServerAPI --> Models : "instancia e usa"
+Models --> KVStore : "persiste dados"
+KVStore --> KVTable : "SQL Queries"
+ServerAPI --> SupabaseAuth : "valida tokens"
+
+' Server para Hardware
+Models --> ESP32 : "Comandos Serial\n(via ControladorSerial)"
+Models --> PythonServer : "HTTP API\nInferência YOLO\n(opcional)"
+ESP32 --> Atuadores : "Controle GPIO"
+
+' ==================== NOTAS ====================
+
+note right of AppMain
+  **Estado Global:**
+  • user, isDemoMode
+  • activeTab
+  • isSystemRunning
+  • minAccuracy (85%)
+  • modelVersion (YOLOv8n/s/m)
+  • gateConfigs {1: papel, 2: plastico, 3: metal}
+end note
+
+note right of ServerAPI
+  **Principais Endpoints:**
+  • POST /esteira/ligar
+  • POST /esteira/desligar
+  • POST /cancela/:id/abrir
+  • POST /cancela/:id/fechar
+  • POST /camera/iniciar
+  • POST /camera/parar
+  • POST /modelo/ativar
+  • POST /modelo/desativar
+  • POST /modelo/calibrar
+  • POST /modelo/processar
+  • POST /config
+  • GET /dashboard/stats
+  • GET /dashboard/visao-geral
+end note
+
+note right of KVTable
+  **Estrutura de Chaves:**
+  • system_config
+  • detection_{timestamp}
+  • processamento_{timestamp}
+  • log_{timestamp}
+  • user_preferences_{userId}
+end note
+
+note right of Models
+  **Padrão de Design:**
+  • Classes representam entidades físicas
+  • Interface IAtuador para abstração
+  • Injeção de dependências
+  • Separação de responsabilidades
+end note
+
+note left of ESP32
+  **Protocolo Serial:**
+  Formato: [1 bit esteira][2 bits cancela]
+  Exemplos:
+  • LIGAR_ESTEIRA
+  • DESLIGAR_ESTEIRA
+  • ABRIR_CANCELA_1
+  • FECHAR_CANCELA_1
+end note
+
+note left of PythonServer
+  **Modelos YOLO Disponíveis:**
+  • yolov8n.pt (Nano - Rápido)
+  • yolov8s.pt (Small - Balanceado)
+  • yolov8m.pt (Medium - Preciso)
+  
+  Classes detectadas:
+  • papel/papelão (#163b6f)
+  • metal (#196626)
+  • plástico (#dc1f2e)
+  • vidro (#d2b91f)
+end note
+
+' ==================== LEGENDA ====================
+
+legend right
+  |<#EDFEF4>    | Frontend (React) |
+  |<#FEF4ED>    | Backend (Hono/Deno) |
+  |<#E8F4FD>    | Database (Supabase) |
+  |<#FFF9E8>    | Hardware/Externo |
+  |<#034732>    | Componente Principal |
+  |<#ABF2AB>    | Componentes React |
+  |<#008148>    | Utilitários |
+  |<#196626>    | Lógica de Negócio |
+  |<#163B6F>    | Persistência |
+endlegend
+
+@enduml

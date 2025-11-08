@@ -276,9 +276,21 @@ Representa um registro no banco de dados
 - `data`: Data/hora do processamento
 - Métodos: `toJSON()`
 
-### Diagrama de Classes
+### 📊 Diagramas UML
 
-O sistema segue o diagrama UML fornecido, com todas as classes interligadas para fornecer:
+O projeto inclui documentação visual completa através de diagramas UML na pasta `/diagrams`:
+
+- **📦 Diagrama de Classes** - Estrutura completa de classes e relacionamentos
+- **🔄 Diagrama de Sequência** - 5 fluxos principais de interação
+- **🏗️ Diagrama de Arquitetura** - Arquitetura de três camadas
+- **📊 Diagrama de Fluxo de Dados** - Fluxo de dados em tempo real
+- **🧩 Diagrama de Componentes React** - Estrutura de componentes e props
+
+**📁 Acesse**: [/diagrams/INDEX.md](./diagrams/INDEX.md) para documentação completa dos diagramas
+
+**🚀 Quick Reference**: [/diagrams/QUICK_REFERENCE.md](./diagrams/QUICK_REFERENCE.md) para guia de referência rápida
+
+O sistema segue estes diagramas para fornecer:
 - Detecção inteligente de materiais
 - Controle automático de cancelas
 - Monitoramento em tempo real

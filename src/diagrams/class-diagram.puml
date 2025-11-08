@@ -1,0 +1,334 @@
+@startuml EcoVision - Diagrama de Classes
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+' ==================== CAMADA DE INTERFACE (FRONTEND) ====================
+
+package "Frontend - React Components" #EDFEF4 {
+  
+  class App <<Component>> {
+    - user: User
+    - isDemoMode: boolean
+    - activeTab: string
+    - isSystemRunning: boolean
+    - minAccuracy: number
+    - modelVersion: string
+    - gateConfigs: Map<number, string>
+    --
+    + handleDemoMode(): void
+    + handleToggleSystem(): Promise<void>
+    + handleAccuracyChange(accuracy: number): Promise<void>
+    + handleModelVersionChange(version: string): Promise<void>
+    + handleGateConfigChange(configs: Map): Promise<void>
+  }
+  
+  class Login <<Component>> {
+    - isLoading: boolean
+    --
+    + handleGoogleLogin(): Promise<void>
+    + handleDemoMode(): void
+  }
+  
+  class Sidebar <<Component>> {
+    - activeTab: string
+    - userEmail: string
+    --
+    + onTabChange(tab: string): void
+    + onLogout(): void
+  }
+  
+  class MonitorPanel <<Component>> {
+    - gateConfigs: Map<number, string>
+    - minAccuracy: number
+    - isRunning: boolean
+    - modelVersion: string
+    - userId: string
+    --
+    + render(): JSX.Element
+  }
+  
+  class CameraFeed <<Component>> {
+    - isActive: boolean
+    - detections: Detection[]
+    - webcamRef: RefObject
+    - canvasRef: RefObject
+    --
+    + startCamera(): Promise<void>
+    + stopCamera(): void
+    + detectObjects(): Promise<void>
+    + drawBoxes(): void
+  }
+  
+  class ConveyorSystem <<Component>> {
+    - isRunning: boolean
+    - gateConfigs: Map<number, string>
+    - conveyorSpeed: number
+    --
+    + startConveyor(): void
+    + stopConveyor(): void
+    + render(): JSX.Element
+  }
+  
+  class GateConfiguration <<Component>> {
+    - gateConfigs: Map<number, string>
+    - isSystemRunning: boolean
+    --
+    + onConfigChange(configs: Map): void
+    + validateConfig(): boolean
+  }
+  
+  class AccuracyControl <<Component>> {
+    - minAccuracy: number
+    - modelVersion: string
+    - tempAccuracy: number
+    - hasChanges: boolean
+    --
+    + handleSliderChange(value: number): void
+    + handleSave(): void
+    + handleReset(): void
+    + onModelVersionChange(version: string): void
+  }
+  
+  class StatisticsPanel <<Component>> {
+    - stats: Statistics
+    - lastUpdate: Date
+    - loading: boolean
+    --
+    + loadStats(): Promise<void>
+    + render(): JSX.Element
+  }
+  
+  class UserProfile <<Component>> {
+    - user: User
+    --
+    + render(): JSX.Element
+  }
+}
+
+' ==================== CAMADA DE BACKEND ====================
+
+package "Backend - Server (Hono)" #FEF4ED {
+  
+  class HonoServer {
+    - app: Hono
+    --
+    + configureRoutes(): void
+    + start(): void
+  }
+  
+  note right of HonoServer
+    Endpoints principais:
+    • POST /esteira/ligar
+    • POST /esteira/desligar
+    • POST /cancela/:id/abrir
+    • POST /cancela/:id/fechar
+    • POST /camera/iniciar
+    • POST /camera/parar
+    • POST /modelo/ativar
+    • POST /modelo/processar
+    • GET /dashboard/visao-geral
+    • POST /config
+  end note
+}
+
+' ==================== CAMADA DE DOMÍNIO (MODELOS) ====================
+
+package "Domain - Models" #E8F4FD {
+  
+  class Usuario {
+    + id: string
+    + name: string
+    + email: string
+    + autenticado: boolean
+    --
+    + to_dict(): Record<string, any>
+  }
+  
+  class Camera {
+    - fps: number
+    - cap: VideoCapture
+    - resolucao: [number, number]
+    --
+    + iniciarStream(source: number): void
+    + capturarImagem(): Frame
+    + pararStream(): void
+    + is_ativa(): boolean
+  }
+  
+  class Esteira {
+    - status: string
+    - velocidade: number
+    - controlador: ControladorSerial
+    --
+    + ligar(): void
+    + desligar(): void
+  }
+  
+  class Cancela {
+    - cancela_id: number
+    - status: string
+    - controlador: ControladorSerial
+    --
+    + abrir(): void
+    + fechar(): void
+  }
+  
+  interface IAtuador {
+    {abstract} + ligarEsteira(): void
+    {abstract} + desligarEsteira(): void
+    {abstract} + abrirCancela(id: number): void
+    {abstract} + fecharCancela(id: number): void
+  }
+  
+  class ControladorSerial {
+    - portaSerial: string
+    - baudRate: number
+    - ser: SerialPort
+    --
+    + conectar(): boolean
+    + enviarComando(comando: string): void
+    + ligarEsteira(): void
+    + desligarEsteira(): void
+    + abrirCancela(id: number): void
+    + fecharCancela(id: number): void
+  }
+  
+  class ModeloIA {
+    - nome: string
+    - versao: string
+    - ativo: boolean
+    - limiteMinAccuracy: number
+    - model: YOLOModel
+    - db: BancoDeDados
+    - atuador: IAtuador
+    --
+    + ativar(): void
+    + desativar(): void
+    + carregarModelo(caminho: string): void
+    + preverFrame(frame: Frame): OutputData
+    + calibrarLimite(limite: number): void
+    + decidirAcionamento(pred: OutputData, configs: Map, id: number): boolean
+    + executarAcionamento(id: number): Promise<void>
+  }
+  
+  class OutputData {
+    - classePrevista: string
+    - confianca: number
+    --
+    + getClasse(): string
+    + getConfianca(): number
+  }
+  
+  class RegistroProcessamento {
+    + id: number
+    + material: string
+    + precisao: number
+    + cancela_id: number
+    + data: Date
+    --
+    + toJSON(): Record<string, any>
+  }
+  
+  class BancoDeDados {
+    - kvStore: KeyValueStore
+    --
+    + registrarProcessamento(material: string, precisao: number, cancelaId: number): Promise<void>
+    + consultarItensProcessados(data: Date): Promise<number>
+    + consultarMateriais(data: Date): Promise<Map<string, number>>
+    + consultarPerformanceCancelas(data: Date): Promise<Map<string, number>>
+    + consultarPrecisaoMedia(data: Date): Promise<number>
+  }
+  
+  class Dashboard {
+    - db: BancoDeDados
+    --
+    + coletarVisaoGeral(): Promise<Map<string, any>>
+    + exibirStatusGeral(): Map<string, any>
+    + exibirMateriaisReciclados(data: Date): Promise<Map<string, number>>
+    + exibirPerformanceCancelas(data: Date): Promise<Map<string, number>>
+  }
+  
+  class Autenticacao {
+    - google_client_id: string
+    - _sessions: Map<string, any>
+    --
+    + loginComGoogle(token: string): Map<string, any>
+    + logout(usuario: Usuario): void
+    + logout_try(email: string): void
+    + is_autenticado(email: string): boolean
+  }
+}
+
+' ==================== CAMADA DE INFRAESTRUTURA ====================
+
+package "Infrastructure" #FFF9E8 {
+  
+  class SupabaseClient {
+    - projectId: string
+    - publicAnonKey: string
+    --
+    + auth: SupabaseAuth
+    + storage: SupabaseStorage
+  }
+  
+  class KeyValueStore {
+    --
+    + get(key: string): Promise<any>
+    + set(key: string, value: any): Promise<void>
+    + del(key: string): Promise<void>
+    + mget(keys: string[]): Promise<any[]>
+    + mset(items: Map): Promise<void>
+    + mdel(keys: string[]): Promise<void>
+    + getByPrefix(prefix: string): Promise<any[]>
+  }
+}
+
+' ==================== RELACIONAMENTOS ====================
+
+' Frontend para Backend
+App --> HonoServer : "HTTP REST API"
+MonitorPanel --> HonoServer : "Controla Sistema"
+CameraFeed --> HonoServer : "Envia Detecções"
+GateConfiguration --> HonoServer : "Salva Configurações"
+AccuracyControl --> HonoServer : "Calibra Modelo"
+StatisticsPanel --> HonoServer : "Carrega Estatísticas"
+Login --> SupabaseClient : "Autenticação Google OAuth"
+
+' Frontend Components
+App *-- Login
+App *-- Sidebar
+App *-- MonitorPanel
+App *-- GateConfiguration
+App *-- AccuracyControl
+App *-- StatisticsPanel
+App *-- UserProfile
+MonitorPanel *-- CameraFeed
+MonitorPanel *-- ConveyorSystem
+
+' Backend para Domain
+HonoServer --> ModeloIA : "gerencia"
+HonoServer --> Esteira : "controla"
+HonoServer --> Cancela : "controla"
+HonoServer --> Camera : "controla"
+HonoServer --> Dashboard : "consulta"
+HonoServer --> Autenticacao : "valida"
+
+' Domain Relationships
+ModeloIA --> OutputData : "gera"
+ModeloIA --> BancoDeDados : "registra em"
+ModeloIA --> IAtuador : "aciona via"
+ModeloIA --> ControladorSerial : "usa"
+Dashboard --> BancoDeDados : "consulta"
+Esteira --> ControladorSerial : "usa"
+Cancela --> ControladorSerial : "usa"
+ControladorSerial ..|> IAtuador : "implementa"
+BancoDeDados --> RegistroProcessamento : "armazena"
+BancoDeDados --> KeyValueStore : "usa"
+
+' Infrastructure
+HonoServer --> KeyValueStore : "persiste dados"
+SupabaseClient --> KeyValueStore : "acessa"
+
+@enduml

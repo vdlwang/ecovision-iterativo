@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { 
   Monitor, 
-  Lock, 
-  Settings, 
+  SlidersHorizontal, 
+  Brain, 
   BarChart3, 
   User,
   ChevronLeft,
@@ -23,7 +23,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: SidebarProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false); // Inicia fechada
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -44,8 +44,8 @@ export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: Sidebar
 
   const menuItems = [
     { id: "monitor", label: "Monitor", icon: Monitor },
-    { id: "cancelas", label: "Cancelas", icon: Lock },
-    { id: "modelo", label: "Modelo", icon: Settings },
+    { id: "cancelas", label: "Cancelas", icon: SlidersHorizontal },
+    { id: "modelo", label: "Modelo", icon: Brain },
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
     { id: "perfil", label: "Perfil", icon: User },
   ];
