@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { User, Mail, Calendar, Activity, TrendingUp, Package } from "lucide-react";
+import { User, Mail, Calendar, Activity, TrendingUp, Package, TestTube } from "lucide-react";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 
 interface UserProfileProps {
   user: any;
+  isDemoMode?: boolean;
+  userToken?: string;
 }
 
 interface UserStats {
@@ -24,7 +26,7 @@ interface UserStats {
   } | null;
 }
 
-export function UserProfile({ user }: UserProfileProps) {
+export function UserProfile({ user, isDemoMode = false, userToken }: UserProfileProps) {
   const [stats, setStats] = useState<UserStats>({
     totalSessions: 0,
     totalDetections: 0,
@@ -36,20 +38,31 @@ export function UserProfile({ user }: UserProfileProps) {
 
   useEffect(() => {
     loadUserStats();
-  }, [user]);
+  }, [user, userToken]);
 
   const loadUserStats = async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+    
+    if (!userToken) {
+      console.log('[PERFIL] Aguardando token de autenticação...');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
+      console.log(`[PERFIL] Carregando estatísticas do usuário ${user.email}`);
+      console.log(`[PERFIL] Token sendo enviado: ${userToken.substring(0, 20)}...`);
       
       // Busca estatísticas do usuário no backend
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/user/stats?userId=${user.id}`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
+            'Authorization': `Bearer ${userToken}`
           }
         }
       );
@@ -58,8 +71,14 @@ export function UserProfile({ user }: UserProfileProps) {
         const data = await response.json();
         if (data.success) {
           setStats(data.stats);
-          console.log(`[PERFIL] Estatísticas carregadas para usuário ${user.email}`);
+          console.log(`[PERFIL] Estatísticas carregadas: ${data.stats.totalSessions} sessões, ${data.stats.totalDetections} detecções`);
+        } else {
+          console.error('[PERFIL] Erro na resposta:', data.error);
         }
+      } else {
+        console.error('[PERFIL] Erro HTTP:', response.status);
+        const errorData = await response.text();
+        console.error('[PERFIL] Detalhes:', errorData);
       }
     } catch (error) {
       console.error('[PERFIL] Erro ao carregar estatísticas:', error);
@@ -112,6 +131,12 @@ export function UserProfile({ user }: UserProfileProps) {
                   <Activity className="h-3 w-3 mr-1" />
                   EcoVision
                 </Badge>
+                {isDemoMode && (
+                  <Badge className="bg-yellow-500 text-white">
+                    <TestTube className="h-3 w-3 mr-1" />
+                    Modo Demo
+                  </Badge>
+                )}
               </div>
 
               {user?.created_at && (

@@ -19,6 +19,7 @@ interface ConveyorSystemCompactProps {
   minAccuracy: number;
   isRunning: boolean;
   onToggleSystem: () => void;
+  userToken: string | null;
 }
 
 const materialColors = {
@@ -32,7 +33,8 @@ export function ConveyorSystemCompact({
   gateConfigs, 
   minAccuracy, 
   isRunning, 
-  onToggleSystem 
+  onToggleSystem,
+  userToken 
 }: ConveyorSystemCompactProps) {
   const [recentDetections, setRecentDetections] = useState<Detection[]>([]);
   const [gateStates, setGateStates] = useState({

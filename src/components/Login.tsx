@@ -97,6 +97,21 @@ export function Login({ onDemoMode }: { onDemoMode?: () => void }) {
               Entrar em Modo Demo
             </div>
           </Button>
+
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-800 font-semibold mb-2">
+              📋 Para configurar o login com Google:
+            </p>
+            <ol className="text-xs text-blue-700 space-y-1 ml-4 list-decimal">
+              <li>Acesse o Dashboard do Supabase</li>
+              <li>Vá em Authentication → Providers</li>
+              <li>Ative o Google OAuth</li>
+              <li>Configure as credenciais do Google Cloud</li>
+            </ol>
+            <p className="text-xs text-blue-600 mt-2 italic">
+              Enquanto isso, use o Modo Demo para testar o sistema!
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -21,6 +21,7 @@ interface MonitorPanelProps {
   onToggleSystem: () => void;
   modelVersion: string;
   userId: string;
+  userToken: string | null;
 }
 
 const materialColors = {
@@ -36,7 +37,8 @@ export function MonitorPanel({
   isRunning, 
   onToggleSystem,
   modelVersion,
-  userId
+  userId,
+  userToken
 }: MonitorPanelProps) {
   const [recentDetections, setRecentDetections] = useState<Detection[]>([]);
   const [beltRunning, setBeltRunning] = useState(false);
@@ -122,7 +124,7 @@ export function MonitorPanel({
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -150,7 +152,7 @@ export function MonitorPanel({
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -303,6 +305,7 @@ export function MonitorPanel({
                 minConfidence={minAccuracy}
                 onToggleSystem={onToggleSystem}
                 inline={true}
+                userToken={userToken}
               />
             </div>
           </div>

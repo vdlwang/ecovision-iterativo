@@ -1,42 +1,18 @@
 import { Hono } from "npm:hono";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
-import * as kv from "./kv_store.tsx";
-import {
-  BancoDeDados,
-  Dashboard,
-  ModeloIA,
-  ControladorSerial,
-  Esteira,
-  Cancela,
-  Camera,
-  Autenticacao,
-  OutputData
-} from "./models.tsx";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const app = new Hono();
 
-// Inicializa as instâncias do sistema
-const db = new BancoDeDados(kv);
-const dashboard = new Dashboard(db);
-const controlador = new ControladorSerial(Deno.env.get("SERIAL_PORT") || "/dev/ttyUSB0", 9600);
-const esteira = new Esteira(controlador, 50);
-const cancelas = [
-  new Cancela(1, controlador),
-  new Cancela(2, controlador),
-  new Cancela(3, controlador)
-];
-const camera = new Camera(30, [1920, 1080]);
-const autenticacao = new Autenticacao(Deno.env.get("GOOGLE_CLIENT_ID") || "");
-const modeloIA = new ModeloIA("YOLO", "v8n", 85, db, controlador);
+// Cria cliente Supabase com service role para acesso admin
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+);
 
-// Inicializa conexão serial se configurada
-try {
-  controlador.conectar();
-  console.log("Controlador serial inicializado com sucesso");
-} catch (error) {
-  console.log("Executando em modo simulação (serial não disponível):", error);
-}
+// URL do servidor de inferência Python
+const INFERENCE_SERVER_URL = Deno.env.get('INFERENCE_SERVER_URL') || 'http://localhost:8000';
 
 // Enable logger
 app.use('*', logger(console.log));
@@ -53,112 +29,591 @@ app.use(
   }),
 );
 
-// Health check endpoint
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Extrai user_id do token JWT
+ */
+async function getUserFromToken(authHeader: string | null) {
+  if (!authHeader?.startsWith('Bearer ')) {
+    console.error('[AUTH] Header de autorização ausente ou inválido');
+    return null;
+  }
+  
+  const token = authHeader.substring(7);
+  
+  // Validar se o token não está vazio
+  if (!token || token.trim() === '') {
+    console.error('[AUTH] Token vazio ou inválido');
+    return null;
+  }
+  
+  // Log para debug (primeiros 30 caracteres apenas)
+  console.log(`[AUTH] Token recebido (início): ${token.substring(0, 30)}...`);
+  
+  // MODO DEMO: Token especial para desenvolvimento/testes
+  if (token === 'DEMO_MODE_TOKEN_ecovision_2024') {
+    console.log('[DEMO] ✅ Token demo reconhecido! Usando usuário demo');
+    return {
+      id: 'demo-user-ecovision-2024',
+      email: 'demo@ecovision.com',
+      aud: 'authenticated',
+      role: 'authenticated'
+    };
+  }
+  
+  console.log('[AUTH] Token não é demo, tentando validar com Supabase OAuth...');
+  
+  try {
+    // Criar cliente Supabase com o token do usuário
+    const userSupabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      }
+    );
+    
+    const { data: { user }, error } = await userSupabase.auth.getUser();
+    
+    if (error || !user) {
+      // Não logar erro se o token parece ser uma key pública (termina com números/letras aleatórios)
+      // Isso evita spam de logs quando não há autenticação OAuth configurada
+      const isAnonKey = token.length > 100 && token.includes('eyJ');
+      if (!isAnonKey) {
+        console.error('[AUTH] Erro ao obter usuário:', error?.message || 'Usuário não encontrado');
+      }
+      return null;
+    }
+    
+    console.log(`[AUTH] Usuário autenticado via OAuth: ${user.email}`);
+    return user;
+  } catch (err) {
+    console.error('[AUTH] Exceção ao validar token:', err);
+    return null;
+  }
+}
+
+/**
+ * Obtém ou cria sessão ativa do usuário
+ */
+async function getOrCreateSession(userId: string, userAgent: string | null) {
+  // Busca sessão ativa (sem ended_at)
+  const { data: activeSessions, error: searchError } = await supabase
+    .from('user_sessions')
+    .select('*')
+    .eq('user_id', userId)
+    .is('ended_at', null)
+    .order('started_at', { ascending: false })
+    .limit(1);
+  
+  if (searchError) {
+    console.error('Erro ao buscar sessão:', searchError);
+    throw searchError;
+  }
+  
+  // Se existe sessão ativa, retorna ela
+  if (activeSessions && activeSessions.length > 0) {
+    return activeSessions[0];
+  }
+  
+  // Cria nova sessão
+  const { data: newSession, error: createError } = await supabase
+    .from('user_sessions')
+    .insert({
+      user_id: userId,
+      session_token: crypto.randomUUID(),
+      user_agent: userAgent,
+      device_info: {}
+    })
+    .select()
+    .single();
+  
+  if (createError) {
+    console.error('Erro ao criar sessão:', createError);
+    throw createError;
+  }
+  
+  return newSession;
+}
+
+// ==================== ENDPOINTS ====================
+
+// Health check
 app.get("/make-server-ea835390/health", (c) => {
-  return c.json({ status: "ok", message: "EcoVision server is running" });
+  return c.json({ 
+    status: "ok", 
+    message: "EcoVision server is running",
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Salvar configurações do sistema
+// Teste de autenticação
+app.get("/make-server-ea835390/auth-test", async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    
+    if (!authHeader) {
+      return c.json({ 
+        success: false, 
+        error: 'Header Authorization ausente',
+        hint: 'Certifique-se de incluir: Authorization: Bearer {token}'
+      }, 401);
+    }
+    
+    const user = await getUserFromToken(authHeader);
+    
+    if (!user) {
+      return c.json({ 
+        success: false, 
+        error: 'Token inválido ou expirado',
+        hint: 'Faça logout e login novamente para obter um novo token'
+      }, 401);
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: 'Autenticação funcionando corretamente',
+      user: {
+        id: user.id,
+        email: user.email
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[AUTH-TEST] Erro:', error);
+    return c.json({ success: false, error: String(error) }, 500);
+  }
+});
+
+// ==================== CONFIGURAÇÕES ====================
+
+// Salvar configuração
 app.post("/make-server-ea835390/config", async (c) => {
   try {
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
+    
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
     const { gateConfigs, minAccuracy, modelVersion } = await c.req.json();
     
-    // Atualiza configurações do modelo IA
-    if (minAccuracy !== undefined) {
-      modeloIA.calibrarLimite(minAccuracy);
+    // Desativa configurações antigas
+    await supabase
+      .from('system_config')
+      .update({ is_active: false })
+      .eq('user_id', user.id)
+      .eq('is_active', true);
+    
+    // Cria nova configuração
+    const { data, error } = await supabase
+      .from('system_config')
+      .insert({
+        user_id: user.id,
+        gate_1_material: gateConfigs?.['1'] || null,
+        gate_2_material: gateConfigs?.['2'] || null,
+        gate_3_material: gateConfigs?.['3'] || null,
+        min_confidence: minAccuracy || 85,
+        model_version: modelVersion || 'YOLOv8n',
+        is_active: true
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Erro ao salvar config:', error);
+      return c.json({ success: false, error: error.message }, 500);
     }
     
-    if (modelVersion !== undefined) {
-      modeloIA.versao = modelVersion.toLowerCase().replace("yolov8", "v8");
-    }
+    console.log('Config salva:', data);
+    return c.json({ success: true, config: data });
     
-    await kv.set("system_config", {
-      gateConfigs,
-      minAccuracy,
-      modelVersion,
-      updatedAt: new Date().toISOString()
-    });
-    
-    console.log("Configuração atualizada - Cancelas:", gateConfigs, "Confiança:", minAccuracy, "Modelo:", modelVersion);
-    
-    return c.json({ success: true, message: "Configuração salva com sucesso" });
   } catch (error) {
-    console.error("Erro ao salvar configuração:", error);
+    console.error('Erro ao salvar configuração:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
-// Obter configurações do sistema
+// Obter configuração ativa
 app.get("/make-server-ea835390/config", async (c) => {
   try {
-    const config = await kv.get("system_config");
-    return c.json({ success: true, config });
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
+    
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    const { data, error } = await supabase
+      .from('system_config')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows
+      console.error('Erro ao obter config:', error);
+      return c.json({ success: false, error: error.message }, 500);
+    }
+    
+    // Se não tem config, retorna valores padrão
+    if (!data) {
+      return c.json({ 
+        success: true, 
+        config: {
+          gate_1_material: null,
+          gate_2_material: null,
+          gate_3_material: null,
+          min_confidence: 85,
+          model_version: 'YOLOv8n'
+        }
+      });
+    }
+    
+    return c.json({ success: true, config: data });
+    
   } catch (error) {
-    console.error("Erro ao obter configuração:", error);
+    console.error('Erro ao obter configuração:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
-// Salvar detecções
-app.post("/make-server-ea835390/detections", async (c) => {
+// ==================== INFERÊNCIA ====================
+
+// Processar imagem (fazer inferência)
+app.post("/make-server-ea835390/inference", async (c) => {
   try {
-    const detection = await c.req.json();
-    const detectionId = `detection_${Date.now()}`;
+    const authHeader = c.req.header('Authorization');
     
-    await kv.set(detectionId, {
-      ...detection,
-      createdAt: new Date().toISOString()
+    if (!authHeader) {
+      console.error('[INFERENCE] Header Authorization ausente');
+      return c.json({ success: false, error: 'Token de autenticação não fornecido' }, 401);
+    }
+    
+    const user = await getUserFromToken(authHeader);
+    
+    if (!user) {
+      console.error('[INFERENCE] Falha na autenticação do usuário');
+      return c.json({ success: false, error: 'Token de autenticação inválido ou expirado. Faça login novamente.' }, 401);
+    }
+    
+    console.log(`[INFERENCE] Usuário autenticado: ${user.id}`);
+    
+    const { image_base64, model_version, min_confidence } = await c.req.json();
+    
+    // Chama servidor de inferência Python
+    const inferenceResponse = await fetch(`${INFERENCE_SERVER_URL}/inference`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_base64,
+        model_version: model_version || 'YOLOv8n',
+        min_confidence: (min_confidence || 85) / 100 // Converte para 0-1
+      })
     });
     
-    return c.json({ success: true, id: detectionId });
+    if (!inferenceResponse.ok) {
+      const errorText = await inferenceResponse.text();
+      console.error('Erro na inferência:', errorText);
+      return c.json({ 
+        success: false, 
+        error: 'Servidor de inferência indisponível. Execute: python inference_server.py' 
+      }, 500);
+    }
+    
+    const inferenceData = await inferenceResponse.json();
+    
+    // Se não há detecções, retorna sem salvar
+    if (!inferenceData.detections || inferenceData.detections.length === 0) {
+      return c.json({ 
+        success: true, 
+        detections: [],
+        processing_time_ms: inferenceData.processing_time_ms
+      });
+    }
+    
+    // Obtém configuração ativa para saber qual cancela acionar
+    const { data: config } = await supabase
+      .from('system_config')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .single();
+    
+    // Obtém ou cria sessão
+    const session = await getOrCreateSession(user.id, c.req.header('User-Agent'));
+    
+    // Salva cada detecção no banco
+    const detectionsToSave = [];
+    
+    for (const detection of inferenceData.detections) {
+      // Determina qual cancela acionar baseado no material
+      let gateNumber = 1; // Padrão
+      let gateActivated = false;
+      
+      if (config) {
+        if (detection.material === config.gate_1_material) {
+          gateNumber = 1;
+          gateActivated = detection.confidence >= (config.min_confidence || 85);
+        } else if (detection.material === config.gate_2_material) {
+          gateNumber = 2;
+          gateActivated = detection.confidence >= (config.min_confidence || 85);
+        } else if (detection.material === config.gate_3_material) {
+          gateNumber = 3;
+          gateActivated = detection.confidence >= (config.min_confidence || 85);
+        }
+      }
+      
+      detectionsToSave.push({
+        user_id: user.id,
+        session_id: session.id,
+        material_detected: detection.material,
+        confidence: detection.confidence,
+        gate_number: gateNumber,
+        gate_activated: gateActivated,
+        model_version: inferenceData.model_version,
+        processing_time_ms: inferenceData.processing_time_ms,
+        bounding_box: detection.bounding_box
+      });
+    }
+    
+    // Insere todas as detecções
+    const { data: savedDetections, error: saveError } = await supabase
+      .from('inferences')
+      .insert(detectionsToSave)
+      .select();
+    
+    if (saveError) {
+      console.error('Erro ao salvar detecções:', saveError);
+      // Não falha a requisição, apenas loga o erro
+    }
+    
+    // Atualiza contador de inferências na sessão
+    await supabase
+      .from('user_sessions')
+      .update({ 
+        inferences_count: session.inferences_count + detectionsToSave.length 
+      })
+      .eq('id', session.id);
+    
+    return c.json({ 
+      success: true, 
+      detections: inferenceData.detections,
+      processing_time_ms: inferenceData.processing_time_ms,
+      saved_to_database: !!savedDetections
+    });
+    
   } catch (error) {
-    console.error("Erro ao salvar detecção:", error);
+    console.error('Erro ao processar inferência:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
-// Obter estatísticas
+// ==================== ESTATÍSTICAS ====================
+
+// Obter estatísticas do dashboard
 app.get("/make-server-ea835390/stats", async (c) => {
   try {
-    const detections = await kv.getByPrefix("detection_");
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
     
-    // Processa estatísticas
-    const stats = {
-      total: detections.length,
-      byMaterial: {} as Record<string, number>,
-      byGate: {} as Record<number, number>
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    // Total de inferências
+    const { count: totalInferences } = await supabase
+      .from('inferences')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    
+    // Inferências por material
+    const { data: byMaterial } = await supabase
+      .from('inferences')
+      .select('material_detected')
+      .eq('user_id', user.id);
+    
+    const materialCounts = {
+      papel: 0,
+      metal: 0,
+      plastico: 0,
+      vidro: 0
     };
     
-    detections.forEach((d: any) => {
-      if (d.material) {
-        stats.byMaterial[d.material] = (stats.byMaterial[d.material] || 0) + 1;
-      }
-      if (d.gateAssigned) {
-        stats.byGate[d.gateAssigned] = (stats.byGate[d.gateAssigned] || 0) + 1;
+    byMaterial?.forEach(item => {
+      if (item.material_detected in materialCounts) {
+        materialCounts[item.material_detected]++;
       }
     });
     
-    return c.json({ success: true, stats });
+    // Inferências por cancela
+    const { data: byGate } = await supabase
+      .from('inferences')
+      .select('gate_number')
+      .eq('user_id', user.id);
+    
+    const gateCounts = { '1': 0, '2': 0, '3': 0 };
+    
+    byGate?.forEach(item => {
+      if (item.gate_number in gateCounts) {
+        gateCounts[item.gate_number]++;
+      }
+    });
+    
+    // Confiança média
+    const { data: confidenceData } = await supabase
+      .from('inferences')
+      .select('confidence')
+      .eq('user_id', user.id);
+    
+    const avgConfidence = confidenceData && confidenceData.length > 0
+      ? confidenceData.reduce((sum, item) => sum + item.confidence, 0) / confidenceData.length
+      : 0;
+    
+    // Últimas 10 detecções
+    const { data: recentDetections } = await supabase
+      .from('inferences')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('timestamp', { ascending: false })
+      .limit(10);
+    
+    // Sessões
+    const { count: totalSessions } = await supabase
+      .from('user_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    
+    return c.json({ 
+      success: true, 
+      stats: {
+        total: totalInferences || 0,
+        byMaterial: materialCounts,
+        byGate: gateCounts,
+        avgConfidence: Math.round(avgConfidence * 100) / 100,
+        recentDetections: recentDetections || [],
+        totalSessions: totalSessions || 0
+      }
+    });
+    
   } catch (error) {
-    console.error("Erro ao obter estatísticas:", error);
+    console.error('Erro ao obter estatísticas:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
-// Salvar logs
-app.post("/make-server-ea835390/logs", async (c) => {
+// Estatísticas por período
+app.get("/make-server-ea835390/stats/period", async (c) => {
   try {
-    const log = await c.req.json();
-    const logId = `log_${Date.now()}`;
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
     
-    await kv.set(logId, {
-      ...log,
-      createdAt: new Date().toISOString()
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    const days = parseInt(c.req.query('days') || '7');
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    // Busca estatísticas agregadas
+    const { data: dailyStats } = await supabase
+      .from('statistics')
+      .select('*')
+      .eq('user_id', user.id)
+      .gte('date', startDate.toISOString().split('T')[0])
+      .order('date', { ascending: true });
+    
+    return c.json({ 
+      success: true, 
+      stats: dailyStats || []
     });
     
-    return c.json({ success: true, id: logId });
   } catch (error) {
-    console.error("Erro ao salvar log:", error);
+    console.error('Erro ao obter estatísticas por período:', error);
+    return c.json({ success: false, error: String(error) }, 500);
+  }
+});
+
+// ==================== SESSÕES ====================
+
+// Encerrar sessão atual
+app.post("/make-server-ea835390/session/end", async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
+    
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    // Busca sessão ativa
+    const { data: sessions } = await supabase
+      .from('user_sessions')
+      .select('*')
+      .eq('user_id', user.id)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1);
+    
+    if (!sessions || sessions.length === 0) {
+      return c.json({ success: true, message: 'Nenhuma sessão ativa' });
+    }
+    
+    // Encerra sessão
+    const { error } = await supabase
+      .from('user_sessions')
+      .update({ ended_at: new Date().toISOString() })
+      .eq('id', sessions[0].id);
+    
+    if (error) {
+      console.error('Erro ao encerrar sessão:', error);
+      return c.json({ success: false, error: error.message }, 500);
+    }
+    
+    return c.json({ success: true, message: 'Sessão encerrada' });
+    
+  } catch (error) {
+    console.error('Erro ao encerrar sessão:', error);
+    return c.json({ success: false, error: String(error) }, 500);
+  }
+});
+
+// ==================== LOGS ====================
+
+// Salvar log
+app.post("/make-server-ea835390/logs", async (c) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
+    
+    const { log_level, log_type, message, details } = await c.req.json();
+    
+    const { error } = await supabase
+      .from('system_logs')
+      .insert({
+        user_id: user?.id || null,
+        log_level: log_level || 'INFO',
+        log_type: log_type || 'SYSTEM',
+        message,
+        details: details || {}
+      });
+    
+    if (error) {
+      console.error('Erro ao salvar log:', error);
+      return c.json({ success: false, error: error.message }, 500);
+    }
+    
+    return c.json({ success: true });
+    
+  } catch (error) {
+    console.error('Erro ao salvar log:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
@@ -166,397 +621,126 @@ app.post("/make-server-ea835390/logs", async (c) => {
 // Obter logs
 app.get("/make-server-ea835390/logs", async (c) => {
   try {
-    const logs = await kv.getByPrefix("log_");
-    return c.json({ success: true, logs });
-  } catch (error) {
-    console.error("Erro ao obter logs:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// ==================== ENDPOINTS BASEADOS NAS CLASSES ====================
-
-// Controle da Esteira
-app.post("/make-server-ea835390/esteira/ligar", (c) => {
-  try {
-    esteira.ligar();
-    return c.json({ success: true, status: esteira.status });
-  } catch (error) {
-    console.error("Erro ao ligar esteira:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/esteira/desligar", (c) => {
-  try {
-    esteira.desligar();
-    return c.json({ success: true, status: esteira.status });
-  } catch (error) {
-    console.error("Erro ao desligar esteira:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Controle das Cancelas
-app.post("/make-server-ea835390/cancela/:id/abrir", (c) => {
-  try {
-    const id = parseInt(c.req.param("id"));
-    const cancela = cancelas.find(c => c.cancela_id === id);
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
     
-    if (!cancela) {
-      return c.json({ success: false, error: "Cancela não encontrada" }, 404);
+    if (!user) {
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
     }
     
-    cancela.abrir();
-    return c.json({ success: true, status: cancela.status });
-  } catch (error) {
-    console.error("Erro ao abrir cancela:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/cancela/:id/fechar", (c) => {
-  try {
-    const id = parseInt(c.req.param("id"));
-    const cancela = cancelas.find(c => c.cancela_id === id);
+    const limit = parseInt(c.req.query('limit') || '50');
+    const level = c.req.query('level');
     
-    if (!cancela) {
-      return c.json({ success: false, error: "Cancela não encontrada" }, 404);
+    let query = supabase
+      .from('system_logs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+    
+    if (level) {
+      query = query.eq('log_level', level);
     }
     
-    cancela.fechar();
-    return c.json({ success: true, status: cancela.status });
-  } catch (error) {
-    console.error("Erro ao fechar cancela:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Controle da Câmera
-app.post("/make-server-ea835390/camera/iniciar", (c) => {
-  try {
-    camera.iniciarStream(0);
-    return c.json({ success: true, ativa: camera.is_ativa() });
-  } catch (error) {
-    console.error("Erro ao iniciar câmera:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/camera/parar", (c) => {
-  try {
-    camera.pararStream();
-    return c.json({ success: true, ativa: camera.is_ativa() });
-  } catch (error) {
-    console.error("Erro ao parar câmera:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.get("/make-server-ea835390/camera/capturar", (c) => {
-  try {
-    const frame = camera.capturarImagem();
-    return c.json({ success: true, frame });
-  } catch (error) {
-    console.error("Erro ao capturar imagem:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Controle do Modelo IA
-app.post("/make-server-ea835390/modelo/ativar", (c) => {
-  try {
-    modeloIA.ativar();
-    return c.json({ success: true, ativo: modeloIA.ativo });
-  } catch (error) {
-    console.error("Erro ao ativar modelo:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/modelo/desativar", (c) => {
-  try {
-    modeloIA.desativar();
-    return c.json({ success: true, ativo: modeloIA.ativo });
-  } catch (error) {
-    console.error("Erro ao desativar modelo:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/modelo/calibrar", async (c) => {
-  try {
-    const { limite } = await c.req.json();
-    modeloIA.calibrarLimite(limite);
-    return c.json({ success: true, limiteAtual: modeloIA.limiteMinAccuracy });
-  } catch (error) {
-    console.error("Erro ao calibrar modelo:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/modelo/processar", async (c) => {
-  try {
-    const { frame, gateConfigs } = await c.req.json();
+    const { data, error } = await query;
     
-    // Faz predição
-    const predicao = modeloIA.preverFrame(frame);
-    
-    console.log(`Detecção: ${predicao.getClasse()} com ${predicao.getConfianca().toFixed(1)}% de confiança`);
-    
-    // Decide acionamento para cada cancela
-    const acionamentos = [];
-    for (let i = 1; i <= 3; i++) {
-      const deveAcionar = modeloIA.decidirAcionamento(predicao, gateConfigs, i);
-      if (deveAcionar) {
-        console.log(`Acionando cancela ${i} para material ${predicao.getClasse()}`);
-        await modeloIA.executarAcionamento(i);
-        await db.registrarProcessamento(
-          predicao.getClasse(),
-          predicao.getConfianca(),
-          i
-        );
-        acionamentos.push(i);
-      }
+    if (error) {
+      console.error('Erro ao obter logs:', error);
+      return c.json({ success: false, error: error.message }, 500);
     }
     
-    return c.json({
-      success: true,
-      predicao: {
-        classe: predicao.getClasse(),
-        confianca: predicao.getConfianca()
-      },
-      acionamentos
-    });
+    return c.json({ success: true, logs: data || [] });
+    
   } catch (error) {
-    console.error("Erro ao processar frame:", error);
+    console.error('Erro ao obter logs:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
-// Dashboard
-app.get("/make-server-ea835390/dashboard/visao-geral", async (c) => {
-  try {
-    const dados = await dashboard.coletarVisaoGeral();
-    return c.json({ success: true, dados });
-  } catch (error) {
-    console.error("Erro ao obter visão geral:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
+// ==================== PERFIL DO USUÁRIO ====================
 
-app.get("/make-server-ea835390/dashboard/status", (c) => {
-  try {
-    const status = dashboard.exibirStatusGeral();
-    return c.json({ success: true, status });
-  } catch (error) {
-    console.error("Erro ao obter status:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.get("/make-server-ea835390/dashboard/materiais", async (c) => {
-  try {
-    const data = new Date();
-    const materiais = await dashboard.exibirMateriaisReciclados(data);
-    return c.json({ success: true, materiais });
-  } catch (error) {
-    console.error("Erro ao obter materiais:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.get("/make-server-ea835390/dashboard/performance-cancelas", async (c) => {
-  try {
-    const data = new Date();
-    const performance = await dashboard.exibirPerformanceCancelas(data);
-    return c.json({ success: true, performance });
-  } catch (error) {
-    console.error("Erro ao obter performance:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Autenticação
-app.post("/make-server-ea835390/auth/login", async (c) => {
-  try {
-    const { token } = await c.req.json();
-    const resultado = autenticacao.loginComGoogle(token);
-    return c.json({ success: true, ...resultado });
-  } catch (error) {
-    console.error("Erro ao fazer login:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-ea835390/auth/logout", async (c) => {
-  try {
-    const { email } = await c.req.json();
-    autenticacao.logout_try(email);
-    return c.json({ success: true, message: "Logout realizado" });
-  } catch (error) {
-    console.error("Erro ao fazer logout:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-app.get("/make-server-ea835390/auth/verificar/:email", (c) => {
-  try {
-    const email = c.req.param("email");
-    const autenticado = autenticacao.is_autenticado(email);
-    return c.json({ success: true, autenticado });
-  } catch (error) {
-    console.error("Erro ao verificar autenticação:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// ==================== NOVOS ENDPOINTS PARA SISTEMA COMPLETO ====================
-
-// Endpoint para comunicação serial (ESP32)
-app.post("/make-server-ea835390/serial/send", async (c) => {
-  try {
-    const { esteira, cancela } = await c.req.json();
-    
-    console.log(`[SERIAL] Enviando comando - Esteira: ${esteira ? 'ON' : 'OFF'}, Cancela: ${cancela}`);
-    
-    // Monta comando serial:
-    // Bit 0: Esteira (0 = desligada, 1 = ligada)
-    // Bits 1-2: Cancela (00 = nenhuma, 01 = cancela 1, 10 = cancela 2, 11 = cancela 3)
-    let command = esteira ? 0b1 : 0b0; // Bit da esteira
-    
-    if (cancela) {
-      const cancelaBits = cancela & 0b11; // Limita a 2 bits
-      command |= (cancelaBits << 1); // Desloca cancela para bits 1-2
-    }
-    
-    try {
-      // Envia comando via serial
-      const output = controlador.enviarComando(command);
-      console.log(`[SERIAL] Comando enviado: ${command.toString(2).padStart(3, '0')} (binário) - Resposta: ${output.codigo}`);
-      
-      return c.json({
-        success: true,
-        command,
-        binary: command.toString(2).padStart(3, '0'),
-        output
-      });
-    } catch (serialError) {
-      console.log('[SERIAL] Porta serial não disponível, modo simulação');
-      return c.json({
-        success: true,
-        command,
-        binary: command.toString(2).padStart(3, '0'),
-        mode: 'simulation'
-      });
-    }
-  } catch (error) {
-    console.error("[SERIAL] Erro ao enviar comando:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Salvar detecção no banco de dados por usuário
-app.post("/make-server-ea835390/detections/save", async (c) => {
-  try {
-    const { userId, material, confidence, gateAssigned, timestamp } = await c.req.json();
-    
-    const detectionId = `detection_${userId}_${Date.now()}`;
-    
-    await kv.set(detectionId, {
-      userId,
-      material,
-      confidence,
-      gateAssigned,
-      timestamp,
-      createdAt: new Date().toISOString()
-    });
-    
-    console.log(`[BD] Detecção salva: ${material} (${confidence.toFixed(1)}%) - Usuário: ${userId}`);
-    
-    return c.json({ success: true, id: detectionId });
-  } catch (error) {
-    console.error("[BD] Erro ao salvar detecção:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Estatísticas do dashboard por usuário
-app.get("/make-server-ea835390/dashboard/stats", async (c) => {
-  try {
-    const userId = c.req.query('userId');
-    
-    if (!userId) {
-      return c.json({ success: false, error: "userId é obrigatório" }, 400);
-    }
-    
-    console.log(`[DASHBOARD] Buscando estatísticas para usuário ${userId}`);
-    
-    // Busca todas as detecções do usuário
-    const allDetections = await kv.getByPrefix(`detection_${userId}_`);
-    
-    const stats = {
-      totalProcessed: allDetections.length,
-      totalSeparated: allDetections.filter((d: any) => d.gateAssigned !== null).length,
-      totalRejected: allDetections.filter((d: any) => d.gateAssigned === null).length,
-      materialCounts: {
-        papel: allDetections.filter((d: any) => d.material === 'papel').length,
-        metal: allDetections.filter((d: any) => d.material === 'metal').length,
-        plastico: allDetections.filter((d: any) => d.material === 'plastico').length,
-        vidro: allDetections.filter((d: any) => d.material === 'vidro').length
-      },
-      gateCounts: {
-        1: allDetections.filter((d: any) => d.gateAssigned === 1).length,
-        2: allDetections.filter((d: any) => d.gateAssigned === 2).length,
-        3: allDetections.filter((d: any) => d.gateAssigned === 3).length
-      },
-      efficiency: allDetections.length > 0 
-        ? Math.round((allDetections.filter((d: any) => d.gateAssigned !== null).length / allDetections.length) * 100)
-        : 0,
-      uptime: 95 // Simulado por enquanto
-    };
-    
-    console.log(`[DASHBOARD] Estatísticas: ${stats.totalProcessed} processados, ${stats.totalSeparated} separados`);
-    
-    return c.json({ success: true, stats });
-  } catch (error) {
-    console.error("[DASHBOARD] Erro ao obter estatísticas:", error);
-    return c.json({ success: false, error: String(error) }, 500);
-  }
-});
-
-// Estatísticas do perfil do usuário
+// Obter estatísticas do usuário para o perfil
 app.get("/make-server-ea835390/user/stats", async (c) => {
   try {
-    const userId = c.req.query('userId');
+    const authHeader = c.req.header('Authorization');
+    const user = await getUserFromToken(authHeader);
     
-    if (!userId) {
-      return c.json({ success: false, error: "userId é obrigatório" }, 400);
+    if (!user) {
+      console.error('[USER/STATS] Não autorizado');
+      return c.json({ success: false, error: 'Não autorizado' }, 401);
     }
     
-    console.log(`[PERFIL] Buscando estatísticas para usuário ${userId}`);
+    console.log(`[USER/STATS] Buscando estatísticas do usuário ${user.email}`);
     
-    const allDetections = await kv.getByPrefix(`detection_${userId}_`);
+    // Total de sessões
+    const { count: totalSessions } = await supabase
+      .from('user_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
     
-    // Busca configurações mais usadas
-    const configKey = `user_${userId}_favorite_config`;
-    const favoriteConfig = await kv.get(configKey);
+    // Total de detecções
+    const { count: totalDetections } = await supabase
+      .from('inferences')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+    
+    // Itens processados (detecções com cancela acionada)
+    const { count: totalProcessed } = await supabase
+      .from('inferences')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('gate_activated', true);
+    
+    // Última sessão
+    const { data: lastSessionData } = await supabase
+      .from('user_sessions')
+      .select('started_at')
+      .eq('user_id', user.id)
+      .order('started_at', { ascending: false })
+      .limit(1);
+    
+    const lastSession = lastSessionData && lastSessionData.length > 0 
+      ? lastSessionData[0].started_at 
+      : null;
+    
+    // Configuração favorita (mais usada)
+    const { data: configurations } = await supabase
+      .from('configurations')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    
+    const favoriteConfiguration = configurations && configurations.length > 0
+      ? {
+          cancela1: configurations[0].cancela1_material,
+          cancela2: configurations[0].cancela2_material,
+          cancela3: configurations[0].cancela3_material,
+          minAccuracy: configurations[0].min_confidence,
+          modelVersion: configurations[0].model_version
+        }
+      : null;
     
     const stats = {
-      totalSessions: 0, // TODO: Implementar contagem de sessões
-      totalDetections: allDetections.length,
-      totalProcessed: allDetections.length,
-      lastSession: allDetections.length > 0 
-        ? allDetections[allDetections.length - 1].timestamp
-        : null,
-      favoriteConfiguration: favoriteConfig || null
+      totalSessions: totalSessions || 0,
+      totalDetections: totalDetections || 0,
+      totalProcessed: totalProcessed || 0,
+      lastSession,
+      favoriteConfiguration
     };
     
-    return c.json({ success: true, stats });
+    console.log(`[USER/STATS] Estatísticas carregadas: ${totalSessions} sessões, ${totalDetections} detecções`);
+    
+    return c.json({ 
+      success: true, 
+      stats 
+    });
+    
   } catch (error) {
-    console.error("[PERFIL] Erro ao obter estatísticas do usuário:", error);
+    console.error('[USER/STATS] Erro ao buscar estatísticas:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
 
+// Start the server
 Deno.serve(app.fetch);

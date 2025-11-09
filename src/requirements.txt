@@ -1,143 +1,21 @@
-# ==================== ECOVISION - REQUIREMENTS ====================
-# Dependências para o sistema de controle inteligente de reciclagem
-# Python 3.9+
+# EcoVision - Python Dependencies
+# Instalar com: pip install -r requirements.txt
 
-# ==================== SERVIDOR DE INFERÊNCIA ====================
-# Flask para API REST
-flask==3.0.0
-flask-cors==4.0.0
+# Framework Web
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
 
-# ==================== MODELO DE IA ====================
-# YOLOv8 - Modelo de detecção de objetos
-ultralytics==8.0.196
-torch==2.0.1
-torchvision==0.15.2
-
-# Processamento de imagem e vídeo
+# Processamento de Imagem
 opencv-python==4.8.1.78
-opencv-contrib-python==4.8.1.78
-Pillow==10.0.1
-
-# Processamento numérico
+Pillow==10.1.0
 numpy==1.24.3
-scipy==1.11.3
 
-# ==================== COMUNICAÇÃO E HARDWARE ====================
-# Comunicação serial (Arduino, ESP32, etc)
-pyserial==3.5
+# Machine Learning - Ultralytics YOLO
+ultralytics==8.0.230
+torch>=2.0.0
+torchvision>=0.15.0
 
-# GPIO para Raspberry Pi (opcional, apenas se usar RPi)
-# RPi.GPIO==0.7.1
-
-# ==================== BACKEND E API ====================
-# Supabase client para Python (opcional, se integrar com Python)
-supabase==1.0.4
-
-# Cliente HTTP
-requests==2.31.0
-httpx==0.25.0
-
-# ==================== PROCESSAMENTO DE DADOS ====================
-# Pandas para análise de dados
-pandas==2.1.1
-
-# Visualização
-matplotlib==3.8.0
-seaborn==0.12.2
-
-# ==================== UTILITÁRIOS ====================
-# Logging avançado
-loguru==0.7.2
-
-# Variáveis de ambiente
+# Utilitários
+pydantic==2.5.0
 python-dotenv==1.0.0
-
-# Manipulação de datas
-python-dateutil==2.8.2
-
-# JSON avançado
-ujson==5.8.0
-
-# ==================== TESTES (OPCIONAL) ====================
-pytest==7.4.2
-pytest-cov==4.1.0
-pytest-mock==3.11.1
-
-# ==================== QUALIDADE DE CÓDIGO (OPCIONAL) ====================
-# Formatação
-black==23.9.1
-isort==5.12.0
-
-# Linting
-pylint==2.17.5
-flake8==6.1.0
-
-# Type checking
-mypy==1.5.1
-
-# ==================== NOTAS DE INSTALAÇÃO ====================
-#
-# Para instalar todas as dependências:
-# pip install -r requirements.txt
-#
-# Para instalar apenas as dependências principais (sem dev):
-# pip install ultralytics torch torchvision opencv-python pyserial requests pandas
-#
-# Para CUDA (GPU acceleration):
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-#
-# Versões do YOLO disponíveis:
-# - yolov8n.pt (nano) - mais rápido, menor precisão
-# - yolov8s.pt (small) - balanceado
-# - yolov8m.pt (medium) - mais preciso, mais lento
-#
-# Para baixar os modelos:
-# from ultralytics import YOLO
-# model_n = YOLO('yolov8n.pt')  # Baixa automaticamente
-# model_s = YOLO('yolov8s.pt')
-# model_m = YOLO('yolov8m.pt')
-
-# ==================== CONFIGURAÇÃO RECOMENDADA ====================
-#
-# Sistema Operacional: Linux (Ubuntu 20.04+) ou Windows 10+
-# Python: 3.9, 3.10 ou 3.11
-# RAM: Mínimo 8GB (Recomendado 16GB)
-# GPU: NVIDIA com CUDA (opcional, mas recomendado para performance)
-# Disco: Mínimo 10GB livres
-#
-# Hardware de Produção:
-# - Câmera IP ou USB (mínimo 1080p, recomendado 4K)
-# - Microcontrolador: Arduino Mega, ESP32 ou Raspberry Pi
-# - Interface Serial: USB ou RS-485
-# - Atuadores: Servos ou motores de passo para cancelas
-# - Sensor de velocidade para esteira (opcional)
-
-# ==================== VARIÁVEIS DE AMBIENTE NECESSÁRIAS ====================
-#
-# Criar arquivo .env na raiz do projeto:
-#
-# # Supabase
-# SUPABASE_URL=https://seu-projeto.supabase.co
-# SUPABASE_ANON_KEY=sua-chave-anonima
-# SUPABASE_SERVICE_ROLE_KEY=sua-chave-service-role
-#
-# # Google OAuth
-# GOOGLE_CLIENT_ID=seu-client-id.apps.googleusercontent.com
-# GOOGLE_CLIENT_SECRET=seu-client-secret
-#
-# # Hardware
-# SERIAL_PORT=/dev/ttyUSB0  # ou COM3 no Windows
-# BAUD_RATE=9600
-#
-# # Câmera
-# CAMERA_URL=0  # 0 para webcam, ou rtsp://... para IP camera
-# CAMERA_FPS=30
-#
-# # Modelo
-# MODEL_VERSION=yolov8s  # n, s, ou m
-# MIN_ACCURACY=85
-# MODEL_PATH=./models/
-#
-# # Sistema
-# DEBUG=False
-# LOG_LEVEL=INFO

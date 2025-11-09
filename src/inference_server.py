@@ -1,228 +1,419 @@
 """
-Servidor de Inferência EcoVision
-Processa frames da câmera usando modelos YOLO da Ultralytics
+EcoVision - Servidor de Inferência com Ultralytics YOLO
+Detecta materiais recicláveis em tempo real: papel, metal, plástico, vidro
 
-INSTRUÇÕES DE USO:
-1. Instale as dependências: pip install ultralytics flask flask-cors opencv-python pillow
-2. Coloque os modelos .pt na pasta /models/ com os nomes:
-   - yolov8n.pt (nano - mais rápido)
-   - yolov8s.pt (small - balanceado)
-   - yolov8m.pt (medium - mais preciso)
-3. Execute: python inference_server.py
-4. O servidor ficará disponível em http://localhost:5000
-
-TREINAMENTO DOS MODELOS:
-- Os modelos devem ser treinados para detectar 4 classes:
-  - 0: papel
-  - 1: metal
-  - 2: plastico
-  - 3: vidro
+Requisitos: pip install -r requirements.txt
 """
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from ultralytics import YOLO
+import os
+import io
+import time
+import base64
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-import base64
 from PIL import Image
-import io
-import os
-from datetime import datetime
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import uvicorn
+from ultralytics import YOLO
 
-app = Flask(__name__)
-CORS(app)  # Permite requisições do frontend
+# ==================== CONFIGURAÇÃO ====================
 
-# Dicionário de modelos carregados
-models = {}
-MODEL_DIR = "./models"
+app = FastAPI(
+    title="EcoVision Inference API",
+    description="API de inferência para detecção de materiais recicláveis",
+    version="1.0.0"
+)
 
-# Mapeamento de classes (ajuste conforme seu treinamento)
-CLASS_NAMES = {
-    0: "papel",
-    1: "metal", 
-    2: "plastico",
-    3: "vidro"
+# CORS para permitir acesso do frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Em produção, especificar domínios permitidos
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mapeamento de classes COCO para materiais recicláveis
+# Ajustar conforme o modelo treinado
+CLASS_TO_MATERIAL = {
+    # Papel/Papelão
+    "book": "papel",
+    "newspaper": "papel",
+    "cardboard": "papel",
+    
+    # Metal
+    "can": "metal",
+    "fork": "metal",
+    "knife": "metal",
+    "spoon": "metal",
+    
+    # Plástico
+    "bottle": "plastico",
+    "cup": "plastico",
+    "plastic_bag": "plastico",
+    
+    # Vidro
+    "wine glass": "vidro",
+    "glass": "vidro",
+    "jar": "vidro",
 }
 
-def load_model(model_name):
-    """Carrega um modelo YOLO se ainda não estiver carregado"""
-    if model_name not in models:
-        model_path = os.path.join(MODEL_DIR, f"{model_name}.pt")
-        
-        if not os.path.exists(model_path):
-            print(f"[ERRO] Modelo não encontrado: {model_path}")
-            print(f"[INFO] Coloque o arquivo {model_name}.pt na pasta {MODEL_DIR}/")
-            return None
-        
-        try:
-            print(f"[MODELO] Carregando {model_path}...")
-            models[model_name] = YOLO(model_path)
-            print(f"[MODELO] {model_name} carregado com sucesso!")
-            return models[model_name]
-        except Exception as e:
-            print(f"[ERRO] Falha ao carregar modelo {model_name}: {str(e)}")
-            return None
-    
-    return models[model_name]
+# Modelos disponíveis
+MODELS_PATH = "./models"
+AVAILABLE_MODELS = {
+    "YOLOv8n": "yolov8n.pt",  # Mais rápido, menos preciso
+    "YOLOv8s": "yolov8s.pt",  # Balanceado
+    "YOLOv8m": "yolov8m.pt",  # Mais preciso, mais lento
+}
 
-def decode_image(base64_string):
-    """Decodifica uma imagem base64 para formato numpy array"""
-    try:
-        # Remove o prefixo data:image/jpeg;base64, se presente
-        if ',' in base64_string:
-            base64_string = base64_string.split(',')[1]
-        
-        # Decodifica base64
-        image_data = base64.b64decode(base64_string)
-        image = Image.open(io.BytesIO(image_data))
-        
-        # Converte para numpy array (formato BGR para OpenCV)
-        image_np = np.array(image)
-        if len(image_np.shape) == 2:  # Grayscale
-            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
-        elif image_np.shape[2] == 4:  # RGBA
-            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2BGR)
-        elif image_np.shape[2] == 3:  # RGB
-            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
-        
-        return image_np
-    except Exception as e:
-        print(f"[ERRO] Falha ao decodificar imagem: {str(e)}")
-        return None
+# Modelo atual carregado
+current_model: Optional[YOLO] = None
+current_model_version: str = "YOLOv8n"
 
-@app.route('/api/inference', methods=['POST'])
-def infer():
+# ==================== MODELOS DE DADOS ====================
+
+class InferenceRequest(BaseModel):
+    """Request para inferência com imagem base64"""
+    image_base64: str
+    model_version: Optional[str] = "YOLOv8n"
+    min_confidence: Optional[float] = 0.5
+
+class BoundingBox(BaseModel):
+    """Bounding box de uma detecção"""
+    x: float
+    y: float
+    width: float
+    height: float
+
+class Detection(BaseModel):
+    """Detecção individual"""
+    class_name: str
+    material: str
+    confidence: float
+    bounding_box: BoundingBox
+
+class InferenceResponse(BaseModel):
+    """Response da inferência"""
+    success: bool
+    detections: List[Detection]
+    processing_time_ms: int
+    model_version: str
+    timestamp: str
+    image_shape: Tuple[int, int, int]
+
+class ModelInfo(BaseModel):
+    """Informações do modelo"""
+    available_models: List[str]
+    current_model: str
+    model_path: str
+
+# ==================== FUNÇÕES AUXILIARES ====================
+
+def load_model(model_version: str = "YOLOv8n") -> YOLO:
     """
-    Endpoint principal de inferência
+    Carrega o modelo YOLO especificado
     
-    Recebe:
-    {
-        "image": "base64_encoded_image",
-        "model": "yolov8n|yolov8s|yolov8m",
-        "confidence": 0.85
-    }
+    Args:
+        model_version: Versão do modelo (YOLOv8n, YOLOv8s, YOLOv8m)
     
-    Retorna:
-    {
-        "detections": [
-            {
-                "class": "papel",
-                "confidence": 0.92,
-                "bbox": [x, y, width, height]  # Coordenadas normalizadas (0-1)
-            },
-            ...
-        ]
-    }
+    Returns:
+        Modelo YOLO carregado
     """
-    try:
-        data = request.json
+    global current_model, current_model_version
+    
+    if model_version not in AVAILABLE_MODELS:
+        raise ValueError(f"Modelo {model_version} não disponível. Use: {list(AVAILABLE_MODELS.keys())}")
+    
+    model_filename = AVAILABLE_MODELS[model_version]
+    model_path = os.path.join(MODELS_PATH, model_filename)
+    
+    # Se o modelo não existe, baixar automaticamente
+    if not os.path.exists(model_path):
+        os.makedirs(MODELS_PATH, exist_ok=True)
+        print(f"📥 Baixando modelo {model_version}...")
+        model = YOLO(model_filename)  # Ultralytics baixa automaticamente
+        model.save(model_path)
+    else:
+        print(f"📦 Carregando modelo existente: {model_path}")
+        model = YOLO(model_path)
+    
+    current_model = model
+    current_model_version = model_version
+    
+    print(f"✅ Modelo {model_version} carregado com sucesso!")
+    return model
+
+def base64_to_image(base64_string: str) -> np.ndarray:
+    """
+    Converte string base64 para imagem numpy array
+    
+    Args:
+        base64_string: String base64 da imagem
+    
+    Returns:
+        Imagem como numpy array (BGR)
+    """
+    # Remove prefixo data:image se existir
+    if "base64," in base64_string:
+        base64_string = base64_string.split("base64,")[1]
+    
+    # Decodifica base64
+    img_data = base64.b64decode(base64_string)
+    
+    # Converte para imagem PIL
+    img_pil = Image.open(io.BytesIO(img_data))
+    
+    # Converte para numpy array (RGB)
+    img_rgb = np.array(img_pil)
+    
+    # Converte RGB para BGR (formato OpenCV)
+    if len(img_rgb.shape) == 3 and img_rgb.shape[2] == 3:
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    else:
+        img_bgr = img_rgb
+    
+    return img_bgr
+
+def map_class_to_material(class_name: str) -> str:
+    """
+    Mapeia classe detectada para material reciclável
+    
+    Args:
+        class_name: Nome da classe detectada pelo YOLO
+    
+    Returns:
+        Material correspondente (papel, metal, plastico, vidro)
+    """
+    class_lower = class_name.lower()
+    
+    # Busca exata
+    if class_lower in CLASS_TO_MATERIAL:
+        return CLASS_TO_MATERIAL[class_lower]
+    
+    # Busca por palavras-chave
+    if any(key in class_lower for key in ["paper", "book", "cardboard"]):
+        return "papel"
+    if any(key in class_lower for key in ["metal", "can", "fork", "knife", "spoon"]):
+        return "metal"
+    if any(key in class_lower for key in ["plastic", "bottle", "cup", "bag"]):
+        return "plastico"
+    if any(key in class_lower for key in ["glass", "jar", "wine"]):
+        return "vidro"
+    
+    # Default: classifica como plástico (mais comum)
+    return "plastico"
+
+def process_detections(results) -> List[Detection]:
+    """
+    Processa resultados do YOLO e converte para lista de detecções
+    
+    Args:
+        results: Resultados do YOLO
+    
+    Returns:
+        Lista de detecções formatadas
+    """
+    detections = []
+    
+    for result in results:
+        boxes = result.boxes
         
-        # Valida entrada
-        if not data or 'image' not in data:
-            return jsonify({"error": "Imagem não fornecida"}), 400
-        
-        model_name = data.get('model', 'yolov8n').lower()
-        confidence_threshold = float(data.get('confidence', 0.85))
-        
-        print(f"\n[INFERÊNCIA] {datetime.now().strftime('%H:%M:%S')} - Modelo: {model_name}, Confiança: {confidence_threshold}")
-        
-        # Carrega modelo
-        model = load_model(model_name)
-        if model is None:
-            return jsonify({"error": f"Modelo {model_name} não disponível"}), 500
-        
-        # Decodifica imagem
-        image = decode_image(data['image'])
-        if image is None:
-            return jsonify({"error": "Falha ao processar imagem"}), 400
-        
-        # Executa inferência
-        results = model(image, conf=confidence_threshold, verbose=False)
-        
-        # Processa resultados
-        detections = []
-        for result in results:
-            boxes = result.boxes
+        for i in range(len(boxes)):
+            # Coordenadas do bounding box
+            xyxy = boxes.xyxy[i].cpu().numpy()
+            x1, y1, x2, y2 = xyxy
             
-            for box in boxes:
-                # Extrai informações
-                cls_id = int(box.cls[0])
-                confidence = float(box.conf[0])
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                
-                # Normaliza coordenadas (0-1)
-                img_height, img_width = image.shape[:2]
-                bbox_normalized = [
-                    x1 / img_width,
-                    y1 / img_height,
-                    (x2 - x1) / img_width,
-                    (y2 - y1) / img_height
-                ]
-                
-                # Obtém nome da classe
-                class_name = CLASS_NAMES.get(cls_id, f"unknown_{cls_id}")
-                
-                detection = {
-                    "class": class_name,
-                    "confidence": confidence,
-                    "bbox": bbox_normalized
-                }
-                
-                detections.append(detection)
-                print(f"[DETECÇÃO] {class_name}: {confidence*100:.1f}% - bbox: [{bbox_normalized[0]:.2f}, {bbox_normalized[1]:.2f}, {bbox_normalized[2]:.2f}, {bbox_normalized[3]:.2f}]")
-        
-        if not detections:
-            print(f"[INFO] Nenhuma detecção acima de {confidence_threshold*100:.1f}%")
-        
-        return jsonify({"detections": detections})
+            # Confiança e classe
+            conf = float(boxes.conf[i].cpu().numpy())
+            cls_id = int(boxes.cls[i].cpu().numpy())
+            class_name = result.names[cls_id]
+            
+            # Mapeia para material
+            material = map_class_to_material(class_name)
+            
+            # Cria detecção
+            detection = Detection(
+                class_name=class_name,
+                material=material,
+                confidence=round(conf * 100, 2),  # Converte para percentual
+                bounding_box=BoundingBox(
+                    x=float(x1),
+                    y=float(y1),
+                    width=float(x2 - x1),
+                    height=float(y2 - y1)
+                )
+            )
+            
+            detections.append(detection)
     
+    return detections
+
+# ==================== ENDPOINTS ====================
+
+@app.on_event("startup")
+async def startup_event():
+    """Carrega modelo padrão ao iniciar"""
+    print("🚀 Iniciando EcoVision Inference Server...")
+    try:
+        load_model("YOLOv8n")
+        print("✅ Servidor pronto!")
     except Exception as e:
-        print(f"[ERRO] Erro durante inferência: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        print(f"⚠️  Erro ao carregar modelo: {e}")
+        print("ℹ️  O modelo será carregado na primeira requisição")
 
-@app.route('/api/models', methods=['GET'])
-def list_models():
-    """Lista modelos disponíveis"""
-    available_models = []
-    
-    for model_name in ['yolov8n', 'yolov8s', 'yolov8m']:
-        model_path = os.path.join(MODEL_DIR, f"{model_name}.pt")
-        if os.path.exists(model_path):
-            available_models.append({
-                "name": model_name,
-                "path": model_path,
-                "loaded": model_name in models
-            })
-    
-    return jsonify({"models": available_models})
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
+@app.get("/")
+async def root():
+    """Health check"""
+    return {
         "status": "ok",
-        "server": "EcoVision Inference Server",
-        "models_loaded": len(models)
-    })
+        "message": "EcoVision Inference Server is running",
+        "version": "1.0.0",
+        "current_model": current_model_version
+    }
 
-if __name__ == '__main__':
-    # Cria diretório de modelos se não existir
-    os.makedirs(MODEL_DIR, exist_ok=True)
+@app.get("/health")
+async def health():
+    """Health check detalhado"""
+    return {
+        "status": "healthy",
+        "model_loaded": current_model is not None,
+        "current_model": current_model_version,
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/models")
+async def get_models() -> ModelInfo:
+    """Lista modelos disponíveis"""
+    return ModelInfo(
+        available_models=list(AVAILABLE_MODELS.keys()),
+        current_model=current_model_version,
+        model_path=os.path.join(MODELS_PATH, AVAILABLE_MODELS.get(current_model_version, ""))
+    )
+
+@app.post("/models/load")
+async def load_model_endpoint(model_version: str):
+    """Carrega um modelo específico"""
+    try:
+        load_model(model_version)
+        return {
+            "success": True,
+            "message": f"Modelo {model_version} carregado com sucesso",
+            "current_model": current_model_version
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/inference", response_model=InferenceResponse)
+async def inference(request: InferenceRequest):
+    """
+    Realiza inferência em uma imagem base64
     
-    print("="*60)
-    print("EcoVision - Servidor de Inferência com Ultralytics YOLO")
-    print("="*60)
-    print(f"\n[INFO] Diretório de modelos: {os.path.abspath(MODEL_DIR)}")
-    print("[INFO] Coloque seus modelos .pt neste diretório:")
-    print("  - yolov8n.pt (nano - mais rápido)")
-    print("  - yolov8s.pt (small - balanceado)")
-    print("  - yolov8m.pt (medium - mais preciso)")
-    print("\n[INFO] Iniciando servidor na porta 5000...")
-    print("[INFO] Endpoint de inferência: http://localhost:5000/api/inference")
-    print("[INFO] Para usar com o frontend, certifique-se de que está rodando\n")
+    Args:
+        request: Request com imagem base64 e configurações
     
-    # Inicia servidor Flask
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    Returns:
+        Detecções encontradas na imagem
+    """
+    try:
+        start_time = time.time()
+        
+        # Carrega modelo se necessário
+        if current_model is None or current_model_version != request.model_version:
+            load_model(request.model_version)
+        
+        # Converte base64 para imagem
+        img = base64_to_image(request.image_base64)
+        
+        # Realiza inferência
+        results = current_model.predict(
+            img,
+            conf=request.min_confidence,
+            verbose=False
+        )
+        
+        # Processa detecções
+        detections = process_detections(results)
+        
+        # Calcula tempo de processamento
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        
+        return InferenceResponse(
+            success=True,
+            detections=detections,
+            processing_time_ms=processing_time_ms,
+            model_version=current_model_version,
+            timestamp=datetime.now().isoformat(),
+            image_shape=img.shape
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro na inferência: {str(e)}"
+        )
+
+@app.post("/inference/file")
+async def inference_file(
+    file: UploadFile = File(...),
+    model_version: str = Form("YOLOv8n"),
+    min_confidence: float = Form(0.5)
+):
+    """
+    Realiza inferência em arquivo de imagem
+    
+    Args:
+        file: Arquivo de imagem (jpg, png, etc)
+        model_version: Versão do modelo
+        min_confidence: Confiança mínima
+    
+    Returns:
+        Detecções encontradas na imagem
+    """
+    try:
+        # Lê arquivo
+        contents = await file.read()
+        
+        # Converte para base64
+        base64_string = base64.b64encode(contents).decode('utf-8')
+        
+        # Chama endpoint de inferência
+        request = InferenceRequest(
+            image_base64=base64_string,
+            model_version=model_version,
+            min_confidence=min_confidence
+        )
+        
+        return await inference(request)
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar arquivo: {str(e)}"
+        )
+
+# ==================== MAIN ====================
+
+if __name__ == "__main__":
+    print("""
+    ╔═══════════════════════════════════════════╗
+    ║   EcoVision Inference Server              ║
+    ║   Detecção de Materiais Recicláveis       ║
+    ║   Powered by Ultralytics YOLO             ║
+    ╚═══════════════════════════════════════════╝
+    """)
+    
+    # Porta padrão: 8000
+    # Acessível em: http://localhost:8000
+    # Documentação: http://localhost:8000/docs
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )

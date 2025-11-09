@@ -9,11 +9,13 @@ import { UserProfile } from "./components/UserProfile";
 import { Toaster } from "./components/ui/sonner";
 import { getSupabaseClient } from "./utils/supabase/client";
 import { projectId, publicAnonKey } from "./utils/supabase/info";
+import { TestTube } from "lucide-react";
 
 const supabase = getSupabaseClient();
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
+  const [userToken, setUserToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [activeTab, setActiveTab] = useState("monitor");
@@ -32,21 +34,44 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      setUserToken(session?.access_token ?? null);
       setLoading(false);
+      
+      if (session?.access_token) {
+        console.log('[AUTH] Sessão OAuth obtida com sucesso. Token disponível.');
+      } else {
+        console.log('[AUTH] Nenhuma sessão OAuth. Use o Modo Demo ou configure Google OAuth.');
+      }
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`[AUTH] Estado de autenticação mudou: ${event}`);
       setUser(session?.user ?? null);
+      setUserToken(session?.access_token ?? null);
+      
+      if (event === 'SIGNED_OUT') {
+        console.log('[AUTH] Usuário desconectado');
+      } else if (event === 'SIGNED_IN') {
+        console.log('[AUTH] Usuário conectado com sucesso');
+      } else if (event === 'TOKEN_REFRESHED') {
+        console.log('[AUTH] Token renovado automaticamente');
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
   const handleDemoMode = () => {
+    console.log('[AUTH] Entrando em Modo Demo');
     setIsDemoMode(true);
-    setUser({ email: "demo@ecovision.com", id: "demo-user" });
+    setUser({ 
+      email: "demo@ecovision.com", 
+      id: "demo-user-ecovision-2024" 
+    });
+    // Token especial para modo demo que o backend reconhece
+    setUserToken('DEMO_MODE_TOKEN_ecovision_2024');
     setLoading(false);
   };
 
@@ -61,7 +86,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           }
         }
@@ -78,7 +103,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           }
         }
@@ -98,7 +123,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -115,7 +140,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ limite: newAccuracy })
@@ -135,7 +160,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -161,7 +186,7 @@ export default function App() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${userToken || publicAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -213,6 +238,24 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 overflow-auto w-full md:ml-20 lg:ml-20">
         <div className="container mx-auto p-4 md:p-6 space-y-4 md:space-y-6 max-w-7xl">
+          {/* Demo Mode Banner */}
+          {isDemoMode && (
+            <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 mt-16 md:mt-0">
+              <div className="flex items-start gap-3">
+                <TestTube className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold text-yellow-800 text-sm">
+                    Modo Demonstração Ativo
+                  </p>
+                  <p className="text-yellow-700 text-xs mt-1">
+                    Você está usando o EcoVision em modo demo. Os dados não serão salvos permanentemente. 
+                    Para salvar suas configurações e dados, configure o login com Google no Supabase.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Header */}
           <div className="space-y-2 pt-16 md:pt-0">
             <h1 className="text-recycling-primary-darker text-xl md:text-2xl lg:text-3xl">
@@ -241,6 +284,7 @@ export default function App() {
                 onToggleSystem={handleToggleSystem}
                 modelVersion={modelVersion}
                 userId={user.id}
+                userToken={userToken}
               />
             )}
 
@@ -266,12 +310,12 @@ export default function App() {
               <StatisticsPanel
                 isSystemRunning={isSystemRunning}
                 gateConfigs={gateConfigs}
-                userId={user.id}
+                userToken={userToken}
               />
             )}
 
             {activeTab === "perfil" && (
-              <UserProfile user={user} />
+              <UserProfile user={user} isDemoMode={isDemoMode} userToken={userToken} />
             )}
           </div>
         </div>
