@@ -56,13 +56,14 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
   // Carrega estatísticas do banco de dados
   const loadStats = async () => {
     if (!userToken) {
-      console.log('[DASHBOARD] Aguardando autenticação...');
+      console.log('[DASHBOARD] Aguardando autenticação... Token não disponível.');
+      setLoading(false);
       return;
     }
     
     setLoading(true);
     console.log(`[DASHBOARD] Carregando estatísticas do banco de dados...`);
-    console.log(`[DASHBOARD] Token sendo enviado: ${userToken.substring(0, 20)}...`);
+    console.log(`[DASHBOARD] Token sendo enviado: ${userToken.substring(0, 30)}...`);
     
     try {
       const response = await fetch(
@@ -84,7 +85,9 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
           console.error('[DASHBOARD] Erro na resposta:', data.error);
         }
       } else {
+        const errorText = await response.text();
         console.error('[DASHBOARD] Erro HTTP:', response.status);
+        console.error('[DASHBOARD] Detalhes do erro:', errorText);
       }
     } catch (error) {
       console.error('[DASHBOARD] Erro ao carregar estatísticas:', error);

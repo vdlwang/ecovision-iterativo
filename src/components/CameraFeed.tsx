@@ -1,10 +1,11 @@
-// EcoVision Camera Feed Component - v4.0 with Auto Permission Request
+// EcoVision Camera Feed Component - v5.0 Fixed Permission Flow
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Camera, Video, Play, Pause, AlertTriangle, CheckCircle, RefreshCw } from "lucide-react";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
+import { CameraFeedHelp } from "./CameraFeedHelp";
 
 interface BoundingBox {
   x: number;
@@ -33,7 +34,7 @@ interface CameraFeedProps {
   minConfidence: number;
   onToggleSystem?: () => void;
   inline?: boolean;
-  userToken?: string;
+  userToken?: string | null;
 }
 
 export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence, onToggleSystem, inline = false, userToken }: CameraFeedProps) {
@@ -45,128 +46,68 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
   const [error, setError] = useState<string | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastInferenceTime, setLastInferenceTime] = useState<number>(0);
-  const [permissionGranted, setPermissionGranted] = useState(false);
-  const [permissionRequested, setPermissionRequested] = useState(false);
   
   // Sincroniza isDetecting com isRunning quando isRunning muda
   useEffect(() => {
     setIsDetecting(isRunning);
   }, [isRunning]);
 
-  // Solicita permissão automaticamente ao carregar o componente (pós-login)
-  useEffect(() => {
-    requestCameraPermission();
-  }, []);
-
-  const requestCameraPermission = async () => {
-    setPermissionRequested(true);
+  const startCamera = async () => {
     setIsLoading(true);
     setError(null);
     
     try {
-      console.log('[CÂMERA] Solicitando permissão de acesso...');
+      console.log('[CÂMERA] Iniciando stream de vídeo...');
       
-      // Solicita acesso à câmera
-      const testStream = await navigator.mediaDevices.getUserMedia({
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+
+      // Solicita e inicia a câmera padrão do navegador
+      const newStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "environment", // traseira no celular, padrão no PC
+          facingMode: "environment",
           width: { ideal: 1920 },
           height: { ideal: 1080 }
         }
       });
+
+      setStream(newStream);
       
-      // Para o stream de teste, mas marca permissão concedida
-      testStream.getTracks().forEach(track => track.stop());
-      
-      setPermissionGranted(true);
-      console.log('[CÂMERA] ✅ Permissão concedida pelo usuário');
+      if (videoRef.current) {
+        videoRef.current.srcObject = newStream;
+      }
+
+      console.log('[CÂMERA] ✅ Stream de vídeo iniciada com sucesso');
     } catch (err: any) {
-      console.error('[CÂMERA] ❌ Erro ao solicitar permissão:', err);
-      setPermissionGranted(false);
+      console.error('[CÂMERA] ❌ Erro ao iniciar câmera:', err.name, err.message);
       
       if (err.name === 'NotAllowedError') {
-        setError('Permissão de câmera negada. Clique em "Carregar" e autorize o acesso.');
+        setError('🔒 Permissão de câmera bloqueada. Para resolver: 1) Clique no ícone de cadeado/câmera na barra de endereço do navegador, 2) Permita o acesso à câmera, 3) Recarregue a página.');
       } else if (err.name === 'NotFoundError') {
-        setError('Nenhuma câmera encontrada no dispositivo.');
+        setError('📹 Nenhuma câmera encontrada. Verifique se há uma câmera conectada ao dispositivo.');
       } else if (err.name === 'NotSupportedError' || !window.isSecureContext) {
-        setError('⚠️ Este recurso só funciona via HTTPS ou localhost.');
+        setError('⚠️ Acesso à câmera só funciona via HTTPS ou localhost (http://localhost:5000). Configurações do navegador bloqueiam câmera em sites HTTP.');
       } else {
-        setError(`Erro ao acessar câmera: ${err.message}`);
+        setError(`❌ Erro ao acessar câmera: ${err.message}. Verifique as permissões do navegador.`);
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Inicia/para stream da câmera quando o sistema está rodando
+  // Para stream da câmera quando o sistema é desligado
   useEffect(() => {
-    if (!isRunning) {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        setStream(null);
-        console.log('[CÂMERA] Stream parada');
-      }
-      return;
+    if (!isRunning && stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+      console.log('[CÂMERA] Stream parada porque o sistema foi desligado');
     }
-
-    const startStream = async () => {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-
-        // Solicita e inicia a câmera padrão do navegador
-        const newStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          }
-        });
-
-        setStream(newStream);
-        setPermissionGranted(true);
-        setPermissionRequested(true);
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = newStream;
-        }
-
-        console.log('[CÂMERA] ✅ Permissão concedida e stream iniciada');
-      } catch (err: any) {
-        console.error('[CÂMERA] ❌ Erro ao iniciar stream:', err);
-        setPermissionGranted(false);
-        setPermissionRequested(true);
-        
-        if (err.name === 'NotAllowedError') {
-          setError('❌ Permissão de câmera negada. Clique no botão abaixo para tentar novamente e autorize o acesso quando o navegador solicitar.');
-        } else if (err.name === 'NotFoundError') {
-          setError('❌ Nenhuma câmera encontrada no dispositivo.');
-        } else if (err.name === 'NotSupportedError' || !window.isSecureContext) {
-          setError('⚠️ Este recurso só funciona via HTTPS ou localhost.');
-        } else {
-          setError(`❌ Erro ao acessar câmera: ${err.message}`);
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    startStream();
-
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
   }, [isRunning]);
 
   // Processa frames e envia para inferência
   useEffect(() => {
-    if (!isDetecting || !videoRef.current || !canvasRef.current || !stream) {
+    if (!isDetecting || !videoRef.current || !canvasRef.current || !stream || !userToken) {
       return;
     }
 
@@ -197,7 +138,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${userToken || publicAnonKey}`
+            'Authorization': `Bearer ${userToken}`
           },
           body: JSON.stringify({
             image_base64: base64Image,
@@ -347,6 +288,23 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
 
   const cameraContent = (
     <div className="space-y-4">
+      {/* Alerta: Sistema rodando mas câmera não iniciada */}
+      {isRunning && !stream && !isLoading && (
+        <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-yellow-800 text-xs">
+                ⚠️ Sistema em execução, mas câmera não iniciada
+              </p>
+              <p className="text-yellow-700 text-xs mt-1">
+                Clique no botão "Permitir e Iniciar Câmera" abaixo para começar a detecção
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Título e Status */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -356,7 +314,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           </h3>
           <Badge variant={stream ? "default" : "secondary"} className={stream ? "bg-recycling-accent text-white" : ""}>
             <Video className="h-3 w-3 mr-1" />
-            {stream ? "AO VIVO" : permissionGranted ? "INATIVO" : "SEM PERMISSÃO"}
+            {stream ? "AO VIVO" : "INATIVO"}
           </Badge>
         </div>
         
@@ -399,15 +357,16 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
       <div className="relative bg-gray-900 aspect-video w-full overflow-hidden rounded-lg border-2 border-recycling-primary/30">
         {error && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-gray-900 z-10">
-            <div className="text-center p-4">
-              <Camera className="h-16 w-16 mx-auto mb-3 text-material-rejected" />
-              <p className="text-sm mb-2 text-red-400">{error}</p>
+            <div className="text-center p-6 max-w-lg mx-4">
+              <Camera className="h-16 w-16 mx-auto mb-4 text-material-rejected" />
+              <p className="text-sm mb-4 text-red-400 leading-relaxed">{error}</p>
               <Button
-                onClick={requestCameraPermission}
+                onClick={startCamera}
                 size="sm"
                 className="bg-recycling-primary hover:bg-recycling-primary-dark text-white mt-3"
               >
-                Carregar
+                <RefreshCw className="h-3 w-3 mr-1.5" />
+                Tentar Novamente
               </Button>
             </div>
           </div>
@@ -417,41 +376,26 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
             <div className="text-center text-white">
               <div className="w-12 h-12 border-4 border-recycling-primary border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-              <p className="text-sm">
-                {permissionGranted ? 'Iniciando câmera...' : 'Solicitando permissão de câmera...'}
-              </p>
+              <p className="text-sm">Iniciando câmera...</p>
             </div>
           </div>
         )}
         
-        {!stream && !isLoading && !error && !permissionGranted && (
+        {!stream && !isLoading && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-            <div className="text-center p-4">
+            <div className="text-center p-4 max-w-md">
               <Camera className="h-16 w-16 mx-auto mb-4 text-recycling-primary" />
-              <p className="text-sm mb-4 font-medium text-gray-300">Câmera Pronta para Iniciar</p>
-              <Button
-                onClick={requestCameraPermission}
-                size="sm"
-                className="bg-recycling-primary hover:bg-recycling-primary-dark text-white"
-              >
-                Carregar
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {!stream && !isLoading && !error && permissionGranted && (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-            <div className="text-center p-4">
-              <Camera className="h-16 w-16 mx-auto mb-4 text-recycling-primary" />
-              <p className="text-sm mb-4 font-medium text-gray-300">Câmera Pronta</p>
+              <p className="text-sm mb-2 font-medium text-gray-300">📹 Câmera Pronta</p>
+              <p className="text-xs mb-4 text-gray-400">
+                Clique no botão abaixo e autorize o acesso à câmera quando o navegador solicitar
+              </p>
               <Button
                 onClick={startCamera}
                 size="sm"
                 className="bg-recycling-primary hover:bg-recycling-primary-dark text-white"
               >
                 <Play className="h-3 w-3 mr-1.5" />
-                Iniciar Sistema
+                Permitir e Iniciar Câmera
               </Button>
             </div>
           </div>
@@ -497,6 +441,9 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           </>
         )}
       </div>
+      
+      {/* Seção de Ajuda quando há erro */}
+      {error && <CameraFeedHelp />}
     </div>
   );
 

@@ -60,13 +60,15 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      setUserToken(session?.access_token ?? null);
+      const token = session?.access_token ?? null;
+      setUserToken(token);
       setLoading(false);
       
-      if (session?.access_token) {
-        console.log('[AUTH] Sessão OAuth obtida com sucesso. Token disponível.');
+      if (token) {
+        console.log('[AUTH] ✅ Sessão OAuth obtida com sucesso.');
+        console.log('[AUTH] Token disponível:', token.substring(0, 30) + '...');
       } else {
-        console.log('[AUTH] Nenhuma sessão OAuth. Use o Modo Demo ou configure Google OAuth.');
+        console.log('[AUTH] ⚠️ Nenhuma sessão OAuth. Use o Modo Demo ou configure Google OAuth.');
       }
     });
 
@@ -74,15 +76,18 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`[AUTH] Estado de autenticação mudou: ${event}`);
+      const token = session?.access_token ?? null;
       setUser(session?.user ?? null);
-      setUserToken(session?.access_token ?? null);
+      setUserToken(token);
       
       if (event === 'SIGNED_OUT') {
-        console.log('[AUTH] Usuário desconectado');
+        console.log('[AUTH] ❌ Usuário desconectado');
       } else if (event === 'SIGNED_IN') {
-        console.log('[AUTH] Usuário conectado com sucesso');
+        console.log('[AUTH] ✅ Usuário conectado com sucesso');
+        console.log('[AUTH] Token obtido:', token?.substring(0, 30) + '...');
       } else if (event === 'TOKEN_REFRESHED') {
-        console.log('[AUTH] Token renovado automaticamente');
+        console.log('[AUTH] 🔄 Token renovado automaticamente');
+        console.log('[AUTH] Novo token:', token?.substring(0, 30) + '...');
       }
     });
 
@@ -91,14 +96,15 @@ export default function App() {
 
   const handleDemoMode = () => {
     console.log('[AUTH] Entrando em Modo Demo');
+    const demoToken = 'DEMO_MODE_TOKEN_ecovision_2024';
     setIsDemoMode(true);
     setUser({ 
       email: "demo@ecovision.com", 
       id: "demo-user-ecovision-2024" 
     });
-    // Token especial para modo demo que o backend reconhece
-    setUserToken('DEMO_MODE_TOKEN_ecovision_2024');
+    setUserToken(demoToken);
     setLoading(false);
+    console.log('[AUTH] ✅ Modo demo ativado com token:', demoToken.substring(0, 20) + '...');
   };
 
   const handleToggleSystem = async () => {
@@ -274,9 +280,25 @@ export default function App() {
                     Modo Demonstração Ativo
                   </p>
                   <p className="text-yellow-700 text-xs mt-1">
-                    Você está usando o EcoVision em modo demo. Os dados não serão salvos permanentemente.
+                    Você está usando o EcoVision em modo demo. Os dados não serão salvos permanentemente. Token: {userToken ? '✅ Ativo' : '❌ Ausente'}
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+          
+          {/* OAuth Mode - Token Status */}
+          {!isDemoMode && user && (
+            <div className={`border-2 rounded-lg p-3 mt-16 md:mt-0 ${userToken ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'}`}>
+              <div className="flex items-center gap-2 text-sm">
+                <span className={userToken ? 'text-green-800' : 'text-red-800'}>
+                  {userToken ? '✅ Autenticado via Google OAuth' : '❌ Erro: Token de autenticação não disponível'}
+                </span>
+                {!userToken && (
+                  <span className="text-red-600 text-xs">
+                    - Por favor, faça logout e login novamente
+                  </span>
+                )}
               </div>
             </div>
           )}

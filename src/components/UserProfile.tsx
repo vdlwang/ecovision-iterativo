@@ -47,7 +47,7 @@ export function UserProfile({ user, isDemoMode = false, userToken }: UserProfile
     }
     
     if (!userToken) {
-      console.log('[PERFIL] Aguardando token de autenticação...');
+      console.log('[PERFIL] Aguardando token de autenticação... Token não disponível.');
       setLoading(false);
       return;
     }
@@ -55,7 +55,7 @@ export function UserProfile({ user, isDemoMode = false, userToken }: UserProfile
     try {
       setLoading(true);
       console.log(`[PERFIL] Carregando estatísticas do usuário ${user.email}`);
-      console.log(`[PERFIL] Token sendo enviado: ${userToken.substring(0, 20)}...`);
+      console.log(`[PERFIL] Token sendo enviado: ${userToken.substring(0, 30)}...`);
       
       // Busca estatísticas do usuário no backend
       const response = await fetch(

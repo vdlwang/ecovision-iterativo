@@ -10,26 +10,7 @@
 
 **Sistema de controle para esteira de reciclagem integrado com IA para detecção e separação automática de materiais recicláveis**
 
-[⚡ START](./START.md) • [📖 LEIA-ME](./LEIA_ME_PRIMEIRO.md) • [🎯 EXECUTAR](./COMO_EXECUTAR.md) • [📚 DOCS](./DOCS_INDEX.md) • [🏗️ Arquitetura](#️-arquitetura)
-
----
-
-## 🔥 Início Rápido
-
-**Escolha seu estilo:**
-
-| Arquivo | Descrição | Tempo |
-|---------|-----------|-------|
-| **[⚡ START.md](./START.md)** | Apenas comandos | 30s |
-| **[📖 LEIA_ME_PRIMEIRO.md](./LEIA_ME_PRIMEIRO.md)** | Visão geral completa | 5 min |
-| **[🎯 COMO_EXECUTAR.md](./COMO_EXECUTAR.md)** | Guia passo a passo | 10 min |
-| **[📚 DOCS_INDEX.md](./DOCS_INDEX.md)** | Índice de toda documentação | - |
-
-```bash
-pip install -r requirements.txt    # Instalar
-./run_dev.sh                        # Executar (Linux/Mac)
-# Abrir http://localhost:5000      # Acessar
-```
+[🏗️ Arquitetura](#️-arquitetura) • [📊 Diagramas](./diagrams/INDEX.md) • [🚀 Deploy](#-deploy-em-produção)
 
 </div>
 
@@ -51,9 +32,9 @@ O **EcoVision** é um sistema completo de controle para centros de reciclagem qu
 - ✅ **Detecção em Tempo Real** com webcam/câmera
 - ✅ **3 Modelos YOLO** (nano, small, medium) para diferentes necessidades
 - ✅ **Configurável** - defina qual cancela separa qual material
-- ✅ **Banco de Dados Real** - todas detecções são persistidas no PostgreSQL
+- ✅ **Banco de Dados Real** - todas detecções persistidas no PostgreSQL
 - ✅ **Dashboard Completo** - gráficos e métricas em tempo real
-- ✅ **Autenticação Google** - login seguro
+- ✅ **Autenticação Google** - login seguro via Supabase Auth
 - ✅ **Código Open Source** - MIT License
 
 ---
@@ -76,18 +57,15 @@ pip install -r requirements.txt
 run_dev.bat           # Windows
 ```
 
-**Pronto!** Acesse **http://localhost:5000**
+**Pronto!** Acesse **http://localhost:5173** (frontend) e configure o backend no Supabase.
 
 ### 📋 Requisitos
-- Python 3.8+
-- Webcam (integrada ou USB)
-- 8GB RAM mínimo
-- HTTPS (produção) ou localhost (desenvolvimento)
 
-**📖 Guias:**  
-🎯 **[COMO_EXECUTAR.md](./COMO_EXECUTAR.md)** ← **COMECE AQUI** (Guia mais simples)  
-📦 [INSTALACAO.md](./INSTALACAO.md) (Detalhado)  
-🚀 [QUICKSTART.md](./QUICKSTART.md) (Completo)
+- **Python 3.8+** - Para servidor de inferência
+- **Node.js 18+** - Para frontend React
+- **Webcam** (integrada ou USB)
+- **8GB RAM** mínimo (16GB recomendado)
+- **HTTPS** (produção) ou localhost (desenvolvimento)
 
 ### ✅ Onde Funciona
 
@@ -104,24 +82,17 @@ run_dev.bat           # Windows
 - 🚀 Para testes reais, execute localmente com `./run_dev.sh`
 
 **📹 Como funciona a câmera:**
-1. Você faz login no sistema
+1. Faça login no sistema (Google OAuth)
 2. Navegador solicita permissão de câmera automaticamente
-3. Você clica em "Permitir" no popup
-4. Você clica em "Iniciar Sistema" no feed da câmera
+3. Clique em "Permitir" no popup do navegador
+4. Clique em "Iniciar Sistema" no feed da câmera
 5. Pronto! Sistema começa a detectar automaticamente
 
----
-
-## 📚 Documentação
-
-| Documento | Descrição |
-|-----------|-----------|
-| **[🚀 QUICKSTART.md](./QUICKSTART.md)** | Guia de início rápido (10 minutos) |
-| **[📹 WEBCAM_INFERENCE_SETUP.md](./WEBCAM_INFERENCE_SETUP.md)** | Guia completo de configuração de webcam e inferência |
-| **[📁 PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)** | Estrutura do projeto e organização de arquivos |
-| **[🤖 models/README.md](./models/README.md)** | Como treinar modelos YOLO customizados |
-| **[🔌 API.md](./API.md)** | Documentação completa da API |
-| **[📊 diagrams/INDEX.md](./diagrams/INDEX.md)** | Diagramas UML (arquitetura, classes, sequência, etc) |
+**🔧 Problemas com permissão de câmera?**
+- Chrome: `chrome://settings/content/camera`
+- Firefox: Ícone de cadeado → Permissões → Câmera
+- Edge: Ícone de cadeado → Permissões do site
+- Safari: Preferências → Sites → Câmera
 
 ---
 
@@ -131,10 +102,10 @@ run_dev.bat           # Windows
 
 #### 1. Monitor
 - Visualização da webcam em tempo real
-- Bounding boxes nas detecções
+- Bounding boxes coloridos nas detecções
 - Animação da esteira rolante
-- Estado das 3 cancelas
-- Detecções recentes listadas
+- Estado das 3 cancelas (aberta/fechada)
+- Lista de detecções recentes com confiança
 
 #### 2. Configuração de Cancelas
 - Configure qual material cada cancela irá separar
@@ -166,7 +137,7 @@ run_dev.bat           # Windows
 |----------|-----|----------|
 | 📄 **Papel** | Azul (#163b6f) | Livros, jornais, papelão |
 | 🥫 **Metal** | Verde (#196626) | Latas, talheres, alumínio |
-| 🍾 **Plástico** | Vermelho (#dc1f2e) | Garrafas PET, copos, sacolas |
+| 🍾 **Plástico** | Vermelho vibrante (#dc1f2e) | Garrafas PET, copos, sacolas |
 | 🍷 **Vidro** | Amarelo (#d2b91f) | Garrafas, copos, frascos |
 
 #### Modelos Disponíveis
@@ -186,6 +157,7 @@ React + TypeScript + Tailwind CSS
 ├── Camera Feed: getUserMedia API (webcam)
 ├── UI Components: Shadcn/UI
 ├── Charts: Recharts
+├── Icons: Lucide React
 └── Auth: Supabase Auth (Google OAuth)
 ```
 
@@ -193,8 +165,9 @@ React + TypeScript + Tailwind CSS
 ```
 Supabase Edge Functions (Deno + Hono)
 ├── PostgreSQL: Banco de dados
-├── Row Level Security: Segurança
-└── Real-time: Atualização em tempo real
+├── Row Level Security: Segurança por usuário
+├── Real-time: Atualização em tempo real
+└── KV Store: Cache e configurações
 ```
 
 #### IA/ML
@@ -202,6 +175,7 @@ Supabase Edge Functions (Deno + Hono)
 Python + FastAPI + Ultralytics YOLO
 ├── OpenCV: Processamento de imagem
 ├── PyTorch: Backend de ML
+├── Base64: Transmissão de imagens
 └── CUDA: Aceleração GPU (opcional)
 ```
 
@@ -223,14 +197,16 @@ Python + FastAPI + Ultralytics YOLO
                                             │              │
                                             └──────────────┘
 
-1. Webcam captura frame (2s)
+1. Webcam captura frame a cada 2s
 2. Frontend converte para base64
-3. Backend autentica usuário
+3. Backend autentica usuário (OAuth/Demo)
 4. Python processa com YOLO
 5. Backend salva no PostgreSQL
 6. Frontend renderiza bounding boxes
 7. Dashboard atualiza estatísticas
 ```
+
+**📊 Diagramas completos:** [diagrams/INDEX.md](./diagrams/INDEX.md)
 
 ---
 
@@ -275,34 +251,65 @@ system_config
 
 ---
 
-## 🛠️ Instalação e Desenvolvimento
+## 📁 Estrutura do Projeto
 
-### Pré-requisitos
-
-- **Python 3.8+** - [Download](https://www.python.org/downloads/)
-- **Node.js 18+** - [Download](https://nodejs.org/)
-- **Webcam** - Integrada ou USB
-- **8GB RAM** mínimo (16GB recomendado)
-- **GPU NVIDIA** (opcional, mas acelera 10x)
-
-### Instalação Completa
-
-Consulte os guias detalhados:
-
-1. **[QUICKSTART.md](./QUICKSTART.md)** - Para começar rápido (10 min)
-2. **[WEBCAM_INFERENCE_SETUP.md](./WEBCAM_INFERENCE_SETUP.md)** - Guia completo
-
-### Scripts Auxiliares
-
-```bash
-# Linux/Mac - Inicia tudo automaticamente
-./run_dev.sh
-
-# Windows - Inicia tudo automaticamente
-run_dev.bat
-
-# Testa instalação
-python test_setup.py
+```
+ecovision/
+├── 📁 components/           # Componentes React
+│   ├── AccuracyControl.tsx  # Controle de confiança mínima
+│   ├── CameraFeed.tsx       # Feed de webcam com detecções
+│   ├── ConveyorSystem.tsx   # Animação da esteira
+│   ├── GateConfiguration.tsx# Configuração das cancelas
+│   ├── Login.tsx            # Tela de login
+│   ├── MonitorPanel.tsx     # Painel de monitoramento
+│   ├── Sidebar.tsx          # Menu lateral
+│   ├── StatisticsPanel.tsx  # Dashboard de estatísticas
+│   ├── UserProfile.tsx      # Perfil do usuário
+│   └── 📁 ui/               # Componentes Shadcn/UI
+│
+├── 📁 supabase/
+│   └── 📁 functions/server/ # Edge Functions
+│       ├── index.tsx        # API principal (Hono)
+│       ├── kv_store.tsx     # Utilitário KV Store
+│       ├── Camera.tsx       # Classe Camera
+│       ├── Usuario.tsx      # Classe Usuario
+│       ├── OutputData.tsx   # Classe OutputData
+│       ├── Atuador.tsx      # Interface IAtuador + ControladorSerial
+│       ├── Esteira.tsx      # Classe Esteira
+│       ├── Cancela.tsx      # Classe Cancela
+│       ├── RegistroProcessamento.tsx
+│       ├── BancoDeDados.tsx # Classe BancoDeDados
+│       ├── ModeloIA.tsx     # Classe ModeloIA
+│       ├── Dashboard.tsx    # Classe Dashboard
+│       └── Autenticacao.tsx # Classe Autenticacao
+│
+├── 📁 diagrams/             # Diagramas UML (PlantUML)
+│   ├── INDEX.md             # Índice dos diagramas
+│   ├── architecture-diagram.puml
+│   ├── class-diagram.puml
+│   ├── component-diagram.puml
+│   ├── data-flow-diagram.puml
+│   ├── database-diagram.puml
+│   └── sequence-diagram.puml
+│
+├── 📁 models/               # Modelos YOLO (.pt)
+│   └── README.md
+│
+├── 📁 styles/               # Estilos globais
+│   └── globals.css          # Paleta de cores e tokens
+│
+├── 📁 utils/                # Utilitários
+│   └── supabase/
+│       ├── client.tsx       # Cliente Supabase
+│       └── info.tsx         # Config do projeto
+│
+├── App.tsx                  # Componente principal
+├── inference_server.py      # Servidor Python de inferência YOLO
+├── requirements.txt         # Dependências Python
+├── run_dev.sh              # Script de execução (Linux/Mac)
+├── run_dev.bat             # Script de execução (Windows)
+├── test_setup.py           # Script de teste de instalação
+└── README.md               # Este arquivo
 ```
 
 ---
@@ -315,7 +322,7 @@ python test_setup.py
 # Health check
 curl http://localhost:8000/health
 
-# Listar modelos
+# Listar modelos disponíveis
 curl http://localhost:8000/models
 
 # Teste de inferência com imagem
@@ -327,7 +334,7 @@ curl -X POST http://localhost:8000/inference/file \
 ### Testar Frontend
 
 1. Acesse http://localhost:5173
-2. Faça login com Google
+2. Faça login com Google ou use modo demo
 3. Vá para "Monitor"
 4. Permita acesso à webcam
 5. Clique em "Iniciar Sistema"
@@ -398,10 +405,9 @@ services:
 
 Já está deployado! Configure apenas:
 ```bash
-supabase secrets set INFERENCE_SERVER_URL=https://seu-servidor.com
+# No Supabase Dashboard → Project Settings → Edge Functions → Secrets
+INFERENCE_SERVER_URL=https://seu-servidor.com
 ```
-
-**📖 Guia completo de deploy:** [WEBCAM_INFERENCE_SETUP.md#-deploy-em-produção](./WEBCAM_INFERENCE_SETUP.md#-deploy-em-produção)
 
 ---
 
@@ -440,12 +446,6 @@ in the Software without restriction...
 
 ---
 
-## 👥 Autores
-
-- **Desenvolvedor Principal** - Sistema completo de reciclagem inteligente
-
----
-
 ## 🙏 Agradecimentos
 
 - **Ultralytics** - Framework YOLO v8
@@ -457,12 +457,19 @@ in the Software without restriction...
 
 ## 📞 Suporte
 
-**Problemas?** Consulte:
-1. [QUICKSTART.md](./QUICKSTART.md) - Início rápido
-2. [WEBCAM_INFERENCE_SETUP.md](./WEBCAM_INFERENCE_SETUP.md) - Troubleshooting completo
-3. [Issues](https://github.com/seu-usuario/ecovision/issues) - Reporte bugs
+**Problemas com o sistema?**
 
-**Perguntas?** Abra uma [Discussion](https://github.com/seu-usuario/ecovision/discussions)
+1. Verifique se o servidor Python está rodando: `curl http://localhost:8000/health`
+2. Verifique se a câmera tem permissões no navegador
+3. Verifique os logs do console do navegador (F12)
+4. Consulte os [diagramas](./diagrams/INDEX.md) para entender a arquitetura
+
+**Problemas com a câmera?**
+- Navegador bloqueou? Veja configurações em `chrome://settings/content/camera`
+- HTTPS obrigatório? Execute localmente ou use ngrok
+- Dispositivo não encontrado? Verifique se a webcam está conectada
+
+**Perguntas?** Abra uma [Issue](https://github.com/seu-usuario/ecovision/issues)
 
 ---
 
