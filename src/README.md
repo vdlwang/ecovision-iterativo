@@ -39,11 +39,27 @@ Sistema completo para centros de reciclagem que:
 
 ## 🚀 Início Rápido
 
-### Pré-requisitos
-- Node.js 18+ 
-- Python 3.8+ (opcional, para inferência avançada)
-- Webcam conectada
-- Navegador moderno (Chrome/Edge recomendado)
+### ⚠️ IMPORTANTE: Você PRECISA de um modelo YOLO!
+
+O sistema **não funcionará** sem um modelo. Escolha uma opção:
+
+**OPÇÃO A: Você JÁ TEM modelos .pt treinados** ⭐ (Recomendado)
+```bash
+# Use o script automatizado
+./setup_models.sh   # Linux/Mac
+setup_models.bat    # Windows
+
+# Siga as instruções na tela para converter seus modelos
+```
+
+**OPÇÃO B: Baixar modelo de TESTE** (apenas para experimentar)
+```bash
+./setup_models.sh   # Linux/Mac - escolha opção 2
+setup_models.bat    # Windows - escolha opção 2
+
+# ⚠️ Modelo de teste tem 80 classes COCO, não as 4 específicas
+# Use apenas para ver o sistema funcionando!
+```
 
 ### Instalação
 
@@ -52,8 +68,8 @@ Sistema completo para centros de reciclagem que:
 git clone <seu-repo>
 cd ecovision
 
-# 2. Instale dependências Python (opcional)
-pip install -r requirements.txt
+# 2. Configure os modelos (veja acima ⬆️)
+./setup_models.sh
 
 # 3. Execute o sistema
 ./run_dev.sh        # Linux/Mac
@@ -61,6 +77,16 @@ pip install -r requirements.txt
 run_dev.bat         # Windows
 
 # 4. Acesse http://localhost:5000
+```
+
+**Verificação Rápida:**
+```bash
+# Deve ter este arquivo:
+ls models/yolov8n.onnx  # ~12MB
+
+# Console do navegador (F12) deve mostrar:
+# [ONNX] ✅ Modelo carregado com sucesso
+# [INFERÊNCIA ONNX] X detecção(ões)...
 ```
 
 ### Primeiro Uso
@@ -159,20 +185,41 @@ O sistema suporta 3 modos (em ordem de prioridade):
 
 ### 1. Modelos YOLO
 
-**Opção A: ONNX (Recomendado)**
-```bash
-# Baixe modelo treinado YOLOv8
-# Coloque em /models/yolov8n.onnx
+**⚠️ IMPORTANTE:** O sistema precisa de um modelo para funcionar!
 
-# OU converta seu próprio modelo:
-python convert_to_onnx.py --weights best.pt --output models/
+**Se você JÁ TEM modelos .pt treinados:**
+```bash
+# 1. Copie para /models/
+cp /caminho/do/modelo/yolov8n.pt models/
+
+# 2. Converta para ONNX
+python convert_to_onnx.py models/yolov8n.pt
+
+# 3. Move para /models/
+mv yolov8n.onnx models/
+
+# Pronto! O sistema detectará automaticamente
 ```
 
-**Opção B: Servidor Python**
+**Se NÃO TEM modelos treinados:**
 ```bash
-# Coloque modelo .pt em /models/
-# Execute servidor:
-python inference_server.py
+# Baixe modelo pré-treinado COCO (apenas para teste)
+cd models
+wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
+
+# Converta (mesmo tendo só 80 classes COCO, funcionará parcialmente)
+cd ..
+python convert_to_onnx.py models/yolov8n.pt
+mv yolov8n.onnx models/
+
+# ⚠️ Você DEVE treinar um modelo próprio com 4 classes específicas
+# (papel, metal, plastico, vidro) para produção!
+```
+
+**Verificação:**
+```bash
+ls -lh models/
+# Deve mostrar: yolov8n.onnx (~12MB)
 ```
 
 ### 2. Google OAuth (Opcional)
@@ -197,6 +244,30 @@ No painel "Configuração":
 ---
 
 ## 🐛 Troubleshooting
+
+### Problema: Nenhuma detecção aparece / Detecções mockadas
+
+**Causa:** Modelo ONNX não foi carregado corretamente.
+
+**Solução:**
+1. Abra console do navegador (F12)
+2. Procure por estas mensagens:
+   ```
+   [ONNX] ❌ Erro ao carregar modelo
+   [INFERÊNCIA MOCK] Detecção simulada
+   ```
+3. Se aparecem, o modelo não foi encontrado
+4. Siga os passos em **Configuração → 1. Modelos YOLO**
+5. Verifique se arquivo existe: `ls models/yolov8n.onnx`
+6. Faça refresh da página (Ctrl+F5)
+
+**Console deve mostrar:**
+```
+[ONNX] Carregando modelo: /models/yolov8n.onnx...
+[ONNX] ✅ Modelo carregado com sucesso
+[INFERÊNCIA ONNX] Processando frame localmente...
+[INFERÊNCIA ONNX] 2 detecção(ões): plastico (92%), papel (88%)
+```
 
 ### Problema: Câmera não inicia
 
