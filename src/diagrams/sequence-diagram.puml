@@ -1,395 +1,266 @@
-@startuml EcoVision - Diagramas de Sequência
+@startuml EcoVision - Diagrama de Sequência
 !theme plain
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 12
-skinparam sequenceMessageAlign center
 
-title EcoVision - Fluxos de Sequência Principais
+title EcoVision - Fluxo de Operação Completo
 
-' ==================== ATORES ====================
 actor "Usuário" as User
-participant "App" as App
 participant "Login" as Login
-participant "SupabaseClient" as Supabase
+participant "App.tsx" as App
 participant "Sidebar" as Sidebar
 participant "MonitorPanel" as Monitor
 participant "CameraFeed" as Camera
-participant "ConveyorSystem" as Conveyor
 participant "GateConfiguration" as GateConfig
 participant "AccuracyControl" as AccuracyCtrl
-participant "StatisticsPanel" as Stats
-participant "HonoServer" as Server
-participant "ModeloIA" as ModelIA
-participant "ControladorSerial" as Serial
-participant "Esteira" as Esteira
-participant "Cancela" as Cancela
-participant "BancoDeDados" as DB
-participant "Dashboard" as Dashboard
+participant "StatisticsPanel" as StatsPanel
+participant "UserProfile" as Profile
+participant "ONNX Runtime" as ONNX
+participant "Supabase Auth" as Auth
+participant "Server API" as Server
+participant "KV Store" as KV
 
-== 1. FLUXO DE AUTENTICAÇÃO ==
+' ==================== FLUXO 1: LOGIN ====================
 
-User -> App : Acessa aplicação
-activate App
-
-App -> App : useEffect()
-App -> Supabase : getSession()
-activate Supabase
-Supabase --> App : { user: null }
-deactivate Supabase
-
-App -> Login : renderiza
-activate Login
-Login --> User : Exibe tela de login
-
-User -> Login : Clica "Entrar com Google"
-Login -> Supabase : signInWithOAuth({ provider: 'google' })
-activate Supabase
-
-Supabase -> Supabase : Redireciona para Google OAuth
-Supabase --> User : Página de autorização Google
-
-User -> Supabase : Autoriza aplicação
-Supabase -> Supabase : Valida token Google
-Supabase --> Login : { user, session }
-deactivate Supabase
-
-Login -> App : setUser(user)
-App --> User : Redireciona para Dashboard
-deactivate Login
-deactivate App
-
-|||
-
-== 2. FLUXO DE CONFIGURAÇÃO DO SISTEMA ==
-
-User -> App : Navega para aba "Cancelas"
-activate App
-
-App -> Sidebar : onTabChange("cancelas")
-activate Sidebar
-Sidebar --> App : activeTab = "cancelas"
-deactivate Sidebar
-
-App -> GateConfig : renderiza
-activate GateConfig
-GateConfig --> User : Exibe configuração de cancelas
-
-User -> GateConfig : Seleciona "Cancela 1 = Papel"
-GateConfig -> GateConfig : setGateConfigs({ 1: "papel", ... })
-User -> GateConfig : Clica "Salvar Configuração"
-
-GateConfig -> App : onConfigChange(newConfigs)
-App -> Server : POST /config\n{ gateConfigs, minAccuracy, modelVersion }
-activate Server
-
-Server -> Server : await kv.set("system_config", ...)
-Server --> App : { success: true }
-deactivate Server
-
-App --> GateConfig : Configuração salva
-GateConfig --> User : Exibe toast "Configuração salva!"
-deactivate GateConfig
-
-|||
-
-User -> App : Navega para aba "Modelo"
-App -> AccuracyCtrl : renderiza
-activate AccuracyCtrl
-AccuracyCtrl --> User : Exibe controle de confiança
-
-User -> AccuracyCtrl : Ajusta slider para 90%
-AccuracyCtrl -> AccuracyCtrl : setTempAccuracy(90)
-User -> AccuracyCtrl : Clica "Aplicar"
-
-AccuracyCtrl -> App : onAccuracyChange(90)
-App -> Server : POST /config\n{ minAccuracy: 90, ... }
-activate Server
-Server -> Server : await kv.set("system_config", ...)
-Server --> App : { success: true }
-deactivate Server
-
-App -> Server : POST /modelo/calibrar\n{ limite: 90 }
-activate Server
-Server -> ModelIA : calibrarLimite(90)
-activate ModelIA
-ModelIA -> ModelIA : limiteMinAccuracy = 90
-ModelIA --> Server : Limite calibrado
-deactivate ModelIA
-Server --> App : { success: true }
-deactivate Server
-
-App --> AccuracyCtrl : Confiança atualizada
-AccuracyCtrl --> User : Exibe toast "Confiança definida para 90%"
-deactivate AccuracyCtrl
-deactivate App
-
-|||
-
-== 3. FLUXO DE MONITORAMENTO E DETECÇÃO ==
-
-User -> App : Navega para aba "Monitor"
-activate App
-
-App -> Monitor : renderiza
-activate Monitor
-Monitor -> Conveyor : renderiza (isRunning = false)
-activate Conveyor
-Monitor -> Camera : renderiza (isActive = false)
-activate Camera
-
-Conveyor --> User : Exibe esteira parada
-Camera --> User : Exibe câmera desligada
-
-User -> Monitor : Clica "Start" na Esteira
-Monitor -> App : onToggleSystem()
-App -> Server : POST /esteira/ligar
-activate Server
-Server -> Esteira : ligar()
-activate Esteira
-Esteira -> Serial : ligarEsteira()
-activate Serial
-Serial -> Serial : enviarComando("LIGAR_ESTEIRA")
-Serial --> Esteira : Comando enviado
-deactivate Serial
-Esteira -> Esteira : status = "ligada"
-Esteira --> Server : { success: true }
-deactivate Esteira
-Server --> App : { success: true }
-deactivate Server
-
-App -> Server : POST /modelo/ativar
-activate Server
-Server -> ModelIA : ativar()
-activate ModelIA
-ModelIA -> ModelIA : ativo = true
-ModelIA --> Server : Modelo ativado
-deactivate ModelIA
-Server --> App : { success: true }
-deactivate Server
-
-App -> Monitor : setIsRunning(true)
-Monitor -> Conveyor : isRunning = true
-Conveyor -> Conveyor : Inicia animação CSS
-Conveyor --> User : Exibe esteira em movimento
-deactivate Conveyor
-
-|||
-
-User -> Camera : Clica "Start" na Câmera
-Camera -> Camera : startCamera()
-Camera -> Camera : navigator.mediaDevices.getUserMedia()
-Camera --> User : Exibe feed da webcam
-
-Camera -> Camera : Inicia loop de detecção (setInterval)
-
-loop A cada 3 segundos
-  Camera -> Camera : detectObjects()
-  Camera -> Camera : Captura frame da webcam
+group 1. Login e Autenticação
+  User -> Login : Acessa aplicação
+  activate Login
   
-  Camera -> Server : POST /modelo/processar\n{ frame, gateConfigs }
+  alt Google OAuth
+    User -> Login : Clica "Login com Google"
+    Login -> Auth : signInWithOAuth({provider: 'google'})
+    activate Auth
+    Auth --> Login : session + access_token
+    deactivate Auth
+    Login -> App : setUser(user), setUserToken(token)
+  else Modo Demo
+    User -> Login : Clica "Modo Demo"
+    Login -> App : handleDemoMode()
+    activate App
+    App -> App : setIsDemoMode(true)\nsetUser(demo)\nsetUserToken(DEMO_TOKEN)
+    deactivate App
+  end
+  
+  deactivate Login
+end
+
+' ==================== FLUXO 2: CONFIGURAÇÃO ====================
+
+group 2. Configuração Inicial
+
+  User -> Sidebar : Seleciona aba "Cancelas"
+  activate Sidebar
+  Sidebar -> App : onTabChange("cancelas")
+  deactivate Sidebar
+  activate App
+  App -> GateConfig : Renderiza componente
+  deactivate App
+  activate GateConfig
+  
+  User -> GateConfig : Define materiais:\nCancela 1 = papel\nCancela 2 = plástico\nCancela 3 = metal
+  GateConfig -> App : onConfigChange({ 1: "papel", 2: "plastico", 3: "metal" })
+  activate App
+  App -> App : setGateConfigs(configs)
+  App -> Server : POST /config\n{ gateConfigs, minAccuracy, modelVersion }
+  activate Server
+  Server -> KV : set("config_user123", {...})
+  activate KV
+  KV --> Server : success
+  deactivate KV
+  Server --> App : { success: true, config: {...} }
+  deactivate Server
+  deactivate App
+  deactivate GateConfig
+  
+  User -> Sidebar : Seleciona aba "Modelo"
+  activate Sidebar
+  Sidebar -> App : onTabChange("modelo")
+  deactivate Sidebar
+  activate App
+  App -> AccuracyCtrl : Renderiza componente
+  deactivate App
+  activate AccuracyCtrl
+  
+  User -> AccuracyCtrl : Ajusta confiança = 90%\nSeleciona YOLOv8n
+  AccuracyCtrl -> App : onAccuracyChange(90)\nonModelVersionChange("YOLOv8n")
+  activate App
+  App -> App : setMinAccuracy(90)\nsetModelVersion("YOLOv8n")
+  App -> Server : POST /config\n{ gateConfigs, minAccuracy: 90, modelVersion: "YOLOv8n" }
+  activate Server
+  Server -> KV : set("config_user123", {...})
+  activate KV
+  KV --> Server : success
+  deactivate KV
+  Server --> App : { success: true }
+  deactivate Server
+  deactivate App
+  deactivate AccuracyCtrl
+  
+end
+
+' ==================== FLUXO 3: MONITORAMENTO ====================
+
+group 3. Monitoramento em Tempo Real
+
+  User -> Sidebar : Seleciona aba "Monitor"
+  activate Sidebar
+  Sidebar -> App : onTabChange("monitor")
+  deactivate Sidebar
+  activate App
+  App -> Monitor : Renderiza componente
+  deactivate App
+  activate Monitor
+  Monitor -> Camera : Renderiza CameraFeed (inline)
+  activate Camera
+  
+  User -> Camera : Clica "Iniciar Sistema"
+  Camera -> App : onToggleSystem()
+  activate App
+  App -> App : setIsSystemRunning(true)
+  App --> Camera : isRunning = true
+  deactivate App
+  
+  Camera -> Camera : Solicita permissão da câmera
+  Camera -> Camera : navigator.mediaDevices.getUserMedia()
+  Camera --> Camera : stream de vídeo
+  
+  alt Inferência ONNX (Preferido)
+    Camera -> ONNX : loadModel("/models/yolov8n.onnx")
+    activate ONNX
+    ONNX --> Camera : session pronta
+    
+    loop A cada frame (30-60 FPS)
+      Camera -> Camera : Captura frame do vídeo
+      Camera -> ONNX : runInference(session, imageData)
+      ONNX -> ONNX : Pré-processamento (640x640, normalize)
+      ONNX -> ONNX : Executa modelo
+      ONNX -> ONNX : Pós-processamento (NMS, threshold)
+      ONNX --> Camera : detections[]
+      
+      alt Detecção encontrada com confiança >= 90%
+        Camera -> Camera : Desenha bounding box
+        Camera -> Monitor : onDetection({ material, confidence, bbox })
+        activate Monitor
+        Monitor -> Monitor : Identifica cancela correta\n(baseado em gateConfigs)
+        Monitor -> Monitor : Ativa cancela visual
+        Monitor --> Camera : ok
+        deactivate Monitor
+      end
+    end
+    deactivate ONNX
+    
+  else Fallback: Servidor Python
+    Camera -> Server : POST /inference\n{ imageBase64 }
+    activate Server
+    Server -> Server : Chama Python inference_server.py
+    Server --> Camera : { detections: [...] }
+    deactivate Server
+    Camera -> Monitor : onDetection({ material, confidence, bbox })
+    activate Monitor
+    Monitor -> Monitor : Ativa cancela
+    deactivate Monitor
+  end
+  
+  deactivate Camera
+  deactivate Monitor
+end
+
+' ==================== FLUXO 4: DASHBOARD ====================
+
+group 4. Visualização de Estatísticas
+
+  User -> Sidebar : Seleciona aba "Dashboard"
+  activate Sidebar
+  Sidebar -> App : onTabChange("dashboard")
+  deactivate Sidebar
+  activate App
+  App -> StatsPanel : Renderiza componente
+  deactivate App
+  activate StatsPanel
+  
+  StatsPanel -> Server : GET /stats?userId=user123
   activate Server
   
-  Server -> ModelIA : preverFrame(frame)
-  activate ModelIA
-  ModelIA -> ModelIA : Executa inferência YOLO
-  ModelIA -> ModelIA : new OutputData(classe, confianca)
-  ModelIA --> Server : OutputData { classe: "plastico", confianca: 92 }
-  deactivate ModelIA
+  alt Modo Demo
+    Server --> StatsPanel : Mock data (estatísticas demo)
+  else Modo OAuth
+    Server -> KV : getByPrefix("detection_user123_")
+    activate KV
+    KV --> Server : detections[]
+    deactivate KV
+    Server -> Server : Agrega estatísticas por material
+    Server --> StatsPanel : { totalDetections, byMaterial, timeline }
+  end
   
-  Server -> ModelIA : decidirAcionamento(pred, gateConfigs, 1)
-  activate ModelIA
-  ModelIA -> ModelIA : if (confianca >= limiteMinAccuracy)
-  ModelIA -> ModelIA : if (gateConfigs[1] == pred.classe)
-  ModelIA --> Server : false (Cancela 1 = papel)
-  deactivate ModelIA
-  
-  Server -> ModelIA : decidirAcionamento(pred, gateConfigs, 2)
-  activate ModelIA
-  ModelIA -> ModelIA : if (gateConfigs[2] == pred.classe)
-  ModelIA --> Server : true (Cancela 2 = plastico) ✓
-  deactivate ModelIA
-  
-  Server -> ModelIA : executarAcionamento(2)
-  activate ModelIA
-  
-  ModelIA -> Serial : abrirCancela(2)
-  activate Serial
-  Serial -> Serial : enviarComando("ABRIR_CANCELA_2")
-  Serial --> ModelIA : Comando enviado
-  deactivate Serial
-  
-  ModelIA -> Cancela : abrir()
-  activate Cancela
-  Cancela -> Cancela : status = "aberta"
-  Cancela --> ModelIA : Cancela aberta
-  deactivate Cancela
-  
-  ModelIA -> ModelIA : await delay(2000ms)
-  
-  ModelIA -> Serial : fecharCancela(2)
-  activate Serial
-  Serial -> Serial : enviarComando("FECHAR_CANCELA_2")
-  Serial --> ModelIA : Comando enviado
-  deactivate Serial
-  
-  ModelIA -> Cancela : fechar()
-  activate Cancela
-  Cancela -> Cancela : status = "fechada"
-  Cancela --> ModelIA : Cancela fechada
-  deactivate Cancela
-  
-  ModelIA --> Server : Acionamento concluído
-  deactivate ModelIA
-  
-  Server -> DB : registrarProcessamento("plastico", 92, 2)
-  activate DB
-  DB -> DB : new RegistroProcessamento(...)
-  DB -> DB : await kvStore.set(`processamento_${id}`, ...)
-  DB --> Server : Processamento registrado
-  deactivate DB
-  
-  Server --> Camera : { success: true, predicao, acionamentos: [2] }
   deactivate Server
   
-  Camera -> Camera : drawBoxes() - Desenha bounding box
-  Camera --> User : Exibe detecção no canvas
-end
-
-|||
-
-User -> Camera : Clica "Stop" na Câmera
-Camera -> Camera : stopCamera()
-Camera -> Camera : Limpa interval de detecção
-Camera -> Camera : Para stream da webcam
-Camera --> User : Câmera desligada
-
-deactivate Camera
-
-|||
-
-User -> Monitor : Clica "Stop" na Esteira
-Monitor -> App : onToggleSystem()
-App -> Server : POST /esteira/desligar
-activate Server
-Server -> Esteira : desligar()
-activate Esteira
-Esteira -> Serial : desligarEsteira()
-activate Serial
-Serial -> Serial : enviarComando("DESLIGAR_ESTEIRA")
-Serial --> Esteira : Comando enviado
-deactivate Serial
-Esteira -> Esteira : status = "desligada"
-Esteira --> Server : { success: true }
-deactivate Esteira
-Server --> App : { success: true }
-deactivate Server
-
-App -> Server : POST /modelo/desativar
-activate Server
-Server -> ModelIA : desativar()
-activate ModelIA
-ModelIA -> ModelIA : ativo = false
-ModelIA --> Server : Modelo desativado
-deactivate ModelIA
-Server --> App : { success: true }
-deactivate Server
-
-App -> Monitor : setIsRunning(false)
-Monitor --> User : Sistema parado
-deactivate Monitor
-deactivate App
-
-|||
-
-== 4. FLUXO DE VISUALIZAÇÃO DE ESTATÍSTICAS ==
-
-User -> App : Navega para aba "Dashboard"
-activate App
-
-App -> Stats : renderiza
-activate Stats
-
-Stats -> Stats : useEffect() - loadStats()
-Stats -> Server : GET /dashboard/stats?userId=${userId}
-activate Server
-
-Server -> Server : await kv.getByPrefix("detection_")
-Server -> Server : Processa estatísticas
-
-Server --> Stats : { success: true, stats }
-deactivate Server
-
-Stats -> Stats : setStats(data.stats)
-Stats -> Stats : setLastUpdate(new Date())
-Stats --> User : Exibe gráficos e métricas
-
-|||
-
-User -> Stats : Clica "Atualizar"
-Stats -> Stats : loadStats()
-Stats -> Server : GET /dashboard/stats
-activate Server
-
-Server -> DB : consultarItensProcessados(hoje)
-activate DB
-DB -> DB : await kvStore.getByPrefix("processamento_")
-DB -> DB : Filtra por data
-DB --> Server : totalProcessados: 127
-deactivate DB
-
-Server -> DB : consultarMateriais(hoje)
-activate DB
-DB -> DB : Agrupa por material
-DB --> Server : { papel: 35, metal: 28, plastico: 42, vidro: 22 }
-deactivate DB
-
-Server -> DB : consultarPerformanceCancelas(hoje)
-activate DB
-DB -> DB : Agrupa por cancela
-DB --> Server : { cancela_1: 35, cancela_2: 42, cancela_3: 28 }
-deactivate DB
-
-Server -> DB : consultarPrecisaoMedia(hoje)
-activate DB
-DB -> DB : Calcula média de precisão
-DB --> Server : precisaoMedia: 88.5
-deactivate DB
-
-Server --> Stats : { success: true, stats }
-deactivate Server
-
-Stats -> Stats : Atualiza gráficos
-Stats --> User : Exibe dados atualizados
-deactivate Stats
-deactivate App
-
-|||
-
-== 5. FLUXO DE LOGOUT ==
-
-User -> Sidebar : Clica em "Sair"
-activate Sidebar
-
-Sidebar -> App : onLogout()
-activate App
-
-alt Modo Demo
-  App -> App : setUser(null)
-  App -> App : setIsDemoMode(false)
-else Modo Real
-  App -> Supabase : auth.signOut()
-  activate Supabase
-  Supabase -> Supabase : Invalida sessão
-  Supabase --> App : { success: true }
-  deactivate Supabase
+  StatsPanel -> StatsPanel : Renderiza gráficos (Recharts)
+  StatsPanel --> User : Exibe dashboard
+  deactivate StatsPanel
   
-  App -> App : setUser(null)
 end
 
-App -> Login : renderiza
-deactivate Sidebar
-deactivate App
+' ==================== FLUXO 5: PERFIL ====================
 
-Login --> User : Exibe tela de login
+group 5. Perfil do Usuário
+
+  User -> Sidebar : Seleciona aba "Perfil"
+  activate Sidebar
+  Sidebar -> App : onTabChange("perfil")
+  deactivate Sidebar
+  activate App
+  App -> Profile : Renderiza componente
+  deactivate App
+  activate Profile
+  
+  Profile -> Server : GET /user/stats?userId=user123
+  activate Server
+  
+  alt Modo Demo
+    Server --> Profile : { totalSessions: 0, totalDetections: 0 }
+  else Modo OAuth
+    Server -> KV : getByPrefix("session_user123_")
+    activate KV
+    KV --> Server : sessions[]
+    deactivate KV
+    Server -> KV : getByPrefix("detection_user123_")
+    activate KV
+    KV --> Server : detections[]
+    deactivate KV
+    Server -> Server : Calcula estatísticas
+    Server --> Profile : { totalSessions, totalDetections, lastSession, ... }
+  end
+  
+  deactivate Server
+  
+  Profile --> User : Exibe perfil e estatísticas
+  deactivate Profile
+  
+end
+
+' ==================== FLUXO 6: LOGOUT ====================
+
+group 6. Logout
+
+  User -> Sidebar : Clica "Logout"
+  activate Sidebar
+  Sidebar -> App : onLogout()
+  deactivate Sidebar
+  activate App
+  
+  alt Modo Demo
+    App -> App : setUser(null)\nsetIsDemoMode(false)
+  else OAuth
+    App -> Auth : signOut()
+    activate Auth
+    Auth --> App : success
+    deactivate Auth
+    App -> App : setUser(null)
+  end
+  
+  App -> Login : Renderiza tela de login
+  deactivate App
+  
+end
 
 @enduml

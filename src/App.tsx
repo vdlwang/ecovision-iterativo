@@ -110,43 +110,12 @@ export default function App() {
   const handleToggleSystem = async () => {
     const newState = !isSystemRunning;
     setIsSystemRunning(newState);
-    
-    try {
-      const endpoint = newState ? 'esteira/ligar' : 'esteira/desligar';
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/${endpoint}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${userToken || publicAnonKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (!response.ok) {
-        console.error('Erro ao controlar esteira');
-      }
-      
-      // Ativa/desativa o modelo IA
-      const modelEndpoint = newState ? 'modelo/ativar' : 'modelo/desativar';
-      await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/${modelEndpoint}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${userToken || publicAnonKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-    } catch (error) {
-      console.error('Erro ao comunicar com backend:', error);
-    }
+    console.log(`[SISTEMA] ${newState ? 'Iniciando' : 'Parando'} sistema de monitoramento`);
   };
 
   const handleAccuracyChange = async (newAccuracy: number) => {
     setMinAccuracy(newAccuracy);
+    console.log(`[CONFIGURAÇÃO] Confiança mínima alterada para ${newAccuracy}%`);
     
     try {
       // Atualiza no backend
@@ -165,21 +134,8 @@ export default function App() {
           })
         }
       );
-      
-      // Calibra o modelo
-      await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/modelo/calibrar`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${userToken || publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ limite: newAccuracy })
-        }
-      );
     } catch (error) {
-      console.error('Erro ao atualizar confiança:', error);
+      console.error('[CONFIGURAÇÃO] Erro ao atualizar confiança:', error);
     }
   };
 

@@ -1,552 +1,364 @@
 # 🌿 EcoVision - Sistema Inteligente de Reciclagem com IA
 
-<div align="center">
+![Status](https://img.shields.io/badge/Status-Funcional-brightgreen?style=flat-square)
+![React](https://img.shields.io/badge/React-TypeScript-blue?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.8+-yellow?style=flat-square)
+![YOLO](https://img.shields.io/badge/YOLOv8-Ultralytics-purple?style=flat-square)
 
-![EcoVision](https://img.shields.io/badge/EcoVision-Sistema%20de%20Reciclagem-008148?style=for-the-badge&logo=recycle)
-![Python](https://img.shields.io/badge/Python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
-![YOLO](https://img.shields.io/badge/YOLOv8-00FFFF?style=for-the-badge&logo=yolo&logoColor=black)
-
-**Sistema de controle para esteira de reciclagem integrado com IA para detecção e separação automática de materiais recicláveis**
-
-[🚀 Início Rápido](#-quick-start) • [📚 Documentação](#-documentação) • [🏗️ Arquitetura](#️-arquitetura) • [🆘 Suporte](#-suporte)
-
-</div>
+**Sistema de controle para esteira de reciclagem com detecção automática de materiais usando visão computacional e IA**
 
 ---
 
-## 🎯 Status Atual: ✅ Sistema Operacional
+## 📋 O Que é o EcoVision?
 
-**Última atualização:** 09/Nov/2025  
-**Versão:** 5.0 - ONNX Híbrido
-
-- ✅ **Sistema totalmente funcional**
-- ✅ **Erro "Connection Refused" resolvido**
-- ✅ **ONNX no navegador implementado**
-- ✅ **Sistema híbrido com fallbacks automáticos**
-
-📄 **[Ver STATUS completo →](/STATUS.md)**
+Sistema completo para centros de reciclagem que:
+- 📹 Captura imagens da webcam em tempo real
+- 🤖 Detecta materiais (papel, metal, plástico, vidro) com IA YOLO
+- 🚪 Aciona cancelas automaticamente para separação
+- 📊 Monitora estatísticas e performance
+- 🔐 Autenticação com Google OAuth ou modo demo
 
 ---
 
-## 📋 Sobre o Projeto
+## 🎯 Como Funciona
 
-O **EcoVision** é um sistema completo de controle para centros de reciclagem que utiliza **visão computacional** e **inteligência artificial** para automatizar a separação de materiais recicláveis em tempo real.
-
-### 🎥 Como Funciona
-
-1. **Câmera** captura imagens da esteira em movimento
-2. **IA (YOLO)** detecta e classifica materiais (papel, metal, plástico, vidro)
-3. **Sistema** aciona cancelas automaticamente para separar cada material
-4. **Dashboard** monitora estatísticas e performance em tempo real
-
-### 🌟 Diferenciais
-
-- ✅ **Inferência no Navegador (ONNX)** - processamento local, sem servidor Python necessário
-- ✅ **Detecção em Tempo Real** com webcam/câmera
-- ✅ **3 Modelos YOLO** (nano, small, medium) para diferentes necessidades
-- ✅ **Dual-Mode**: Inferência local (ONNX) ou servidor Python
-- ✅ **Configurável** - defina qual cancela separa qual material
-- ✅ **Banco de Dados Real** - todas detecções persistidas no PostgreSQL
-- ✅ **Dashboard Completo** - gráficos e métricas em tempo real
-- ✅ **Autenticação Google** - login seguro via Supabase Auth
-- ✅ **Código Open Source** - MIT License
-
----
-
-## 🚀 Quick Start
-
-### 🆕 NOVO: Modo Inferência Local (Sem Servidor Python)
-
-**A maneira mais rápida de começar!**
-
-```bash
-# 1. Converter modelo YOLO para ONNX (apenas uma vez)
-pip install ultralytics
-python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', simplify=True)"
-
-# 2. Copiar modelo para pasta models/
-cp yolov8n.onnx models/
-
-# 3. Iniciar aplicação (sem servidor Python necessário!)
-npm run dev
+```
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│ Webcam   │───▶│ IA YOLO  │───▶│ Cancelas │───▶│Dashboard │
+│ Captura  │    │ Detecta  │    │ Separam  │    │Estatístic│
+└──────────┘    └──────────┘    └──────────┘    └──────────┘
 ```
 
-📖 **Guia completo:** [`QUICKSTART_ONNX.md`](./QUICKSTART_ONNX.md)
+1. Câmera captura frames da esteira
+2. YOLO detecta e classifica materiais
+3. Sistema aciona a cancela correta
+4. Material é separado automaticamente
+5. Dashboard registra todas as detecções
 
 ---
 
-### ⚡ Modo Tradicional (Servidor Python)
+## 🚀 Início Rápido
+
+### Pré-requisitos
+- Node.js 18+ 
+- Python 3.8+ (opcional, para inferência avançada)
+- Webcam conectada
+- Navegador moderno (Chrome/Edge recomendado)
+
+### Instalação
 
 ```bash
-# 1. Instalar dependências Python
+# 1. Clone o repositório
+git clone <seu-repo>
+cd ecovision
+
+# 2. Instale dependências Python (opcional)
 pip install -r requirements.txt
 
-# 2. Baixar modelos YOLO (coloque na pasta models/)
-# Download: https://github.com/ultralytics/assets/releases
-# Ou deixe baixar automaticamente na primeira execução
-
-# 3. Executar o sistema
-./run_dev.sh          # Linux/Mac
+# 3. Execute o sistema
+./run_dev.sh        # Linux/Mac
 # ou
-run_dev.bat           # Windows
+run_dev.bat         # Windows
+
+# 4. Acesse http://localhost:5000
 ```
 
-**Pronto!** Acesse **http://localhost:5173** (frontend) e configure o backend no Supabase.
+### Primeiro Uso
 
-📖 **Comparação de modos:** [`INFERENCE_MODES.md`](./INFERENCE_MODES.md)
-
-### 📋 Requisitos
-
-- **Python 3.8+** - Para servidor de inferência
-- **Node.js 18+** - Para frontend React
-- **Webcam** (integrada ou USB)
-- **8GB RAM** mínimo (16GB recomendado)
-- **HTTPS** (produção) ou localhost (desenvolvimento)
-
-### ✅ Onde Funciona
-
-| Ambiente | Câmera | Inferência | Status |
-|----------|--------|------------|--------|
-| **Localhost** (HTTP) | ✅ | ✅ | **100% Funcional** |
-| **Produção** (HTTPS) | ✅ | ✅ | **100% Funcional** |
-| **Playground Figma** | ⚠️ | ⚠️ | Limitado (CORS/Câmera) |
-
-**⚠️ IMPORTANTE:** 
-- ✅ O sistema é **totalmente funcional** quando executado localmente ou em produção com HTTPS
-- ✅ Captura frames da webcam → Envia para YOLO → Retorna bounding boxes na tela
-- ⚠️ O Playground do Figma tem limitações de segurança que podem bloquear a câmera
-- 🚀 Para testes reais, execute localmente com `./run_dev.sh`
-
-**📹 Como funciona a câmera:**
-1. Faça login no sistema (Google OAuth)
-2. Navegador solicita permissão de câmera automaticamente
-3. Clique em "Permitir" no popup do navegador
-4. Clique em "Iniciar Sistema" no feed da câmera
-5. Pronto! Sistema começa a detectar automaticamente
-
-**🔧 Problemas com permissão de câmera?**
-- Chrome: `chrome://settings/content/camera`
-- Firefox: Ícone de cadeado → Permissões → Câmera
-- Edge: Ícone de cadeado → Permissões do site
-- Safari: Preferências → Sites → Câmera
+1. **Login**: Clique em "Modo Demo" (ou configure Google OAuth)
+2. **Permita a câmera** quando solicitado pelo navegador
+3. **Configure as cancelas** na aba "Configuração"
+4. **Inicie o sistema** na aba "Monitor"
+5. **Veja as detecções** em tempo real!
 
 ---
 
-## 🎯 Funcionalidades
-
-### 🖥️ Interface do Usuário
-
-#### 1. Monitor
-- Visualização da webcam em tempo real
-- Bounding boxes coloridos nas detecções
-- Animação da esteira rolante
-- Estado das 3 cancelas (aberta/fechada)
-- Lista de detecções recentes com confiança
-
-#### 2. Configuração de Cancelas
-- Configure qual material cada cancela irá separar
-- Teste manual de acionamento
-- Visualização do status atual
-
-#### 3. Controle de Modelo
-- Escolha entre YOLOv8n, YOLOv8s, YOLOv8m
-- Ajuste a confiança mínima (0-100%)
-- Informações sobre cada modelo
-
-#### 4. Dashboard
-- **Dados Reais do Banco PostgreSQL**
-- Gráficos de pizza: Distribuição por material
-- Gráficos de barras: Acionamentos por cancela
-- Métricas: Total processado, confiança média
-- Lista de detecções recentes
-- Atualização automática a cada 30s
-
-#### 5. Perfil
-- Informações do usuário
-- Histórico de sessões
-- Estatísticas pessoais
-
-### 🤖 IA e Detecção
-
-#### Materiais Detectados
-| Material | Cor | Exemplos |
-|----------|-----|----------|
-| 📄 **Papel** | Azul (#163b6f) | Livros, jornais, papelão |
-| 🥫 **Metal** | Verde (#196626) | Latas, talheres, alumínio |
-| 🍾 **Plástico** | Vermelho vibrante (#dc1f2e) | Garrafas PET, copos, sacolas |
-| 🍷 **Vidro** | Amarelo (#d2b91f) | Garrafas, copos, frascos |
-
-#### Modelos Disponíveis
-- **YOLOv8n** (nano): 6MB, ~100 FPS, ideal para tempo real
-- **YOLOv8s** (small): 22MB, ~50 FPS, balanceado
-- **YOLOv8m** (medium): 52MB, ~25 FPS, máxima precisão
-
----
-
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura do Sistema
 
 ### Stack Tecnológico
 
-#### Frontend
-```
-React + TypeScript + Tailwind CSS
-├── Camera Feed: getUserMedia API (webcam)
-├── UI Components: Shadcn/UI
-├── Charts: Recharts
-├── Icons: Lucide React
-└── Auth: Supabase Auth (Google OAuth)
-```
+**Frontend:**
+- React + TypeScript
+- Tailwind CSS
+- Shadcn/ui components
+- ONNX Runtime Web (inferência no navegador)
 
-#### Backend
-```
-Supabase Edge Functions (Deno + Hono)
-├── PostgreSQL: Banco de dados
-├── Row Level Security: Segurança por usuário
-├── Real-time: Atualização em tempo real
-└── KV Store: Cache e configurações
-```
+**Backend:**
+- Supabase (Database + Auth + Edge Functions)
+- Deno (servidor backend)
+- PostgreSQL (via Supabase)
 
-#### IA/ML
-```
-Python + FastAPI + Ultralytics YOLO
-├── OpenCV: Processamento de imagem
-├── PyTorch: Backend de ML
-├── Base64: Transmissão de imagens
-└── CUDA: Aceleração GPU (opcional)
-```
+**IA/ML:**
+- YOLOv8 (Ultralytics)
+- ONNX Runtime
+- Python FastAPI (opcional, para inferência avançada)
 
-### Fluxo de Dados
+### Estrutura de Pastas
 
 ```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐      ┌──────────────┐
-│             │      │              │      │             │      │              │
-│   Webcam    │─────▶│   Frontend   │─────▶│   Backend   │─────▶│   Python     │
-│  (Camera)   │      │   (React)    │      │  (Supabase) │      │   (YOLO)     │
-│             │      │              │      │             │      │              │
-└─────────────┘      └──────────────┘      └──────────────┘      └──────────────┘
-                             │                     │
-                             │                     ▼
-                             │              ┌──────────────┐
-                             │              │              │
-                             └─────────────▶│  PostgreSQL  │
-                                            │  (Database)  │
-                                            │              │
-                                            └──────────────┘
-
-1. Webcam captura frame a cada 2s
-2. Frontend converte para base64
-3. Backend autentica usuário (OAuth/Demo)
-4. Python processa com YOLO
-5. Backend salva no PostgreSQL
-6. Frontend renderiza bounding boxes
-7. Dashboard atualiza estatísticas
+ecovision/
+├── App.tsx                    # Aplicação React principal
+├── components/                # Componentes React
+│   ├── Login.tsx             # Autenticação
+│   ├── MonitorPanel.tsx      # Painel de monitoramento
+│   ├── CameraFeed.tsx        # Feed da câmera + IA
+│   ├── GateConfiguration.tsx # Config de cancelas
+│   ├── AccuracyControl.tsx   # Controle de modelo
+│   ├── StatisticsPanel.tsx   # Dashboard
+│   ├── UserProfile.tsx       # Perfil do usuário
+│   └── Sidebar.tsx           # Menu lateral
+├── utils/
+│   ├── onnxInference.tsx     # Inferência ONNX no navegador
+│   └── supabase/             # Cliente Supabase
+├── supabase/
+│   └── functions/server/     # Backend Deno
+│       └── index.tsx         # Servidor API REST
+├── models/                    # Modelos YOLO (.onnx)
+├── inference_server.py        # Servidor Python (opcional)
+└── convert_to_onnx.py        # Conversor YOLO → ONNX
 ```
 
-**📊 Diagramas completos:** [diagrams/INDEX.md](./diagrams/INDEX.md)
+---
+
+## 🎮 Funcionalidades
+
+### ✅ Completas e Funcionando
+
+- [x] **Login/Auth**: Google OAuth + Modo Demo
+- [x] **Captura de Vídeo**: Webcam em tempo real
+- [x] **Detecção IA**: YOLO com 4 classes de materiais
+- [x] **Bounding Boxes**: Desenha detecções na tela
+- [x] **Cancelas**: 3 cancelas configuráveis
+- [x] **Dashboard**: Estatísticas e gráficos
+- [x] **Histórico**: Registro de todas as detecções
+- [x] **Perfil**: Dados do usuário e sessões
+- [x] **Responsivo**: Desktop e mobile
+
+### 🎯 Modos de Inferência
+
+O sistema suporta 3 modos (em ordem de prioridade):
+
+1. **ONNX no Navegador** ⭐ (Recomendado)
+   - Processamento local, super rápido
+   - Privacidade total (nada sai do navegador)
+   - Requer: arquivo `/models/yolov8n.onnx`
+
+2. **Servidor Python** (Fallback)
+   - Suporta GPU (CUDA)
+   - Modelos .pt nativos do YOLO
+   - Requer: `python inference_server.py` rodando
+
+3. **Mock** (Desenvolvimento)
+   - Detecções simuladas aleatórias
+   - Sempre disponível
+   - Apenas para testes
+
+---
+
+## ⚙️ Configuração
+
+### 1. Modelos YOLO
+
+**Opção A: ONNX (Recomendado)**
+```bash
+# Baixe modelo treinado YOLOv8
+# Coloque em /models/yolov8n.onnx
+
+# OU converta seu próprio modelo:
+python convert_to_onnx.py --weights best.pt --output models/
+```
+
+**Opção B: Servidor Python**
+```bash
+# Coloque modelo .pt em /models/
+# Execute servidor:
+python inference_server.py
+```
+
+### 2. Google OAuth (Opcional)
+
+Para login real com Google:
+
+1. Acesse [Supabase Dashboard](https://supabase.com)
+2. Navegue: Authentication → Providers → Google
+3. Siga instruções para obter Client ID/Secret
+4. Configure no Supabase
+
+Sem OAuth: use **Modo Demo** (funciona 100%)
+
+### 3. Configuração de Cancelas
+
+No painel "Configuração":
+- **Cancela 1**: Escolha qual material (papel, metal, plástico, vidro)
+- **Cancela 2**: Escolha outro material
+- **Cancela 3**: Escolha terceiro material
+- **Confiança Mínima**: 50-95% (padrão: 85%)
+
+---
+
+## 🐛 Troubleshooting
+
+### Problema: Câmera não inicia
+
+**Solução:**
+1. Verifique permissões do navegador (ícone 🔒 na barra de endereço)
+2. Use Chrome/Edge (melhor compatibilidade)
+3. Acesse via `http://localhost:5000` (não IP)
+4. Feche outros apps usando a câmera (Zoom, Teams, etc.)
+
+### Problema: Detecções não aparecem
+
+**Solução:**
+1. Verifique se há modelo em `/models/yolov8n.onnx`
+2. Ou inicie servidor Python: `python inference_server.py`
+3. Sistema funcionará em modo mock se ambos faltarem
+
+### Problema: Erros 401 (JWT Inválido)
+
+**Solução:**
+- Se em **Modo Demo**: ignore (normal, estatísticas limitadas)
+- Se com **OAuth**: faça logout/login novamente
+
+### Problema: ONNX não carrega
+
+**Solução:**
+- Verifique conexão com internet (precisa baixar WASM do CDN)
+- Sistema fará fallback automático para servidor/mock
+- Funcionalidade não é afetada
 
 ---
 
 ## 📊 Banco de Dados
 
-### Tabelas Principais
+### Estrutura (PostgreSQL via Supabase)
 
 ```sql
--- Detecções da IA
-inferences
-├── id (UUID)
-├── user_id (UUID)
-├── material_detected (TEXT)      -- papel, metal, plastico, vidro
-├── confidence (DECIMAL)           -- 0.00 - 100.00
-├── gate_number (INTEGER)          -- 1, 2, 3
-├── gate_activated (BOOLEAN)
-├── model_version (TEXT)           -- YOLOv8n, YOLOv8s, YOLOv8m
-├── processing_time_ms (INTEGER)
-├── bounding_box (JSONB)
-└── timestamp (TIMESTAMPTZ)
+-- Tabela KV Store (chave-valor genérica)
+kv_store_ea835390 (
+  key TEXT PRIMARY KEY,
+  value JSONB,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
 
--- Sessões de usuário
-user_sessions
-├── id (UUID)
-├── user_id (UUID)
-├── started_at (TIMESTAMPTZ)
-├── ended_at (TIMESTAMPTZ)
-└── inferences_count (INTEGER)
-
--- Configuração do sistema
-system_config
-├── id (UUID)
-├── user_id (UUID)
-├── gate_1_material (TEXT)
-├── gate_2_material (TEXT)
-├── gate_3_material (TEXT)
-├── min_confidence (INTEGER)       -- 0-100
-└── model_version (TEXT)
+-- Armazena:
+-- - Configurações do sistema
+-- - Detecções
+-- - Estatísticas de usuários
+-- - Histórico de sessões
 ```
 
-**📖 Schema completo:** [supabase/migrations/001_create_ecovision_tables.sql](./supabase/migrations/001_create_ecovision_tables.sql)
+**Nota:** O sistema usa um KV store flexível. Não requer migrations ou DDL manual.
 
 ---
 
-## 📁 Estrutura do Projeto
+## 🔧 Desenvolvimento
 
-```
-ecovision/
-├── 📁 components/           # Componentes React
-│   ├── AccuracyControl.tsx  # Controle de confiança mínima
-│   ├── CameraFeed.tsx       # Feed de webcam com detecções
-│   ├── ConveyorSystem.tsx   # Animação da esteira
-│   ├── GateConfiguration.tsx# Configuração das cancelas
-│   ├── Login.tsx            # Tela de login
-│   ├── MonitorPanel.tsx     # Painel de monitoramento
-│   ├── Sidebar.tsx          # Menu lateral
-│   ├── StatisticsPanel.tsx  # Dashboard de estatísticas
-│   ├── UserProfile.tsx      # Perfil do usuário
-│   └── 📁 ui/               # Componentes Shadcn/UI
-│
-├── 📁 supabase/
-│   └── 📁 functions/server/ # Edge Functions
-│       ├── index.tsx        # API principal (Hono)
-│       ├── kv_store.tsx     # Utilitário KV Store
-│       ├── Camera.tsx       # Classe Camera
-│       ├── Usuario.tsx      # Classe Usuario
-│       ├── OutputData.tsx   # Classe OutputData
-│       ├── Atuador.tsx      # Interface IAtuador + ControladorSerial
-│       ├── Esteira.tsx      # Classe Esteira
-│       ├── Cancela.tsx      # Classe Cancela
-│       ├── RegistroProcessamento.tsx
-│       ├── BancoDeDados.tsx # Classe BancoDeDados
-│       ├── ModeloIA.tsx     # Classe ModeloIA
-│       ├── Dashboard.tsx    # Classe Dashboard
-│       └── Autenticacao.tsx # Classe Autenticacao
-│
-├── 📁 diagrams/             # Diagramas UML (PlantUML)
-│   ├── INDEX.md             # Índice dos diagramas
-│   ├── architecture-diagram.puml
-│   ├── class-diagram.puml
-│   ├── component-diagram.puml
-│   ├── data-flow-diagram.puml
-│   ├── database-diagram.puml
-│   └── sequence-diagram.puml
-│
-├── 📁 models/               # Modelos YOLO (.pt)
-│   └── README.md
-│
-├── 📁 styles/               # Estilos globais
-│   └── globals.css          # Paleta de cores e tokens
-│
-├── 📁 utils/                # Utilitários
-│   └── supabase/
-│       ├── client.tsx       # Cliente Supabase
-│       └── info.tsx         # Config do projeto
-│
-├── App.tsx                  # Componente principal
-├── inference_server.py      # Servidor Python de inferência YOLO
-├── requirements.txt         # Dependências Python
-├── run_dev.sh              # Script de execução (Linux/Mac)
-├── run_dev.bat             # Script de execução (Windows)
-├── test_setup.py           # Script de teste de instalação
-└── README.md               # Este arquivo
-```
-
----
-
-## 🧪 Testes
-
-### Testar Servidor Python
+### Scripts Úteis
 
 ```bash
-# Health check
-curl http://localhost:8000/health
+# Desenvolvimento local
+./run_dev.sh
 
-# Listar modelos disponíveis
-curl http://localhost:8000/models
+# Converter modelo YOLO → ONNX
+python convert_to_onnx.py --weights best.pt
 
-# Teste de inferência com imagem
-curl -X POST http://localhost:8000/inference/file \
-  -F "file=@test.jpg" \
-  -F "model_version=YOLOv8n"
+# Servidor Python (inferência avançada)
+python inference_server.py
+
+# Testar setup
+python test_setup.py
 ```
 
-### Testar Frontend
+### Estrutura de Classes Backend
 
-1. Acesse http://localhost:5173
-2. Faça login com Google ou use modo demo
-3. Vá para "Monitor"
-4. Permita acesso à webcam
-5. Clique em "Iniciar Sistema"
-6. Coloque objetos recicláveis na frente da câmera
-
-**Esperado:** Bounding boxes aparecem em tempo real, detecções são listadas, estatísticas são atualizadas.
-
----
-
-## 📈 Performance
-
-### Benchmarks
-
-| Componente | Métrica | Valor |
-|------------|---------|-------|
-| Webcam Capture | FPS | 30 |
-| YOLOv8n (CPU) | Inferência | 100-500ms |
-| YOLOv8n (GPU) | Inferência | 10-50ms |
-| Backend API | Latência | <100ms |
-| Dashboard Update | Intervalo | 30s |
-
-### Requisitos de Hardware
-
-#### Mínimo (CPU apenas)
-- Intel i5 / Ryzen 5
-- 8GB RAM
-- Webcam HD (720p)
-- **FPS esperado:** 20-40 (YOLOv8n)
-
-#### Recomendado (com GPU)
-- Intel i7 / Ryzen 7
-- 16GB RAM
-- NVIDIA GTX 1060+ (CUDA)
-- Webcam Full HD (1080p)
-- **FPS esperado:** 60-120 (YOLOv8n)
-
----
-
-## 🚀 Deploy em Produção
-
-### Servidor Python
-
-**Opções:**
-- [Render.com](https://render.com) (Free tier disponível)
-- [Railway.app](https://railway.app)
-- [Heroku](https://heroku.com)
-- VPS (DigitalOcean, AWS EC2, etc)
-
-**Exemplo Render:**
-```yaml
-# render.yaml
-services:
-  - type: web
-    name: ecovision-inference
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python inference_server.py
-```
-
-### Frontend
-
-**Opções:**
-- [Vercel](https://vercel.com) (Recomendado)
-- [Netlify](https://netlify.com)
-- Figma Make (já deployado)
-
-### Backend (Supabase)
-
-Já está deployado! Configure apenas:
-```bash
-# No Supabase Dashboard → Project Settings → Edge Functions → Secrets
-INFERENCE_SERVER_URL=https://seu-servidor.com
+```typescript
+// Padrão MVC com classes
+ModeloIA          // Gerencia inferência
+Cancela           // Controla cancelas
+Esteira           // Controla esteira
+Camera            // Gerencia câmera
+Dashboard         // Estatísticas
+Usuario           // Gerencia usuários
+BancoDeDados      // Acesso ao KV store
 ```
 
 ---
 
-## 🤝 Contribuindo
+## 📚 Tecnologias Utilizadas
 
-Contribuições são bem-vindas! Para contribuir:
+| Categoria | Tecnologia | Uso |
+|-----------|------------|-----|
+| **Frontend** | React + TypeScript | Interface do usuário |
+| **Estilização** | Tailwind CSS | Design responsivo |
+| **Componentes** | Shadcn/ui | Componentes prontos |
+| **Backend** | Supabase + Deno | Servidor e database |
+| **IA** | YOLOv8 Ultralytics | Detecção de objetos |
+| **Runtime IA** | ONNX Runtime Web | Inferência no navegador |
+| **Auth** | Supabase Auth | Login social |
+| **Database** | PostgreSQL | Armazenamento |
+| **Charts** | Recharts | Gráficos e estatísticas |
+
+---
+
+## 🎨 Paleta de Cores
+
+Sistema usa esquema de cores específico para materiais:
+
+```css
+Papel:    #163b6f (azul escuro)
+Metal:    #196626 (verde escuro)
+Plástico: #dc1f2e (vermelho)
+Vidro:    #d2b91f (amarelo/dourado)
+
+Sistema:  #034732 → #abf2ab (verde reciclagem)
+```
+
+---
+
+## 🤝 Como Contribuir
 
 1. Fork o projeto
-2. Crie uma branch: `git checkout -b feature/nova-feature`
-3. Commit suas mudanças: `git commit -m 'Adiciona nova feature'`
-4. Push para a branch: `git push origin feature/nova-feature`
+2. Crie uma branch (`git checkout -b feature/MinhaFeature`)
+3. Commit suas mudanças (`git commit -m 'Add: nova feature'`)
+4. Push para a branch (`git push origin feature/MinhaFeature`)
 5. Abra um Pull Request
 
-### Áreas que precisam de ajuda
+---
 
-- [ ] Treinar modelos YOLO customizados para reciclagem
-- [ ] Implementar suporte para mais materiais (eletrônicos, orgânicos)
-- [ ] Integração com hardware ESP32/Arduino
-- [ ] Melhorias de performance
-- [ ] Testes automatizados
-- [ ] Tradução para outros idiomas
+## 📄 Licença
+
+Este projeto está sob licença MIT. Veja arquivo LICENSE para mais detalhes.
 
 ---
 
-## 📝 Licença
+## 🆘 Suporte
 
-Este projeto está sob a licença **MIT**. Veja o arquivo [LICENSE](./LICENSE) para mais detalhes.
+### Problemas Comuns
 
-```
-MIT License - Copyright (c) 2025 EcoVision
+Todos os erros conhecidos foram corrigidos na versão atual:
+- ✅ Connection Refused → Resolvido
+- ✅ ONNX WASM Loading → Resolvido com fallback
+- ✅ JWT 401 Errors → Resolvido com detecção de modo demo
+- ✅ Camera Permission → Mensagens melhoradas
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction...
-```
+### Logs e Debugging
 
----
+O sistema usa console logging extensivo:
+- `[AUTH]` - Autenticação
+- `[CÂMERA]` - Operações de câmera
+- `[ONNX]` - Inferência ONNX
+- `[INFERÊNCIA]` - Detecções
+- `[DASHBOARD]` - Estatísticas
+- `[PERFIL]` - Perfil do usuário
 
-## 🙏 Agradecimentos
-
-- **Ultralytics** - Framework YOLO v8
-- **Supabase** - Backend-as-a-Service
-- **Shadcn/UI** - Componentes de interface
-- **Comunidade Open Source** - Inspiração e suporte
-
----
-
-## 📚 Documentação
-
-O EcoVision possui documentação completa e organizada:
-
-### 📖 Documentos Principais
-
-| Documento | Descrição |
-|-----------|-----------|
-| **[STATUS.md](/STATUS.md)** | ✅ Status atual do sistema e checklist |
-| **[TROUBLESHOOTING.md](/TROUBLESHOOTING.md)** | 🔧 Resolução de problemas completa |
-| **[SISTEMA_INFERENCIA.md](/SISTEMA_INFERENCIA.md)** | 🧠 Como funciona o sistema de IA |
-| **[QUICKSTART_ONNX.md](/QUICKSTART_ONNX.md)** | ⚡ Guia rápido ONNX |
-| **[INFERENCE_MODES.md](/INFERENCE_MODES.md)** | 🔄 Modos de inferência |
-| **[DOCS_INDEX.md](/DOCS_INDEX.md)** | 📑 Índice completo de documentação |
-
-### 🏗️ Arquitetura e Diagramas
-
-- **[diagrams/](/diagrams/)** - Todos os diagramas arquiteturais (PlantUML)
-- **[STRUCTURE.md](/STRUCTURE.md)** - Estrutura completa de arquivos
-- **[PROJECT_GUIDE.md](/PROJECT_GUIDE.md)** - Guia completo do projeto
-
-### 🎯 Guias Específicos
-
-- **[models/README.md](/models/README.md)** - Treinamento e conversão de modelos
-- **[convert_to_onnx.py](/convert_to_onnx.py)** - Script de conversão YOLO → ONNX
-- **[guidelines/Guidelines.md](/guidelines/Guidelines.md)** - Diretrizes de desenvolvimento
-
-**💡 Dica:** Comece pelo [STATUS.md](/STATUS.md) para ter uma visão geral do sistema atual!
+Abra DevTools (F12) para ver logs detalhados.
 
 ---
 
-## 📞 Suporte
+## 📞 Contato
 
-**Problemas com o sistema?**
-
-### 1️⃣ Consulte a Documentação
-- **[TROUBLESHOOTING.md](/TROUBLESHOOTING.md)** - Soluções para problemas comuns
-- **[STATUS.md](/STATUS.md)** - Verificar status e requisitos
-
-### 2️⃣ Verificações Básicas
-
-```bash
-# Verificar se o servidor Python está rodando (opcional)
-curl http://localhost:8000/health
-2. Verifique se a câmera tem permissões no navegador
-3. Verifique os logs do console do navegador (F12)
-4. Consulte os [diagramas](./diagrams/INDEX.md) para entender a arquitetura
-
-**Problemas com a câmera?**
-- Navegador bloqueou? Veja configurações em `chrome://settings/content/camera`
-- HTTPS obrigatório? Execute localmente ou use ngrok
-- Dispositivo não encontrado? Verifique se a webcam está conectada
-
-**Perguntas?** Abra uma [Issue](https://github.com/seu-usuario/ecovision/issues)
+Dúvidas ou sugestões? Abra uma Issue no GitHub!
 
 ---
 
@@ -554,6 +366,6 @@ curl http://localhost:8000/health
 
 **Desenvolvido com 💚 para um planeta mais sustentável**
 
-![Reciclagem](https://img.shields.io/badge/♻️-Recicle-green?style=for-the-badge)
+🌿 EcoVision - Reciclagem Inteligente 🌿
 
 </div>

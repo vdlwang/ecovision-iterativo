@@ -27,13 +27,12 @@ rectangle "CAMADA 1: FRONTEND (React + Tailwind)" #EDFEF4 {
   rectangle "Componentes de UI" #ABF2AB {
     component "Sidebar" as SidebarComp
     component "CameraFeed" as CameraComp
-    component "ConveyorSystem" as ConveyorComp
     component "Shadcn/UI" as ShadcnComp
   }
   
-  rectangle "Hooks & Utils" #008148 {
-    component "useWebcam" as WebcamHook
-    component "useDetection" as DetectionHook
+  rectangle "Utils" #008148 {
+    component "onnxInference.tsx" as ONNXUtil
+    component "supabase/client.tsx" as SupabaseClient
   }
 }
 
@@ -47,23 +46,14 @@ rectangle "CAMADA 2: SERVER (Hono + Deno)" #FEF4ED {
       [Endpoints HTTP]
       [Middleware CORS]
       [Logger]
-    }
-    
-    rectangle "models.tsx\n(Classes de Domínio)" as Models {
-      [Camera]
-      [Esteira]
-      [Cancela]
-      [ModeloIA]
-      [ControladorSerial]
-      [Dashboard]
-      [BancoDeDados]
-      [Autenticacao]
+      [Autenticação JWT]
     }
     
     rectangle "kv_store.tsx\n(Persistência)" as KVStore {
       [get/set]
       [mget/mset]
       [getByPrefix]
+      [del/mdel]
     }
   }
 }
@@ -77,6 +67,7 @@ rectangle "CAMADA 3: DATABASE (Supabase)" #E8F4FD {
       [key: string (PK)]
       [value: jsonb]
       [created_at: timestamp]
+      [updated_at: timestamp]
     }
   }
   
@@ -84,40 +75,31 @@ rectangle "CAMADA 3: DATABASE (Supabase)" #E8F4FD {
     [Google OAuth]
     [Sessões]
     [Tokens JWT]
-  }
-  
-  rectangle "Supabase Storage\n(Opcional)" as SupabaseStorage #163B6F {
-    [Imagens]
-    [Vídeos]
-    [Logs]
+    [Demo Mode]
   }
 }
 
 ' ==================== HARDWARE/EXTERNAL ====================
 
-rectangle "HARDWARE EXTERNO" #FFF9E8 {
-  
-  rectangle "ESP32" as ESP32 {
-    [Porta Serial]
-    [Comandos: 1 bit esteira + 2 bits cancela]
-  }
+rectangle "HARDWARE & SERVIÇOS EXTERNOS" #FFF9E8 {
   
   rectangle "Webcam" as Webcam {
     [MediaDevices API]
+    [getUserMedia()]
     [Video Stream]
   }
   
-  rectangle "Python Inference Server" as PythonServer {
+  rectangle "ONNX Runtime Web" as ONNXRuntime {
+    [Inferência no Navegador]
+    [Modelos .onnx]
+    [WebAssembly]
+  }
+  
+  rectangle "Python Inference Server\n(Fallback Opcional)" as PythonServer {
     [inference_server.py]
     [Modelos YOLO (.pt)]
     [Ultralytics]
-  }
-  
-  rectangle "Atuadores Físicos" as Atuadores {
-    [Motor Esteira]
-    [Servo Cancela 1]
-    [Servo Cancela 2]
-    [Servo Cancela 3]
+    [FastAPI]
   }
 }
 
@@ -125,11 +107,13 @@ rectangle "HARDWARE EXTERNO" #FFF9E8 {
 
 ' Frontend para Server
 AppMain --> ServerAPI : "HTTP REST\nhttps://{projectId}.supabase.co/\nfunctions/v1/make-server-ea835390"
-LoginComp --> SupabaseAuth : "OAuth Google"
-MonitorComp --> ServerAPI : "POST /esteira/ligar\nPOST /modelo/processar"
+LoginComp --> SupabaseAuth : "OAuth Google / Demo Mode"
+MonitorComp --> ServerAPI : "Estado do sistema"
 GateComp --> ServerAPI : "POST /config"
-AccuracyComp --> ServerAPI : "POST /modelo/calibrar"
-StatsComp --> ServerAPI : "GET /dashboard/stats"
+AccuracyComp --> ServerAPI : "POST /config"
+StatsComp --> ServerAPI : "GET /stats"
+ProfileComp --> ServerAPI : "GET /user/stats"
+CameraComp --> ServerAPI : "POST /inference"
 CameraComp --> Webcam : "getUserMedia()"
 
 ' Frontend Components
@@ -141,20 +125,20 @@ AppMain --> StatsComp
 AppMain --> ProfileComp
 AppMain --> SidebarComp
 MonitorComp --> CameraComp
-MonitorComp --> ConveyorComp
-CameraComp --> WebcamHook
-CameraComp --> DetectionHook
+CameraComp --> ONNXUtil : "Inferência local"
+
+' ONNX & Python
+ONNXUtil --> ONNXRuntime : "WASM inference"
+CameraComp --> PythonServer : "HTTP (fallback)"
 
 ' Server para Database
-ServerAPI --> Models : "instancia e usa"
-Models --> KVStore : "persiste dados"
+ServerAPI --> KVStore : "persiste dados"
 KVStore --> KVTable : "SQL Queries"
 ServerAPI --> SupabaseAuth : "valida tokens"
 
-' Server para Hardware
-Models --> ESP32 : "Comandos Serial\n(via ControladorSerial)"
-Models --> PythonServer : "HTTP API\nInferência YOLO\n(opcional)"
-ESP32 --> Atuadores : "Controle GPIO"
+' Frontend Utils
+AppMain --> SupabaseClient
+SupabaseClient --> SupabaseAuth
 
 ' ==================== NOTAS ====================
 
@@ -170,59 +154,49 @@ end note
 
 note right of ServerAPI
   **Principais Endpoints:**
-  • POST /esteira/ligar
-  • POST /esteira/desligar
-  • POST /cancela/:id/abrir
-  • POST /cancela/:id/fechar
-  • POST /camera/iniciar
-  • POST /camera/parar
-  • POST /modelo/ativar
-  • POST /modelo/desativar
-  • POST /modelo/calibrar
-  • POST /modelo/processar
+  • GET /health
+  • GET /auth-test
   • POST /config
-  • GET /dashboard/stats
-  • GET /dashboard/visao-geral
+  • GET /config
+  • POST /inference
+  • GET /stats
+  • GET /stats/period
+  • POST /session/end
+  • POST /logs
+  • GET /logs
+  • GET /user/stats
 end note
 
 note right of KVTable
   **Estrutura de Chaves:**
-  • system_config
-  • detection_{timestamp}
-  • processamento_{timestamp}
-  • log_{timestamp}
-  • user_preferences_{userId}
+  • system_config_{userId}
+  • detection_{userId}_{timestamp}
+  • stats_{userId}_{date}
+  • session_{sessionId}
+  • user_profile_{userId}
 end note
 
-note right of Models
-  **Padrão de Design:**
-  • Classes representam entidades físicas
-  • Interface IAtuador para abstração
-  • Injeção de dependências
-  • Separação de responsabilidades
-end note
-
-note left of ESP32
-  **Protocolo Serial:**
-  Formato: [1 bit esteira][2 bits cancela]
-  Exemplos:
-  • LIGAR_ESTEIRA
-  • DESLIGAR_ESTEIRA
-  • ABRIR_CANCELA_1
-  • FECHAR_CANCELA_1
+note left of ONNXRuntime
+  **Modo Híbrido de Inferência:**
+  1. ONNX no navegador (preferido)
+  2. Servidor Python (fallback)
+  3. Mock detections (desenvolvimento)
+  
+  **Modelos Suportados:**
+  • yolov8n.onnx (~12MB)
+  • yolov8s.onnx (~45MB)
+  • yolov8m.onnx (~100MB)
 end note
 
 note left of PythonServer
-  **Modelos YOLO Disponíveis:**
-  • yolov8n.pt (Nano - Rápido)
-  • yolov8s.pt (Small - Balanceado)
-  • yolov8m.pt (Medium - Preciso)
-  
-  Classes detectadas:
+  **Classes Detectadas:**
   • papel/papelão (#163b6f)
   • metal (#196626)
   • plástico (#dc1f2e)
   • vidro (#d2b91f)
+  
+  Confiança mínima: 50-95%
+  FPS esperado: 30-60
 end note
 
 ' ==================== LEGENDA ====================

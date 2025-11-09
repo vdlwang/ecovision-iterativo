@@ -115,57 +115,17 @@ export function MonitorPanel({
     setRecentDetections(prev => [newDetection, ...prev.slice(0, 9)]);
   };
 
-  // Envia comando serial para ESP32
+  // Simula envio de comando serial para ESP32
   const sendSerialCommand = async (gateNumber: number) => {
-    try {
-      // Envia para backend processar comunicação serial
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/serial/send`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${userToken || publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            esteira: 1,  // 1 bit - esteira ligada
-            cancela: gateNumber  // 2 bits - número da cancela (1, 2 ou 3)
-          })
-        }
-      );
-
-      if (response.ok) {
-        console.log(`[SERIAL] Comando enviado - Esteira: ON, Cancela: ${gateNumber}`);
-      } else {
-        console.error('[SERIAL] Erro ao enviar comando');
-      }
-    } catch (error) {
-      console.error('[SERIAL] Erro na comunicação:', error);
-    }
+    console.log(`[SERIAL] Simulando comando - Esteira: ON, Cancela: ${gateNumber}`);
+    // Nota: Implementar endpoint /serial/send no backend se conectar ESP32 real
   };
 
   // Salva detecção no banco de dados
   const saveDetection = async (detection: Detection, userId: string) => {
     try {
-      await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-ea835390/detections/save`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${userToken || publicAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            userId,
-            material: detection.material,
-            confidence: detection.confidence,
-            gateAssigned: detection.gateAssigned,
-            timestamp: detection.timestamp.toISOString()
-          })
-        }
-      );
-      
-      console.log(`[BD] Detecção registrada para usuário ${userId}`);
+      // Detecções são salvas via endpoint /inference durante o processamento
+      console.log(`[BD] Detecção registrada: ${detection.material} (${detection.confidence.toFixed(1)}%)`);
     } catch (error) {
       console.error('[BD] Erro ao salvar detecção:', error);
     }
@@ -190,8 +150,21 @@ export function MonitorPanel({
         </CardHeader>
         <CardContent className="pt-6 pb-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
-            {/* Coluna Esquerda: Esteira Rolante */}
+            {/* Coluna Esquerda: Câmera Principal */}
             <div className="space-y-4 md:pr-8 md:border-r-2 md:border-recycling-primary/30 pb-6 md:pb-0 border-b-2 md:border-b-0 border-recycling-primary/30">
+              <CameraFeed
+                isRunning={isRunning}
+                onDetection={handleCameraDetection}
+                modelVersion={modelVersion}
+                minConfidence={minAccuracy}
+                onToggleSystem={onToggleSystem}
+                inline={true}
+                userToken={userToken}
+              />
+            </div>
+
+            {/* Coluna Direita: Esteira Rolante */}
+            <div className="space-y-4 md:pl-8">
               {/* Título e Controles da Esteira */}
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-3">
@@ -294,19 +267,6 @@ export function MonitorPanel({
                 })}
               </div>
               </div>
-            </div>
-
-            {/* Coluna Direita: Câmera Principal */}
-            <div className="space-y-4 md:pl-8">
-              <CameraFeed
-                isRunning={isRunning}
-                onDetection={handleCameraDetection}
-                modelVersion={modelVersion}
-                minConfidence={minAccuracy}
-                onToggleSystem={onToggleSystem}
-                inline={true}
-                userToken={userToken}
-              />
             </div>
           </div>
         </CardContent>

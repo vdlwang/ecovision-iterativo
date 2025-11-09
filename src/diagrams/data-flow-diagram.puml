@@ -1,268 +1,250 @@
-@startuml EcoVision - Fluxo de Dados em Tempo Real
+@startuml EcoVision - Diagrama de Fluxo de Dados
 !theme plain
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 12
 
-title EcoVision - Fluxo de Dados do Sistema de Detecção e Separação
+title EcoVision - Fluxo de Dados Completo (DFD Nível 1)
 
-' ==================== ENTRADA DE DADOS ====================
+' ==================== EXTERNAL ENTITIES ====================
 
-rectangle "ENTRADA" #EDFEF4 {
-  agent "Webcam\n(1920x1080 @ 30fps)" as Webcam #034732
-  
-  note right of Webcam
-    Captura vídeo ao vivo
-    do material na esteira
-  end note
+actor "Usuário" as User #163B6F
+rectangle "Webcam" as Webcam #FFF9E8
+rectangle "Google OAuth" as GoogleOAuth #E8F4FD
+rectangle "ONNX Runtime Web" as ONNXRuntime #FFF9E8
+rectangle "Python Server\n(Opcional)" as PythonServer #FFF9E8
+
+' ==================== PROCESSES ====================
+
+rectangle "1.0\nAutenticação" as P1 #ABF2AB {
+  [Login Component]
+  [Validação de Token]
+  [Modo Demo]
 }
 
-' ==================== PROCESSAMENTO FRONTEND ====================
-
-rectangle "FRONTEND" #ABF2AB {
-  component "CameraFeed\nComponent" as CameraFeed {
-    [Canvas]
-    [Video Element]
-    [Refs & State]
-  }
-  
-  component "Detection\nLoop" as DetectionLoop {
-    [setInterval(3s)]
-    [Capture Frame]
-  }
-  
-  note right of DetectionLoop
-    Loop executa a cada 3 segundos
-    enquanto câmera estiver ativa
-  end note
+rectangle "2.0\nConfiguração" as P2 #ABF2AB {
+  [Config de Cancelas]
+  [Config de Modelo]
+  [Salvar Preferências]
 }
 
-' ==================== API REST ====================
-
-cloud "SUPABASE EDGE FUNCTION" #008148 {
-  component "POST /modelo/processar" as ProcessAPI {
-    [Recebe Frame]
-    [Recebe gateConfigs]
-  }
+rectangle "3.0\nCaptura e Inferência" as P3 #034732 {
+  [Captura de Vídeo]
+  [Pré-processamento]
+  [Inferência ONNX/Server]
+  [Pós-processamento]
+  [Detecção de Materiais]
 }
 
-' ==================== PROCESSAMENTO BACKEND ====================
-
-rectangle "BACKEND - MODELO IA" #196626 {
-  component "ModeloIA.preverFrame()" as Predicao {
-    [Inferência YOLO]
-    [Detecção de Objetos]
-    [Bounding Boxes]
-  }
-  
-  component "OutputData" as Output {
-    classePrevista: string
-    confianca: number
-  }
-  
-  component "ModeloIA.decidirAcionamento()" as Decisao {
-    [Verifica confiança >= limite]
-    [Compara com gateConfigs]
-    [Retorna boolean]
-  }
-  
-  note right of Output
-    Exemplo:
-    classe: "plastico"
-    confianca: 92.5
-  end note
+rectangle "4.0\nControle de Sistema" as P4 #196626 {
+  [Controle de Esteira]
+  [Acionamento de Cancelas]
+  [Gestão de Estado]
 }
 
-' ==================== LÓGICA DE DECISÃO ====================
-
-rectangle "LÓGICA DE CONTROLE" #FEF4ED {
-  
-  hexagon "confianca >= limiteMinAccuracy?" as CheckConfianca #D2B91F
-  hexagon "material == gateConfig?" as CheckMaterial #D2B91F
-  
-  component "ModeloIA.executarAcionamento()" as Acionamento {
-    [Abre Cancela]
-    [Aguarda 2s]
-    [Fecha Cancela]
-  }
+rectangle "5.0\nPersistência" as P5 #008148 {
+  [Salvar Detecções]
+  [Salvar Configurações]
+  [Salvar Estatísticas]
+  [Salvar Logs]
 }
 
-' ==================== CONTROLE FÍSICO ====================
+rectangle "6.0\nVisualização" as P6 #ABF2AB {
+  [Dashboard]
+  [Gráficos]
+  [Histórico]
+  [Perfil]
+}
 
-rectangle "HARDWARE - CONTROLE SERIAL" #163B6F {
-  component "ControladorSerial" as Serial {
-    [Porta: /dev/ttyUSB0]
-    [Baud: 9600]
+' ==================== DATA STORES ====================
+
+database "D1\nKV Store" as D1 #E8F4FD {
+  [Configurações]
+  [Detecções]
+  [Estatísticas]
+  [Sessões]
+  [Logs]
+}
+
+database "D2\nSupabase Auth" as D2 #E8F4FD {
+  [Usuários]
+  [Tokens JWT]
+  [Sessões OAuth]
+}
+
+database "D3\nModelos ONNX" as D3 #FFF9E8 {
+  [yolov8n.onnx]
+  [yolov8s.onnx]
+  [yolov8m.onnx]
+}
+
+' ==================== DATA FLOWS ====================
+
+' FLUXO 1: AUTENTICAÇÃO
+
+User --> P1 : "Credenciais\n(Google OAuth ou Demo)"
+GoogleOAuth --> P1 : "Token JWT"
+P1 --> D2 : "Validar Token"
+D2 --> P1 : "Dados do Usuário"
+P1 --> User : "Sessão Autenticada"
+
+' FLUXO 2: CONFIGURAÇÃO
+
+User --> P2 : "Configurações:\n• Cancelas\n• Confiança\n• Modelo"
+P2 --> D1 : "Salvar Config"
+D1 --> P2 : "Config Salva"
+P2 --> User : "Confirmação"
+
+' FLUXO 3: CAPTURA E INFERÊNCIA
+
+Webcam --> P3 : "Stream de Vídeo\n(640x480, 30fps)"
+P3 --> P3 : "Frame atual"
+D3 --> P3 : "Modelo ONNX"
+P3 --> ONNXRuntime : "ImageData\n(640x640 normalizado)"
+ONNXRuntime --> P3 : "Tensor Output\n(8400 detecções)"
+P3 --> P3 : "NMS + Threshold\nFiltragem"
+
+alt Fallback
+  P3 --> PythonServer : "ImageBase64"
+  PythonServer --> P3 : "Detections JSON"
+end
+
+P3 --> User : "Bounding Boxes\n+ Labels\n+ Confiança"
+P3 --> P4 : "Detecções Válidas\n(confidence >= threshold)"
+P3 --> P5 : "Dados de Detecção"
+
+' FLUXO 4: CONTROLE
+
+P4 --> P4 : "Identifica Cancela\n(baseado em material)"
+P4 --> User : "Visual Feedback:\n• Esteira animada\n• Cancela ativa\n• Cor do material"
+P4 --> P5 : "Estado do Sistema"
+
+' FLUXO 5: PERSISTÊNCIA
+
+P5 --> D1 : "INSERT:\n• detection_{userId}_{timestamp}\n• stats_{userId}_{date}"
+D1 --> P5 : "Confirmação"
+P5 --> P6 : "Trigger atualização"
+
+' FLUXO 6: VISUALIZAÇÃO
+
+User --> P6 : "Solicita Dashboard/Perfil"
+P6 --> D1 : "Query:\n• getByPrefix('detection_user123_')\n• getByPrefix('stats_user123_')"
+D1 --> P6 : "Dados Agregados"
+P6 --> P6 : "Processar:\n• Agrupar por material\n• Calcular totais\n• Gerar timeline"
+P6 --> User : "Gráficos:\n• BarChart\n• LineChart\n• PieChart\n• Tabelas"
+
+' ==================== NOTAS ====================
+
+note right of P3
+  **Pipeline de Inferência:**
+  1. Captura frame (640x480)
+  2. Redimensiona (640x640)
+  3. Normaliza (RGB 0-1)
+  4. Transpõe (CHW format)
+  5. Cria tensor Float32
+  6. Executa modelo ONNX
+  7. Extrai output (1, 84, 8400)
+  8. Transpõe (8400, 84)
+  9. Aplica NMS (IoU 0.45)
+  10. Filtra confiança mínima
+  11. Mapeia classes
+  12. Retorna detecções
+end note
+
+note right of P4
+  **Mapeamento Material → Cancela:**
+  
+  gateConfigs = {
+    1: "papel",
+    2: "plastico",
+    3: "metal"
   }
   
-  component "Comandos" as Comandos {
-    ABRIR_CANCELA_X
-    FECHAR_CANCELA_X
-  }
-}
+  Se detectado "plastico" com 92%:
+  → Aciona Cancela 2
+  → Cor vermelha (#dc1f2e)
+  → Animação visual 2s
+end note
 
-' ==================== ATUADORES ====================
-
-rectangle "ATUADORES FÍSICOS" #FFF9E8 {
-  component "ESP32" as ESP32 {
-    [Recebe Serial]
-    [Interpreta Bits]
+note left of D1
+  **Estrutura de Dados:**
+  
+  **Chave:** detection_user123_1699564321000
+  **Valor:** {
+    "material": "plastico",
+    "confidence": 0.92,
+    "bbox": {...},
+    "gateAssigned": 2,
+    "timestamp": "2025-11-09T..."
   }
   
-  rectangle "Cancelas" {
-    agent "Cancela 1\n(Papel)" as Cancela1 #163B6F
-    agent "Cancela 2\n(Plástico)" as Cancela2 #DC1F2E
-    agent "Cancela 3\n(Metal)" as Cancela3 #196626
+  **Chave:** stats_user123_20251109
+  **Valor:** {
+    "totalDetections": 245,
+    "byMaterial": {
+      "papel": 80,
+      "metal": 65,
+      "plastico": 70,
+      "vidro": 30
+    },
+    ...
   }
-}
+end note
 
-' ==================== PERSISTÊNCIA ====================
-
-database "BANCO DE DADOS" #E8F4FD {
-  component "BancoDeDados.registrarProcessamento()" as RegistroDB {
-    [material]
-    [precisao]
-    [cancelaId]
-    [timestamp]
-  }
+note left of D3
+  **Modelos Disponíveis:**
   
-  storage "KV Store\nPostgreSQL" as KVStore {
-    processamento_{id}
-  }
-}
-
-' ==================== FEEDBACK VISUAL ====================
-
-rectangle "SAÍDA VISUAL" #EDFEF4 {
-  component "Canvas Overlay" as Canvas {
-    [Desenha Bounding Box]
-    [Exibe Label]
-    [Exibe Confiança]
-  }
+  • yolov8n.onnx (12MB)
+    - Nano: rápido, 30-60 FPS
+    - mAP: ~0.85
   
-  component "Toast\nNotification" as Toast {
-    "Material X detectado
-    na Cancela Y"
-  }
+  • yolov8s.onnx (45MB)
+    - Small: balanceado, 20-40 FPS
+    - mAP: ~0.88
   
-  note right of Canvas
-    Bounding box colorido
-    conforme material:
-    • Papel: Azul #163B6F
-    • Metal: Verde #196626
-    • Plástico: Vermelho #DC1F2E
-    • Vidro: Amarelo #D2B91F
-  end note
-}
+  • yolov8m.onnx (100MB)
+    - Medium: preciso, 10-20 FPS
+    - mAP: ~0.90
+  
+  **Classes (4):**
+  0: papel (#163b6f)
+  1: metal (#196626)
+  2: plastico (#dc1f2e)
+  3: vidro (#d2b91f)
+end note
 
-' ==================== FLUXO PRINCIPAL ====================
+note top of ONNXRuntime
+  **ONNX Runtime Web:**
+  • Executa no navegador
+  • WebAssembly + WebGL
+  • Zero latência de rede
+  • Privacidade total
+  • Sem necessidade de GPU
+end note
 
-Webcam --> CameraFeed : "Video Stream\n(MediaDevices API)"
-CameraFeed --> DetectionLoop : "Inicia loop"
-DetectionLoop --> ProcessAPI : "Frame + Configs\n(HTTP POST)"
+note bottom of PythonServer
+  **Servidor Python (Fallback):**
+  • FastAPI HTTP server
+  • Modelos .pt nativos
+  • Suporta CUDA/GPU
+  • Porta 8000
+  • Apenas se ONNX falhar
+end note
 
-ProcessAPI --> Predicao : "frame"
-Predicao --> Output : "cria"
-Output --> Decisao : "pred, configs, gateId"
-
-Decisao --> CheckConfianca : "verifica"
-CheckConfianca --> CheckMaterial : "✓ >= limite (85%)"
-CheckConfianca --> ProcessAPI : "✗ < limite\nRejeita"
-
-CheckMaterial --> Acionamento : "✓ match\nAciona cancela"
-CheckMaterial --> ProcessAPI : "✗ no match\nTenta próxima"
-
-Acionamento --> Serial : "comandos"
-Serial --> Comandos : "formata"
-Comandos --> ESP32 : "Serial (9600 baud)"
-
-ESP32 --> Cancela1 : "GPIO Signal"
-ESP32 --> Cancela2 : "GPIO Signal"
-ESP32 --> Cancela3 : "GPIO Signal"
-
-Acionamento --> RegistroDB : "salva evento"
-RegistroDB --> KVStore : "persiste"
-
-ProcessAPI --> CameraFeed : "Response JSON\n{classe, confianca, acionamentos}"
-CameraFeed --> Canvas : "drawBoxes()"
-CameraFeed --> Toast : "exibe notificação"
-
-' ==================== FLUXO DE DADOS PARALELO ====================
-
-rectangle "DASHBOARD (Paralelo)" #ABF2AB {
-  component "StatisticsPanel" as Stats
-  component "Gráficos\nRechartsKV Store" as Charts
-}
-
-KVStore -.-> Stats : "GET /dashboard/stats\n(polling 10s)"
-Stats -.-> Charts : "atualiza visualização"
-
-' ==================== CONFIGURAÇÕES ====================
-
-rectangle "CONFIGURAÇÕES (Estado)" #008148 {
-  storage "system_config" as Config {
-    minAccuracy: 85
-    modelVersion: "YOLOv8n"
-    gateConfigs: {
-      1: "papel"
-      2: "plastico"
-      3: "metal"
-    }
-  }
-}
-
-Config -.-> Decisao : "lê configurações"
-Config -.-> ProcessAPI : "lê configurações"
-
-' ==================== LEGENDA COM MÉTRICAS ====================
+' ==================== LEGENDA ====================
 
 legend right
-  **Métricas de Performance:**
-  • **FPS da Câmera**: 30 fps
-  • **Frequência de Detecção**: 1x a cada 3s
-  • **Tempo de Acionamento**: ~2 segundos
-  • **Taxa de Atualização Dashboard**: 10 segundos
-  • **Limite de Confiança Padrão**: 85%
-  
-  **Cores dos Materiais:**
-  |<#163B6F>  | Papel/Papelão |
-  |<#196626>  | Metal |
-  |<#DC1F2E>  | Plástico |
-  |<#D2B91F>  | Vidro |
-  
   **Fluxo de Dados:**
-  —> Fluxo principal (síncrono)
-  ..> Fluxo secundário (assíncrono)
-endlegend
-
-' ==================== ANOTAÇÕES DE TIMING ====================
-
-note top of DetectionLoop
-  **TIMING CRÍTICO**
-  Loop de detecção: 3000ms
-  Permite esteira avançar
-  entre detecções
-end note
-
-note bottom of Acionamento
-  **SEQUÊNCIA DE ACIONAMENTO**
-  1. Abre cancela (GPIO HIGH)
-  2. Delay 2000ms
-  3. Fecha cancela (GPIO LOW)
+  • Setas sólidas: Dados principais
+  • Setas pontilhadas: Dados de configuração
   
-  Material cai durante abertura
-end note
-
-note bottom of KVStore
-  **ESTRUTURA DE DADOS**
-  ```json
-  {
-    "id": 1699123456789,
-    "material": "plastico",
-    "precisao": 92.5,
-    "cancela_id": 2,
-    "data": "2025-11-08T10:30:45.789Z"
-  }
-  ```
-end note
+  **Cores:**
+  |<#034732>    | Processo Principal |
+  |<#196626>    | Processo de Controle |
+  |<#ABF2AB>    | Processos de Interface |
+  |<#008148>    | Processo de Persistência |
+  |<#E8F4FD>    | Data Stores |
+  |<#FFF9E8>    | Entidades Externas |
+  |<#163B6F>    | Usuário |
+endlegend
 
 @enduml

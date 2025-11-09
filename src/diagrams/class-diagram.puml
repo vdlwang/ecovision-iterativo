@@ -1,16 +1,20 @@
-@startuml EcoVision - Diagrama de Classes
+@startuml EcoVision - Diagrama de Classes Simplificado
 !theme plain
-skinparam classAttributeIconSize 0
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 12
+skinparam classAttributeIconSize 0
 
-' ==================== CAMADA DE INTERFACE (FRONTEND) ====================
+title EcoVision - Diagrama de Classes (Frontend + Backend)
 
-package "Frontend - React Components" #EDFEF4 {
+' ==================== FRONTEND COMPONENTS ====================
+
+package "Frontend React Components" #EDFEF4 {
   
   class App <<Component>> {
-    - user: User
+    - user: User | null
+    - userToken: string | null
     - isDemoMode: boolean
+    - loading: boolean
     - activeTab: string
     - isSystemRunning: boolean
     - minAccuracy: number
@@ -18,10 +22,13 @@ package "Frontend - React Components" #EDFEF4 {
     - gateConfigs: Map<number, string>
     --
     + handleDemoMode(): void
-    + handleToggleSystem(): Promise<void>
-    + handleAccuracyChange(accuracy: number): Promise<void>
-    + handleModelVersionChange(version: string): Promise<void>
-    + handleGateConfigChange(configs: Map): Promise<void>
+    + handleToggleSystem(): void
+    + handleAccuracyChange(accuracy: number): void
+    + handleModelVersionChange(version: string): void
+    + handleGateConfigChange(configs: object): void
+    --
+    **Gerencia estado global**
+    **Renderiza componentes baseado em activeTab**
   }
   
   class Login <<Component>> {
@@ -29,306 +36,374 @@ package "Frontend - React Components" #EDFEF4 {
     --
     + handleGoogleLogin(): Promise<void>
     + handleDemoMode(): void
+    --
+    **Props:**
+    • onDemoMode: () => void
   }
   
   class Sidebar <<Component>> {
-    - activeTab: string
-    - userEmail: string
     --
-    + onTabChange(tab: string): void
-    + onLogout(): void
+    **Props:**
+    • activeTab: string
+    • onTabChange: (tab) => void
+    • userEmail: string
+    • onLogout: () => void
+    --
+    **Features:**
+    • Menu expansível
+    • 5 abas navegáveis
+    • Avatar do usuário
   }
   
   class MonitorPanel <<Component>> {
-    - gateConfigs: Map<number, string>
-    - minAccuracy: number
-    - isRunning: boolean
-    - modelVersion: string
-    - userId: string
+    - recentDetections: Detection[]
+    - gateStates: GateStates
+    - beltRunning: boolean
     --
-    + render(): JSX.Element
+    + handleCameraDetection(detection): void
+    + activateGate(gateNumber): void
+    + sendSerialCommand(gateNumber): void
+    + saveDetection(detection, userId): void
+    --
+    **Props:**
+    • gateConfigs: object
+    • minAccuracy: number
+    • isRunning: boolean
+    • onToggleSystem: () => void
+    • modelVersion: string
+    • userId: string
+    • userToken: string
   }
   
   class CameraFeed <<Component>> {
-    - isActive: boolean
+    - videoRef: RefObject<HTMLVideoElement>
+    - canvasRef: RefObject<HTMLCanvasElement>
     - detections: Detection[]
-    - webcamRef: RefObject
-    - canvasRef: RefObject
+    - fps: number
+    - cameraError: string | null
+    - inferenceMode: "onnx" | "server" | "mock"
     --
     + startCamera(): Promise<void>
     + stopCamera(): void
-    + detectObjects(): Promise<void>
-    + drawBoxes(): void
-  }
-  
-  class ConveyorSystem <<Component>> {
-    - isRunning: boolean
-    - gateConfigs: Map<number, string>
-    - conveyorSpeed: number
+    + processFrame(): void
+    + drawBoundingBoxes(): void
+    + runONNXInference(imageData): Promise<Detection[]>
+    + runServerInference(imageData): Promise<Detection[]>
     --
-    + startConveyor(): void
-    + stopConveyor(): void
-    + render(): JSX.Element
+    **Props:**
+    • isRunning: boolean
+    • onDetection: (detection) => void
+    • modelVersion: string
+    • minConfidence: number
+    • onToggleSystem: () => void
+    • inline: boolean
+    • userToken: string
   }
   
   class GateConfiguration <<Component>> {
-    - gateConfigs: Map<number, string>
-    - isSystemRunning: boolean
+    - tempConfigs: Map<number, string>
     --
-    + onConfigChange(configs: Map): void
-    + validateConfig(): boolean
+    + handleConfigSave(): void
+    --
+    **Props:**
+    • gateConfigs: object
+    • onConfigChange: (configs) => void
+    • isSystemRunning: boolean
   }
   
   class AccuracyControl <<Component>> {
-    - minAccuracy: number
-    - modelVersion: string
     - tempAccuracy: number
-    - hasChanges: boolean
     --
-    + handleSliderChange(value: number): void
-    + handleSave(): void
-    + handleReset(): void
-    + onModelVersionChange(version: string): void
+    + handleAccuracySave(): void
+    + handleModelChange(version): void
+    --
+    **Props:**
+    • minAccuracy: number
+    • onAccuracyChange: (accuracy) => void
+    • isSystemRunning: boolean
+    • modelVersion: string
+    • onModelVersionChange: (version) => void
   }
   
   class StatisticsPanel <<Component>> {
-    - stats: Statistics
-    - lastUpdate: Date
+    - stats: StatisticsData
     - loading: boolean
+    - timeRange: string
     --
-    + loadStats(): Promise<void>
-    + render(): JSX.Element
+    + fetchStats(): Promise<void>
+    + renderCharts(): JSX.Element
+    --
+    **Props:**
+    • isSystemRunning: boolean
+    • gateConfigs: object
+    • userToken: string
   }
   
   class UserProfile <<Component>> {
-    - user: User
+    - userStats: UserStatistics
+    - loading: boolean
     --
-    + render(): JSX.Element
+    + fetchUserStats(): Promise<void>
+    --
+    **Props:**
+    • user: User
+    • isDemoMode: boolean
+    • userToken: string
   }
 }
 
-' ==================== CAMADA DE BACKEND ====================
+' ==================== FRONTEND UTILS ====================
 
-package "Backend - Server (Hono)" #FEF4ED {
+package "Frontend Utils" #ABF2AB {
   
-  class HonoServer {
-    - app: Hono
+  class ONNXInference <<Utility>> {
+    + loadONNXModel(modelPath: string): Promise<InferenceSession>
+    + runInference(session, imageData): Promise<Tensor>
+    + preprocessImage(imageData): Tensor
+    + postprocessYOLOOutput(output): Detection[]
+    + applyNMS(detections, threshold): Detection[]
     --
-    + configureRoutes(): void
-    + start(): void
+    **Inferência ONNX no navegador**
+    **Zero latência de rede**
+  }
+  
+  class SupabaseClient <<Utility>> {
+    - client: SupabaseClient | null
+    --
+    + getSupabaseClient(): SupabaseClient
+    + createClient(): SupabaseClient
+    --
+    **Singleton do cliente Supabase**
+  }
+}
+
+' ==================== BACKEND API ====================
+
+package "Backend Hono Server" #FEF4ED {
+  
+  class HonoServer <<API>> {
+    - app: Hono
+    - supabase: SupabaseClient
+    --
+    + GET /health
+    + GET /auth-test
+    + POST /config
+    + GET /config
+    + POST /inference
+    + GET /stats
+    + GET /stats/period
+    + POST /session/end
+    + POST /logs
+    + GET /logs
+    + GET /user/stats
+    --
+    **Middleware:**
+    • CORS
+    • Logger
+    • JWT Auth
   }
   
   note right of HonoServer
-    Endpoints principais:
-    • POST /esteira/ligar
-    • POST /esteira/desligar
-    • POST /cancela/:id/abrir
-    • POST /cancela/:id/fechar
-    • POST /camera/iniciar
-    • POST /camera/parar
-    • POST /modelo/ativar
-    • POST /modelo/processar
-    • GET /dashboard/visao-geral
-    • POST /config
+    **Autenticação:**
+    • Suporta Google OAuth (JWT)
+    • Suporta Modo Demo (token especial)
+    • Valida tokens em cada request
+    
+    **CORS:**
+    • Origin: *
+    • Methods: GET, POST, PUT, DELETE
+    • Headers: Content-Type, Authorization
   end note
 }
 
-' ==================== CAMADA DE DOMÍNIO (MODELOS) ====================
+' ==================== DATABASE ====================
 
-package "Domain - Models" #E8F4FD {
+package "Supabase Database" #E8F4FD {
   
-  class Usuario {
-    + id: string
-    + name: string
-    + email: string
-    + autenticado: boolean
-    --
-    + to_dict(): Record<string, any>
-  }
-  
-  class Camera {
-    - fps: number
-    - cap: VideoCapture
-    - resolucao: [number, number]
-    --
-    + iniciarStream(source: number): void
-    + capturarImagem(): Frame
-    + pararStream(): void
-    + is_ativa(): boolean
-  }
-  
-  class Esteira {
-    - status: string
-    - velocidade: number
-    - controlador: ControladorSerial
-    --
-    + ligar(): void
-    + desligar(): void
-  }
-  
-  class Cancela {
-    - cancela_id: number
-    - status: string
-    - controlador: ControladorSerial
-    --
-    + abrir(): void
-    + fechar(): void
-  }
-  
-  interface IAtuador {
-    {abstract} + ligarEsteira(): void
-    {abstract} + desligarEsteira(): void
-    {abstract} + abrirCancela(id: number): void
-    {abstract} + fecharCancela(id: number): void
-  }
-  
-  class ControladorSerial {
-    - portaSerial: string
-    - baudRate: number
-    - ser: SerialPort
-    --
-    + conectar(): boolean
-    + enviarComando(comando: string): void
-    + ligarEsteira(): void
-    + desligarEsteira(): void
-    + abrirCancela(id: number): void
-    + fecharCancela(id: number): void
-  }
-  
-  class ModeloIA {
-    - nome: string
-    - versao: string
-    - ativo: boolean
-    - limiteMinAccuracy: number
-    - model: YOLOModel
-    - db: BancoDeDados
-    - atuador: IAtuador
-    --
-    + ativar(): void
-    + desativar(): void
-    + carregarModelo(caminho: string): void
-    + preverFrame(frame: Frame): OutputData
-    + calibrarLimite(limite: number): void
-    + decidirAcionamento(pred: OutputData, configs: Map, id: number): boolean
-    + executarAcionamento(id: number): Promise<void>
-  }
-  
-  class OutputData {
-    - classePrevista: string
-    - confianca: number
-    --
-    + getClasse(): string
-    + getConfianca(): number
-  }
-  
-  class RegistroProcessamento {
-    + id: number
-    + material: string
-    + precisao: number
-    + cancela_id: number
-    + data: Date
-    --
-    + toJSON(): Record<string, any>
-  }
-  
-  class BancoDeDados {
-    - kvStore: KeyValueStore
-    --
-    + registrarProcessamento(material: string, precisao: number, cancelaId: number): Promise<void>
-    + consultarItensProcessados(data: Date): Promise<number>
-    + consultarMateriais(data: Date): Promise<Map<string, number>>
-    + consultarPerformanceCancelas(data: Date): Promise<Map<string, number>>
-    + consultarPrecisaoMedia(data: Date): Promise<number>
-  }
-  
-  class Dashboard {
-    - db: BancoDeDados
-    --
-    + coletarVisaoGeral(): Promise<Map<string, any>>
-    + exibirStatusGeral(): Map<string, any>
-    + exibirMateriaisReciclados(data: Date): Promise<Map<string, number>>
-    + exibirPerformanceCancelas(data: Date): Promise<Map<string, number>>
-  }
-  
-  class Autenticacao {
-    - google_client_id: string
-    - _sessions: Map<string, any>
-    --
-    + loginComGoogle(token: string): Map<string, any>
-    + logout(usuario: Usuario): void
-    + logout_try(email: string): void
-    + is_autenticado(email: string): boolean
-  }
-}
-
-' ==================== CAMADA DE INFRAESTRUTURA ====================
-
-package "Infrastructure" #FFF9E8 {
-  
-  class SupabaseClient {
-    - projectId: string
-    - publicAnonKey: string
-    --
-    + auth: SupabaseAuth
-    + storage: SupabaseStorage
-  }
-  
-  class KeyValueStore {
+  class KVStore <<Persistence>> {
     --
     + get(key: string): Promise<any>
     + set(key: string, value: any): Promise<void>
-    + del(key: string): Promise<void>
     + mget(keys: string[]): Promise<any[]>
-    + mset(items: Map): Promise<void>
+    + mset(entries: object): Promise<void>
+    + del(key: string): Promise<void>
     + mdel(keys: string[]): Promise<void>
     + getByPrefix(prefix: string): Promise<any[]>
+    --
+    **Table: kv_store_ea835390**
+    • key: TEXT (PK)
+    • value: JSONB
+    • created_at: TIMESTAMP
+    • updated_at: TIMESTAMP
+  }
+  
+  note right of KVStore
+    **Chaves Usadas:**
+    • system_config_{userId}
+    • detection_{userId}_{timestamp}
+    • stats_{userId}_{date}
+    • session_{sessionId}
+    • user_profile_{userId}
+    • inference_{requestId}
+  end note
+}
+
+package "Supabase Auth" #E8F4FD {
+  
+  class SupabaseAuth <<Service>> {
+    --
+    + signInWithOAuth(provider): Promise<Session>
+    + signOut(): Promise<void>
+    + getSession(): Promise<Session>
+    + getUser(token): Promise<User>
+    + onAuthStateChange(callback): Subscription
+    --
+    **Providers:**
+    • Google OAuth
+    • Demo Mode (custom)
   }
 }
 
-' ==================== RELACIONAMENTOS ====================
+' ==================== EXTERNAL SERVICES ====================
 
-' Frontend para Backend
-App --> HonoServer : "HTTP REST API"
-MonitorPanel --> HonoServer : "Controla Sistema"
-CameraFeed --> HonoServer : "Envia Detecções"
-GateConfiguration --> HonoServer : "Salva Configurações"
-AccuracyControl --> HonoServer : "Calibra Modelo"
-StatisticsPanel --> HonoServer : "Carrega Estatísticas"
-Login --> SupabaseClient : "Autenticação Google OAuth"
+package "External Services" #FFF9E8 {
+  
+  class ONNXRuntimeWeb <<Service>> {
+    --
+    + InferenceSession.create(modelPath): Promise<Session>
+    + session.run(feeds): Promise<Tensor>
+    --
+    **Modelos:**
+    • yolov8n.onnx (~12MB)
+    • yolov8s.onnx (~45MB)
+    • yolov8m.onnx (~100MB)
+  }
+  
+  class PythonInferenceServer <<Service>> {
+    --
+    + POST /predict
+    + GET /health
+    --
+    **Framework:** FastAPI
+    **Modelos:** .pt files
+    **Opcional:** Fallback quando ONNX falha
+  }
+  
+  class WebcamAPI <<Browser API>> {
+    --
+    + getUserMedia(constraints): Promise<MediaStream>
+    --
+    **Constraints:**
+    • video: { width: 640, height: 480, facingMode: "environment" }
+  }
+}
 
-' Frontend Components
-App *-- Login
-App *-- Sidebar
-App *-- MonitorPanel
-App *-- GateConfiguration
-App *-- AccuracyControl
-App *-- StatisticsPanel
-App *-- UserProfile
-MonitorPanel *-- CameraFeed
-MonitorPanel *-- ConveyorSystem
+' ==================== DOMAIN MODELS ====================
 
-' Backend para Domain
-HonoServer --> ModeloIA : "gerencia"
-HonoServer --> Esteira : "controla"
-HonoServer --> Cancela : "controla"
-HonoServer --> Camera : "controla"
-HonoServer --> Dashboard : "consulta"
-HonoServer --> Autenticacao : "valida"
+package "Domain Models" #008148 {
+  
+  class Detection <<Model>> {
+    + material: string
+    + confidence: number
+    + bbox: BoundingBox
+    + timestamp: Date
+    + gateAssigned: number
+  }
+  
+  class BoundingBox <<Model>> {
+    + x: number
+    + y: number
+    + width: number
+    + height: number
+  }
+  
+  class User <<Model>> {
+    + id: string
+    + email: string
+    + name?: string
+    + avatar_url?: string
+  }
+  
+  class StatisticsData <<Model>> {
+    + totalDetections: number
+    + byMaterial: Map<string, number>
+    + timeline: TimelinePoint[]
+    + averageConfidence: number
+  }
+  
+  class UserStatistics <<Model>> {
+    + totalSessions: number
+    + totalDetections: number
+    + totalProcessed: number
+    + lastSession: Date | null
+    + favoriteConfiguration: object | null
+  }
+  
+  class GateConfig <<Model>> {
+    + gate1Material: string
+    + gate2Material: string
+    + gate3Material: string
+    + minConfidence: number
+    + modelVersion: string
+  }
+}
 
-' Domain Relationships
-ModeloIA --> OutputData : "gera"
-ModeloIA --> BancoDeDados : "registra em"
-ModeloIA --> IAtuador : "aciona via"
-ModeloIA --> ControladorSerial : "usa"
-Dashboard --> BancoDeDados : "consulta"
-Esteira --> ControladorSerial : "usa"
-Cancela --> ControladorSerial : "usa"
-ControladorSerial ..|> IAtuador : "implementa"
-BancoDeDados --> RegistroProcessamento : "armazena"
-BancoDeDados --> KeyValueStore : "usa"
+' ==================== RELATIONSHIPS ====================
 
-' Infrastructure
-HonoServer --> KeyValueStore : "persiste dados"
-SupabaseClient --> KeyValueStore : "acessa"
+' App para Components
+App *-- Login : "renderiza quando !user"
+App *-- Sidebar : "renderiza quando user"
+App *-- MonitorPanel : "renderiza quando activeTab=monitor"
+App *-- GateConfiguration : "renderiza quando activeTab=cancelas"
+App *-- AccuracyControl : "renderiza quando activeTab=modelo"
+App *-- StatisticsPanel : "renderiza quando activeTab=dashboard"
+App *-- UserProfile : "renderiza quando activeTab=perfil"
+
+' MonitorPanel composição
+MonitorPanel *-- CameraFeed : "contém"
+
+' Components usam Utils
+CameraFeed --> ONNXInference : "usa para inferência local"
+App --> SupabaseClient : "usa para auth"
+Login --> SupabaseClient : "usa para OAuth"
+
+' Components usam API
+MonitorPanel --> HonoServer : "HTTP requests"
+CameraFeed --> HonoServer : "POST /inference (fallback)"
+GateConfiguration --> HonoServer : "POST /config"
+AccuracyControl --> HonoServer : "POST /config"
+StatisticsPanel --> HonoServer : "GET /stats"
+UserProfile --> HonoServer : "GET /user/stats"
+
+' API usa Database
+HonoServer --> KVStore : "persiste dados"
+HonoServer --> SupabaseAuth : "valida tokens"
+
+' External Services
+CameraFeed --> WebcamAPI : "captura vídeo"
+CameraFeed --> ONNXRuntimeWeb : "inferência local"
+CameraFeed --> PythonInferenceServer : "fallback inferência"
+ONNXInference --> ONNXRuntimeWeb : "carrega modelo"
+
+' Domain Models
+Detection *-- BoundingBox
+StatisticsData *-- Detection
+UserStatistics --> User
+GateConfig --> User
+MonitorPanel --> Detection : "processa"
+CameraFeed --> Detection : "cria"
+StatisticsPanel --> StatisticsData : "exibe"
+UserProfile --> UserStatistics : "exibe"
+
+' ==================== LEGENDA ====================
+
+legend right
+  |<#EDFEF4>    | Frontend Components |
+  |<#ABF2AB>    | Frontend Utils |
+  |<#FEF4ED>    | Backend API |
+  |<#E8F4FD>    | Database & Auth |
+  |<#FFF9E8>    | External Services |
+  |<#008148>    | Domain Models |
+endlegend
 
 @enduml

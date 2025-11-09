@@ -15,6 +15,7 @@ package "Root Application" #034732 {
   note right of App
     **Estado Global:**
     • user: User | null
+    • userToken: string | null
     • isDemoMode: boolean
     • activeTab: "monitor" | "cancelas" | "modelo" | "dashboard" | "perfil"
     • isSystemRunning: boolean
@@ -76,54 +77,50 @@ package "Monitor Tab" #EDFEF4 {
     • onToggleSystem: () => void
     • modelVersion: string
     • userId: string
+    • userToken: string | null
     
     **Layout:**
     • Card único com 2 colunas
-    • Coluna esquerda: Esteira
-    • Coluna direita: Câmera
-  }
-  
-  component "ConveyorSystem.tsx" as Conveyor {
-    **Props:**
-    • isRunning: boolean
-    • gateConfigs: { [key: number]: string }
-    
-    **State:**
-    • conveyorSpeed: number
+    • Coluna esquerda: Câmera
+    • Coluna direita: Esteira + Cancelas
     
     **Features:**
-    • Animação CSS da esteira
-    • 3 cancelas configuráveis
-    • Botão Start/Stop independente
+    • Controle da esteira (Start/Stop)
+    • Visualização animada do transportador
+    • 3 cancelas com cores de materiais
+    • Detecções recentes
   }
   
   component "CameraFeed.tsx" as Camera {
     **Props:**
-    • minAccuracy: number
-    • gateConfigs: { [key: number]: string }
+    • isRunning: boolean
+    • onDetection: (detection) => void
     • modelVersion: string
-    • userId: string
+    • minConfidence: number
+    • onToggleSystem: () => void
+    • inline: boolean
+    • userToken: string | null
     
     **State:**
-    • isActive: boolean
-    • detections: Detection[]
-    • isProcessing: boolean
-    
-    **Refs:**
-    • webcamRef: RefObject<Webcam>
+    • videoRef: RefObject<HTMLVideoElement>
     • canvasRef: RefObject<HTMLCanvasElement>
+    • detections: Detection[]
+    • fps: number
+    • cameraError: string | null
     
-    **Methods:**
-    • startCamera()
-    • stopCamera()
-    • detectObjects()
-    • drawBoxes()
+    **Features:**
+    • Captura webcam em tempo real
+    • Inferência ONNX local (prioritária)
+    • Fallback para servidor Python
+    • Desenha bounding boxes
+    • Exibe FPS e confiança
+    • Botão Start/Stop sistema
   }
 }
 
-' ==================== ABA CANCELAS ====================
+' ==================== ABA CONFIGURAÇÃO ====================
 
-package "Gates Tab" #196626 {
+package "Configuration Tab" #FEF4ED {
   component "GateConfiguration.tsx" as GateConfig {
     **Props:**
     • gateConfigs: { [key: number]: string }
@@ -131,246 +128,214 @@ package "Gates Tab" #196626 {
     • isSystemRunning: boolean
     
     **State:**
-    • localConfigs: { [key: number]: string }
-    • hasChanges: boolean
+    • tempConfigs: { [key: number]: string }
     
     **Features:**
-    • Select para cada cancela
-    • Opções: papel, metal, plastico, vidro, vazio
-    • Validação de duplicatas
-    • Badge colorido por material
+    • 3 selects para materiais
+    • Visualização de cores
+    • Salvar configuração
+    • Bloqueio quando sistema ativo
   }
 }
 
 ' ==================== ABA MODELO ====================
 
-package "Model Tab" #163B6F {
+package "Model Tab" #FFF9E8 {
   component "AccuracyControl.tsx" as AccuracyCtrl {
     **Props:**
     • minAccuracy: number
     • onAccuracyChange: (accuracy) => void
     • isSystemRunning: boolean
-    • modelVersion?: string
-    • onModelVersionChange?: (version) => void
+    • modelVersion: string
+    • onModelVersionChange: (version) => void
     
     **State:**
     • tempAccuracy: number
-    • hasChanges: boolean
     
     **Features:**
-    • Slider de confiança (50-100%)
-    • Input numérico
-    • Select de modelo YOLO (n/s/m)
-    • Indicador de precisão
-    • Info sobre impacto
+    • Slider de confiança (50-95%)
+    • Seletor de modelo YOLO
+    • Informações de performance
+    • Bloqueio quando sistema ativo
   }
 }
 
 ' ==================== ABA DASHBOARD ====================
 
-package "Dashboard Tab" #D2B91F {
+package "Statistics Tab" #E8F4FD {
   component "StatisticsPanel.tsx" as StatsPanel {
     **Props:**
     • isSystemRunning: boolean
     • gateConfigs: { [key: number]: string }
-    • userId: string
+    • userToken: string | null
     
     **State:**
-    • stats: Statistics
-    • lastUpdate: Date | null
+    • stats: StatisticsData
     • loading: boolean
+    • timeRange: "24h" | "7d" | "30d"
     
     **Features:**
-    • Cards de métricas
-    • Gráfico de barras (Recharts)
-    • Gráfico de pizza (Recharts)
-    • Performance por cancela
-    • Auto-refresh (10s quando running)
+    • Gráficos de detecções (Recharts)
+    • Métricas por material
+    • Histórico de detecções
+    • Filtros de período
   }
 }
 
 ' ==================== ABA PERFIL ====================
 
-package "Profile Tab" #DC1F2E {
+package "Profile Tab" #ABF2AB {
   component "UserProfile.tsx" as UserProfile {
     **Props:**
     • user: User
+    • isDemoMode: boolean
+    • userToken: string | null
+    
+    **State:**
+    • userStats: UserStatistics
+    • loading: boolean
     
     **Features:**
-    • Avatar
-    • Nome e email
-    • Informações do sistema
-    • Histórico (futuro)
+    • Informações do usuário
+    • Total de sessões
+    • Total de detecções
+    • Última sessão
+    • Configuração favorita
   }
 }
 
-' ==================== COMPONENTES SHADCN/UI ====================
+' ==================== UTILS ====================
 
-package "Shadcn/UI Components" #FFF9E8 {
-  component [Card]
-  component [Button]
-  component [Badge]
-  component [Select]
-  component [Slider]
-  component [Input]
-  component [Progress]
-  component [Switch]
-  component [Tabs]
-  component [Toaster]
-  component [Avatar]
-}
-
-' ==================== UTILITÁRIOS ====================
-
-package "Utils & Hooks" #008148 {
-  component "SupabaseClient" as Supabase {
-    • getSupabaseClient()
-    • auth.signInWithOAuth()
-    • auth.signOut()
-    • auth.getSession()
+package "Utilities" #008148 {
+  component "onnxInference.tsx" as ONNXInf {
+    **Exports:**
+    • loadONNXModel(modelPath)
+    • runInference(session, imageData)
+    • processYOLOOutput(output)
+    
+    **Features:**
+    • ONNX Runtime Web
+    • Pré-processamento de imagem
+    • Pós-processamento YOLO
+    • NMS (Non-Maximum Suppression)
   }
   
-  component "API Helpers" as API {
-    • projectId
-    • publicAnonKey
-    • fetch() para endpoints
+  component "supabase/client.tsx" as SupabaseClient {
+    **Exports:**
+    • getSupabaseClient()
+    • createClient()
+    
+    **Features:**
+    • Cliente Supabase singleton
+    • Configuração de auth
   }
 }
 
-' ==================== RELACIONAMENTOS - HIERARQUIA ====================
+' ==================== SHADCN/UI ====================
 
-App --> Login : "renderiza quando !user"
-App --> Sidebar : "sempre renderiza"
-App -down-> MonitorPanel : "activeTab === 'monitor'"
-App -down-> GateConfig : "activeTab === 'cancelas'"
-App -down-> AccuracyCtrl : "activeTab === 'modelo'"
-App -down-> StatsPanel : "activeTab === 'dashboard'"
-App -down-> UserProfile : "activeTab === 'perfil'"
+package "Shadcn/UI Components" #163B6F {
+  component "Card" as Card
+  component "Button" as Button
+  component "Select" as Select
+  component "Slider" as Slider
+  component "Badge" as Badge
+  component "Avatar" as Avatar
+  component "Toaster" as Toaster
+  component "Chart" as Chart
+}
 
-MonitorPanel --> Conveyor : "lado esquerdo"
-MonitorPanel --> Camera : "lado direito"
+' ==================== CONEXÕES ====================
 
-' ==================== RELACIONAMENTOS - PROPS ====================
+' App para Componentes Principais
+App --> Login : "!user"
+App --> Sidebar : "user exists"
+App --> MonitorPanel : "activeTab === 'monitor'"
+App --> GateConfig : "activeTab === 'cancelas'"
+App --> AccuracyCtrl : "activeTab === 'modelo'"
+App --> StatsPanel : "activeTab === 'dashboard'"
+App --> UserProfile : "activeTab === 'perfil'"
 
-App ..> MonitorPanel : "props: gateConfigs,\nminAccuracy,\nisRunning,\nmodelVersion,\nuserId"
+' MonitorPanel composição
+MonitorPanel --> Camera : "embeds"
 
-App ..> GateConfig : "props: gateConfigs,\nonConfigChange,\nisSystemRunning"
+' Componentes usam Shadcn
+MonitorPanel --> Card
+MonitorPanel --> Badge
+MonitorPanel --> Button
+Camera --> Card
+Camera --> Button
+GateConfig --> Card
+GateConfig --> Select
+GateConfig --> Button
+AccuracyCtrl --> Card
+AccuracyCtrl --> Slider
+AccuracyCtrl --> Select
+StatsPanel --> Card
+StatsPanel --> Chart
+UserProfile --> Card
+UserProfile --> Avatar
+Sidebar --> Avatar
+Sidebar --> Button
+Login --> Button
 
-App ..> AccuracyCtrl : "props: minAccuracy,\nonAccuracyChange,\nmodelVersion,\nonModelVersionChange"
+' Utils
+Camera --> ONNXInf : "inferência local"
+App --> SupabaseClient : "auth"
+Login --> SupabaseClient : "OAuth"
 
-App ..> StatsPanel : "props: isSystemRunning,\ngateConfigs,\nuserId"
+' Toaster global
+App --> Toaster
 
-App ..> UserProfile : "props: user"
+' ==================== NOTAS ====================
 
-MonitorPanel ..> Conveyor : "props: isRunning,\ngateConfigs"
-
-MonitorPanel ..> Camera : "props: minAccuracy,\ngateConfigs,\nmodelVersion,\nuserId"
-
-' ==================== RELACIONAMENTOS - USO ====================
-
-Login --> Supabase : "usa para auth"
-App --> Supabase : "verifica sessão"
-Sidebar --> Supabase : "logout"
-
-MonitorPanel --> API : "fetch /esteira/ligar"
-Camera --> API : "fetch /modelo/processar"
-GateConfig --> API : "fetch /config"
-AccuracyCtrl --> API : "fetch /modelo/calibrar"
-StatsPanel --> API : "fetch /dashboard/stats"
-
-' ==================== USO DE COMPONENTES UI ====================
-
-MonitorPanel --> [Card]
-MonitorPanel --> [Button]
-Conveyor --> [Card]
-Conveyor --> [Button]
-Conveyor --> [Badge]
-Camera --> [Card]
-Camera --> [Button]
-GateConfig --> [Card]
-GateConfig --> [Select]
-GateConfig --> [Badge]
-GateConfig --> [Button]
-AccuracyCtrl --> [Card]
-AccuracyCtrl --> [Slider]
-AccuracyCtrl --> [Input]
-AccuracyCtrl --> [Select]
-AccuracyCtrl --> [Badge]
-StatsPanel --> [Card]
-StatsPanel --> [Progress]
-StatsPanel --> [Badge]
-StatsPanel --> [Button]
-UserProfile --> [Card]
-UserProfile --> [Avatar]
-Sidebar --> [Avatar]
-
-App --> [Toaster] : "notificações globais"
-
-' ==================== NOTAS IMPORTANTES ====================
-
-note bottom of Camera
-  **Fluxo de Detecção:**
-  1. startCamera() -> getUserMedia()
-  2. setInterval(detectObjects, 3000)
-  3. Captura frame do webcam
-  4. POST /modelo/processar
-  5. drawBoxes() no canvas
-  6. Exibe toast com resultado
+note right of Camera
+  **Sistema Híbrido de Inferência:**
+  1. ONNX Runtime Web (prioritário)
+     - Modelo .onnx no /models/
+     - Processamento local no navegador
+     - Zero latência de rede
+  
+  2. Servidor Python (fallback)
+     - Endpoint /inference
+     - Modelos .pt
+     - Suporta GPU
+  
+  3. Mock (desenvolvimento)
+     - Detecções aleatórias
+     - Para testes sem modelo
 end note
 
-note bottom of Conveyor
-  **Controle Independente:**
-  Botão Start/Stop controla
-  apenas a animação CSS.
-  NÃO controla sistema real.
-end note
-
-note bottom of MonitorPanel
-  **Layout Responsivo:**
-  Desktop: 2 colunas lado a lado
-  Mobile: 2 colunas empilhadas
-  Card único "Monitor do Sistema"
-end note
-
-note bottom of GateConfig
-  **Validação:**
-  • Não permite duplicatas
-  • Exibe preview visual
-  • Desabilita quando sistema running
-end note
-
-note bottom of AccuracyCtrl
-  **Cartões Separados:**
-  1. Seleção de Modelo YOLO
-  2. Controle de Confiança
-  Ambos com info de impacto
+note left of ONNXInf
+  **Pipeline de Inferência:**
+  1. Captura frame do vídeo
+  2. Redimensiona para 640x640
+  3. Normaliza pixels (0-1)
+  4. Executa modelo ONNX
+  5. Processa output (8400 detecções)
+  6. Aplica NMS (threshold 0.45)
+  7. Filtra por confiança mínima
+  8. Retorna detecções finais
 end note
 
 note bottom of StatsPanel
-  **Auto-refresh:**
-  Quando isSystemRunning = true,
-  atualiza stats a cada 10s
+  **Tipos de Gráficos:**
+  • BarChart: Detecções por material
+  • LineChart: Detecções ao longo do tempo
+  • PieChart: Distribuição de materiais
+  • AreaChart: Performance do sistema
 end note
 
 ' ==================== LEGENDA ====================
 
 legend right
-  **Convenções:**
-  —> Hierarquia (renderização)
-  ..> Passagem de Props
-  --> Uso / Chamada
-  
-  **Cores:**
-  |<#034732>  | Componente Principal |
-  |<#ABF2AB>  | Componentes de UI |
-  |<#E8F4FD>  | Autenticação |
-  |<#EDFEF4>  | Aba Monitor |
-  |<#196626>  | Aba Cancelas |
-  |<#163B6F>  | Aba Modelo |
-  |<#D2B91F>  | Aba Dashboard |
-  |<#DC1F2E>  | Aba Perfil |
-  |<#FFF9E8>  | Shadcn/UI |
-  |<#008148>  | Utilitários |
+  |<#034732>    | App Principal |
+  |<#ABF2AB>    | Componentes React |
+  |<#E8F4FD>    | Autenticação |
+  |<#EDFEF4>    | Monitor |
+  |<#FEF4ED>    | Configuração |
+  |<#FFF9E8>    | Modelo |
+  |<#008148>    | Utilitários |
+  |<#163B6F>    | UI Library |
 endlegend
 
 @enduml
