@@ -10,7 +10,26 @@
 
 **Sistema de controle para esteira de reciclagem integrado com IA para detecção e separação automática de materiais recicláveis**
 
-[🚀 Quick Start](#-quick-start) • [📚 Documentação](#-documentação) • [🎯 Funcionalidades](#-funcionalidades) • [🏗️ Arquitetura](#️-arquitetura)
+[⚡ START](./START.md) • [📖 LEIA-ME](./LEIA_ME_PRIMEIRO.md) • [🎯 EXECUTAR](./COMO_EXECUTAR.md) • [📚 DOCS](./DOCS_INDEX.md) • [🏗️ Arquitetura](#️-arquitetura)
+
+---
+
+## 🔥 Início Rápido
+
+**Escolha seu estilo:**
+
+| Arquivo | Descrição | Tempo |
+|---------|-----------|-------|
+| **[⚡ START.md](./START.md)** | Apenas comandos | 30s |
+| **[📖 LEIA_ME_PRIMEIRO.md](./LEIA_ME_PRIMEIRO.md)** | Visão geral completa | 5 min |
+| **[🎯 COMO_EXECUTAR.md](./COMO_EXECUTAR.md)** | Guia passo a passo | 10 min |
+| **[📚 DOCS_INDEX.md](./DOCS_INDEX.md)** | Índice de toda documentação | - |
+
+```bash
+pip install -r requirements.txt    # Instalar
+./run_dev.sh                        # Executar (Linux/Mac)
+# Abrir http://localhost:5000      # Acessar
+```
 
 </div>
 
@@ -41,34 +60,55 @@ O **EcoVision** é um sistema completo de controle para centros de reciclagem qu
 
 ## 🚀 Quick Start
 
-**Quer testar rapidamente? Siga estes passos:**
+### ⚡ 3 Passos para Rodar o Projeto
 
 ```bash
-# 1. Clone o repositório
-git clone https://github.com/seu-usuario/ecovision.git
-cd ecovision
-
-# 2. Configure ambiente Python
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# ou: venv\Scripts\activate  # Windows
-
-# 3. Instale dependências
+# 1. Instalar dependências Python
 pip install -r requirements.txt
 
-# 4. Teste a instalação
-python test_setup.py
+# 2. Baixar modelos YOLO (coloque na pasta models/)
+# Download: https://github.com/ultralytics/assets/releases
+# Ou deixe baixar automaticamente na primeira execução
 
-# 5. Inicie servidor de inferência
-python inference_server.py
-
-# 6. Em outro terminal, inicie o frontend
-npm run dev
+# 3. Executar o sistema
+./run_dev.sh          # Linux/Mac
+# ou
+run_dev.bat           # Windows
 ```
 
-**Pronto!** Acesse http://localhost:5173 e faça login com Google.
+**Pronto!** Acesse **http://localhost:5000**
 
-**📖 Guia completo:** [QUICKSTART.md](./QUICKSTART.md)
+### 📋 Requisitos
+- Python 3.8+
+- Webcam (integrada ou USB)
+- 8GB RAM mínimo
+- HTTPS (produção) ou localhost (desenvolvimento)
+
+**📖 Guias:**  
+🎯 **[COMO_EXECUTAR.md](./COMO_EXECUTAR.md)** ← **COMECE AQUI** (Guia mais simples)  
+📦 [INSTALACAO.md](./INSTALACAO.md) (Detalhado)  
+🚀 [QUICKSTART.md](./QUICKSTART.md) (Completo)
+
+### ✅ Onde Funciona
+
+| Ambiente | Câmera | Inferência | Status |
+|----------|--------|------------|--------|
+| **Localhost** (HTTP) | ✅ | ✅ | **100% Funcional** |
+| **Produção** (HTTPS) | ✅ | ✅ | **100% Funcional** |
+| **Playground Figma** | ⚠️ | ⚠️ | Limitado (CORS/Câmera) |
+
+**⚠️ IMPORTANTE:** 
+- ✅ O sistema é **totalmente funcional** quando executado localmente ou em produção com HTTPS
+- ✅ Captura frames da webcam → Envia para YOLO → Retorna bounding boxes na tela
+- ⚠️ O Playground do Figma tem limitações de segurança que podem bloquear a câmera
+- 🚀 Para testes reais, execute localmente com `./run_dev.sh`
+
+**📹 Como funciona a câmera:**
+1. Você faz login no sistema
+2. Navegador solicita permissão de câmera automaticamente
+3. Você clica em "Permitir" no popup
+4. Você clica em "Iniciar Sistema"
+5. Pronto! Sistema começa a detectar automaticamente
 
 ---
 

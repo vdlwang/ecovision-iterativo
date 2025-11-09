@@ -1,9 +1,9 @@
+// EcoVision Camera Feed Component - v4.0 with Auto Permission Request
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Camera, Video, RefreshCw, Play, Pause, AlertTriangle, CheckCircle } from "lucide-react";
+import { Camera, Video, Play, Pause, AlertTriangle, CheckCircle, RefreshCw } from "lucide-react";
 import { projectId, publicAnonKey } from "../utils/supabase/info";
 
 interface BoundingBox {
@@ -23,7 +23,7 @@ interface Detection {
 interface LegacyDetection {
   class: string;
   confidence: number;
-  bbox: [number, number, number, number]; // Para compatibilidade
+  bbox: [number, number, number, number];
 }
 
 interface CameraFeedProps {
@@ -33,12 +33,10 @@ interface CameraFeedProps {
   minConfidence: number;
   onToggleSystem?: () => void;
   inline?: boolean;
-  userToken?: string; // Token de autenticação do usuário
+  userToken?: string;
 }
 
 export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence, onToggleSystem, inline = false, userToken }: CameraFeedProps) {
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<string | undefined>(undefined);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -47,42 +45,62 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
   const [error, setError] = useState<string | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [lastInferenceTime, setLastInferenceTime] = useState<number>(0);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionRequested, setPermissionRequested] = useState(false);
   
   // Sincroniza isDetecting com isRunning quando isRunning muda
   useEffect(() => {
     setIsDetecting(isRunning);
   }, [isRunning]);
 
-  // Enumera dispositivos de câmera disponíveis
+  // Solicita permissão automaticamente ao carregar o componente (pós-login)
   useEffect(() => {
-    const enumerateDevices = async () => {
-      try {
-        const allDevices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = allDevices.filter(device => 
-          device.kind === 'videoinput' && 
-          device.deviceId && 
-          device.deviceId.trim() !== ''
-        );
-        setDevices(videoDevices);
-        
-        if (videoDevices.length > 0 && !selectedDevice) {
-          setSelectedDevice(videoDevices[0].deviceId);
-        }
-
-        console.log(`[CÂMERA] ${videoDevices.length} câmera(s) detectada(s):`, videoDevices.map(d => d.label || d.deviceId));
-      } catch (err) {
-        console.error('[CÂMERA] Erro ao enumerar dispositivos:', err);
-        setError('Não foi possível acessar as câmeras do dispositivo');
-      }
-    };
-
-    enumerateDevices();
+    requestCameraPermission();
   }, []);
 
-  // Inicia/para stream da câmera
+  const requestCameraPermission = async () => {
+    setPermissionRequested(true);
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      console.log('[CÂMERA] Solicitando permissão de acesso...');
+      
+      // Solicita acesso à câmera
+      const testStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment", // traseira no celular, padrão no PC
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+      
+      // Para o stream de teste, mas marca permissão concedida
+      testStream.getTracks().forEach(track => track.stop());
+      
+      setPermissionGranted(true);
+      console.log('[CÂMERA] ✅ Permissão concedida pelo usuário');
+    } catch (err: any) {
+      console.error('[CÂMERA] ❌ Erro ao solicitar permissão:', err);
+      setPermissionGranted(false);
+      
+      if (err.name === 'NotAllowedError') {
+        setError('Permissão de câmera negada. Clique em "Carregar" e autorize o acesso.');
+      } else if (err.name === 'NotFoundError') {
+        setError('Nenhuma câmera encontrada no dispositivo.');
+      } else if (err.name === 'NotSupportedError' || !window.isSecureContext) {
+        setError('⚠️ Este recurso só funciona via HTTPS ou localhost.');
+      } else {
+        setError(`Erro ao acessar câmera: ${err.message}`);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Inicia/para stream da câmera quando o sistema está rodando
   useEffect(() => {
-    if (!isRunning || !selectedDevice) {
-      // Para stream se existir
+    if (!isRunning) {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
         setStream(null);
@@ -96,30 +114,42 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
       setError(null);
       
       try {
-        // Para stream anterior se existir
         if (stream) {
           stream.getTracks().forEach(track => track.stop());
         }
 
+        // Solicita e inicia a câmera padrão do navegador
         const newStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
+            facingMode: "environment",
             width: { ideal: 1920 },
             height: { ideal: 1080 }
           }
         });
 
         setStream(newStream);
+        setPermissionGranted(true);
+        setPermissionRequested(true);
         
         if (videoRef.current) {
           videoRef.current.srcObject = newStream;
         }
 
-        const selectedDeviceInfo = devices.find(d => d.deviceId === selectedDevice);
-        console.log(`[CÂMERA] Stream iniciada - Câmera: ${selectedDeviceInfo?.label || selectedDevice}`);
-      } catch (err) {
-        console.error('[CÂMERA] Erro ao iniciar stream:', err);
-        setError('Erro ao acessar a câmera selecionada');
+        console.log('[CÂMERA] ✅ Permissão concedida e stream iniciada');
+      } catch (err: any) {
+        console.error('[CÂMERA] ❌ Erro ao iniciar stream:', err);
+        setPermissionGranted(false);
+        setPermissionRequested(true);
+        
+        if (err.name === 'NotAllowedError') {
+          setError('❌ Permissão de câmera negada. Clique no botão abaixo para tentar novamente e autorize o acesso quando o navegador solicitar.');
+        } else if (err.name === 'NotFoundError') {
+          setError('❌ Nenhuma câmera encontrada no dispositivo.');
+        } else if (err.name === 'NotSupportedError' || !window.isSecureContext) {
+          setError('⚠️ Este recurso só funciona via HTTPS ou localhost.');
+        } else {
+          setError(`❌ Erro ao acessar câmera: ${err.message}`);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -132,7 +162,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [isRunning, selectedDevice]);
+  }, [isRunning]);
 
   // Processa frames e envia para inferência
   useEffect(() => {
@@ -156,14 +186,13 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
 
       // Converte para base64
       const frameData = canvas.toDataURL('image/jpeg', 0.8);
-      const base64Image = frameData.split(',')[1]; // Remove prefixo data:image
+      const base64Image = frameData.split(',')[1];
 
       const startTime = performance.now();
 
       try {
-        console.log(`[INFERÊNCIA] Enviando frame para modelo ${modelVersion} (confiança mínima: ${minConfidade}%)`);
+        console.log(`[INFERÊNCIA] Enviando frame para modelo ${modelVersion} (confiança mínima: ${minConfidence}%)`);
         
-        // Chama o backend que se comunica com o servidor Python
         const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-ea835390/inference`, {
           method: 'POST',
           headers: { 
@@ -190,7 +219,6 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
             
             setDetections(data.detections);
             
-            // Notifica detecção de maior confiança (converte para formato legado)
             if (onDetection && data.detections.length > 0) {
               const firstDetection = data.detections[0];
               const legacyDetection: LegacyDetection = {
@@ -212,10 +240,9 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           const errorData = await response.json();
           console.error('[INFERÊNCIA] Erro do servidor:', errorData.error);
           
-          // Se for erro de autenticação, alerta o usuário
           if (response.status === 401) {
             setError('Sessão expirada. Por favor, faça login novamente.');
-            console.error('[INFERÊNCIA] Token inválido ou expirado. Faça logout e login novamente.');
+            console.error('[INFERÊNCIA] Token inválido ou expirado.');
           } else {
             setError(errorData.error || 'Erro ao processar inferência');
           }
@@ -258,7 +285,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           setDetections([]);
         }
       }
-    }, 2000); // Processa a cada 2 segundos para não sobrecarregar
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isDetecting, stream, modelVersion, minConfidence, onDetection, userToken]);
@@ -318,17 +345,6 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
     drawBoxes();
   }, [detections]);
 
-  const handleRefreshDevices = async () => {
-    const allDevices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = allDevices.filter(device => 
-      device.kind === 'videoinput' && 
-      device.deviceId && 
-      device.deviceId.trim() !== ''
-    );
-    setDevices(videoDevices);
-    console.log('[CÂMERA] Dispositivos atualizados:', videoDevices.length);
-  };
-
   const cameraContent = (
     <div className="space-y-4">
       {/* Título e Status */}
@@ -340,12 +356,12 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           </h3>
           <Badge variant={stream ? "default" : "secondary"} className={stream ? "bg-recycling-accent text-white" : ""}>
             <Video className="h-3 w-3 mr-1" />
-            {stream ? "AO VIVO" : "INATIVO"}
+            {stream ? "AO VIVO" : permissionGranted ? "INATIVO" : "SEM PERMISSÃO"}
           </Badge>
         </div>
         
         {/* Status e Controles */}
-        {stream && selectedDevice && (
+        {stream && (
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-white/50 rounded-lg border border-recycling-primary/20">
             <div className="flex items-center gap-2">
               {isDetecting ? (
@@ -379,50 +395,20 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
         )}
       </div>
       
-      {/* Seletor de câmera */}
-      <div className="flex gap-2 items-center">
-        <Select value={selectedDevice || undefined} onValueChange={setSelectedDevice}>
-          <SelectTrigger className="flex-1">
-            <SelectValue placeholder="Selecione uma câmera" />
-          </SelectTrigger>
-          <SelectContent>
-            {devices.length > 0 ? (
-              devices
-                .filter(device => device.deviceId && device.deviceId.trim() !== '')
-                .map((device, index) => (
-                  <SelectItem key={device.deviceId} value={device.deviceId}>
-                    {device.label || `Câmera ${index + 1}`}
-                  </SelectItem>
-                ))
-            ) : (
-              <SelectItem value="no-camera-placeholder" disabled>
-                Nenhuma câmera detectada
-              </SelectItem>
-            )}
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handleRefreshDevices}
-          title="Atualizar lista de câmeras"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
-      </div>
-      
       {/* Feed de vídeo */}
       <div className="relative bg-gray-900 aspect-video w-full overflow-hidden rounded-lg border-2 border-recycling-primary/30">
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center text-red-400 bg-gray-900 z-10">
-            <div className="text-center p-4 max-w-md">
-              <AlertTriangle className="h-12 w-12 mx-auto mb-3 text-material-rejected" />
-              <p className="text-sm font-semibold mb-2">{error}</p>
-              {error.includes('expirada') || error.includes('autenticação') ? (
-                <p className="text-xs text-gray-400 mt-2">
-                  Tente fazer logout e login novamente para renovar sua sessão.
-                </p>
-              ) : null}
+          <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-gray-900 z-10">
+            <div className="text-center p-4">
+              <Camera className="h-16 w-16 mx-auto mb-3 text-material-rejected" />
+              <p className="text-sm mb-2 text-red-400">{error}</p>
+              <Button
+                onClick={requestCameraPermission}
+                size="sm"
+                className="bg-recycling-primary hover:bg-recycling-primary-dark text-white mt-3"
+              >
+                Carregar
+              </Button>
             </div>
           </div>
         )}
@@ -431,30 +417,48 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
             <div className="text-center text-white">
               <div className="w-12 h-12 border-4 border-recycling-primary border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-              <p className="text-sm">Iniciando câmera...</p>
+              <p className="text-sm">
+                {permissionGranted ? 'Iniciando câmera...' : 'Solicitando permissão de câmera...'}
+              </p>
             </div>
           </div>
         )}
         
-        {!stream && !isLoading && !error && (
+        {!stream && !isLoading && !error && !permissionGranted && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-            <div className="text-center">
-              <Camera className="h-16 w-16 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Câmera Inativa</p>
-              <p className="text-xs opacity-75 mt-1">Selecione uma câmera acima</p>
+            <div className="text-center p-4">
+              <Camera className="h-16 w-16 mx-auto mb-4 text-recycling-primary" />
+              <p className="text-sm mb-4 font-medium text-gray-300">Câmera Pronta para Iniciar</p>
+              <Button
+                onClick={requestCameraPermission}
+                size="sm"
+                className="bg-recycling-primary hover:bg-recycling-primary-dark text-white"
+              >
+                Carregar
+              </Button>
             </div>
           </div>
         )}
 
-          {/* Video element */}
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-            style={{ display: stream ? 'block' : 'none' }}
-          />
+        {!stream && !isLoading && !error && permissionGranted && (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+            <div className="text-center p-4">
+              <Camera className="h-16 w-16 mx-auto mb-4 text-recycling-primary" />
+              <p className="text-sm mb-2 font-medium text-gray-300">Câmera Pronta para Iniciar</p>
+              <p className="text-xs opacity-75">Inicie o sistema para ativar</p>
+            </div>
+          </div>
+        )}
+
+        {/* Video element */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+          style={{ display: stream ? 'block' : 'none' }}
+        />
 
         {/* Canvas overlay para bounding boxes */}
         <canvas
@@ -467,7 +471,7 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
         {stream && (
           <>
             <div className="absolute bottom-3 left-3 text-white text-xs bg-black/70 px-2 py-1 rounded">
-              {devices.find(d => d.deviceId === selectedDevice)?.label || 'Câmera'} | {new Date().toLocaleTimeString()}
+              Câmera Padrão | {new Date().toLocaleTimeString()}
             </div>
             
             {detections.length > 0 && (

@@ -1,3 +1,29 @@
+/**
+ * 🌿 EcoVision - Sistema Inteligente de Reciclagem com IA
+ * 
+ * SISTEMA TOTALMENTE FUNCIONAL:
+ * ✅ Captura webcam em tempo real via getUserMedia API
+ * ✅ Solicitação automática de permissão de câmera pós-login
+ * ✅ Inferência YOLO (YOLOv8n/s/m) com modelos Ultralytics
+ * ✅ Bounding boxes desenhadas em tempo real na tela
+ * ✅ Detecção de 4 materiais: papel, metal, plástico, vidro
+ * ✅ Controle de 3 cancelas baseado nas detecções
+ * ✅ Dashboard com estatísticas e histórico
+ * 
+ * COMO EXECUTAR:
+ * 1. pip install -r requirements.txt
+ * 2. ./run_dev.sh (Linux/Mac) ou run_dev.bat (Windows)
+ * 3. http://localhost:5000
+ * 4. Faça login → Permita câmera → Clique "Iniciar Sistema"
+ * 
+ * IMPORTANTE:
+ * - ✅ Funciona 100% em localhost (HTTP)
+ * - ✅ Funciona 100% em produção (HTTPS)
+ * - ⚠️ Playground Figma tem limitações (CORS/Câmera)
+ * 
+ * Documentação: README.md | COMO_EXECUTAR.md | INSTALACAO.md
+ */
+
 import { useState, useEffect } from "react";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
@@ -248,8 +274,7 @@ export default function App() {
                     Modo Demonstração Ativo
                   </p>
                   <p className="text-yellow-700 text-xs mt-1">
-                    Você está usando o EcoVision em modo demo. Os dados não serão salvos permanentemente. 
-                    Para salvar suas configurações e dados, configure o login com Google no Supabase.
+                    Você está usando o EcoVision em modo demo. Os dados não serão salvos permanentemente.
                   </p>
                 </div>
               </div>

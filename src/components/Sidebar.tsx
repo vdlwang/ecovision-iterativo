@@ -73,14 +73,14 @@ export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: Sidebar
 
   return (
     <>
-      {/* Mobile Menu Button */}
-      {isMobile && (
+      {/* Mobile Menu Button - Apenas Menu (três barras) */}
+      {isMobile && !isMobileOpen && (
         <Button
           onClick={toggleSidebar}
           className="fixed top-4 left-4 z-50 bg-recycling-primary hover:bg-recycling-primary-dark text-white md:hidden"
           size="icon"
         >
-          {isMobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          <Menu className="h-5 w-5" />
         </Button>
       )}
 
@@ -116,14 +116,27 @@ export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: Sidebar
       <div className="p-6 border-b border-white/20 cursor-pointer hover:bg-white/5 transition-colors" onClick={toggleSidebar}>
         <div className="flex items-center justify-between">
           {(isExpanded || isMobile) ? (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-1">
               <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center flex-shrink-0">
                 <Leaf className="w-6 h-6 text-recycling-primary" />
               </div>
-              <div>
+              <div className="flex-1">
                 <h1 className="text-white font-bold">EcoVision</h1>
                 <p className="text-white/70 text-xs">Sistema de Reciclagem</p>
               </div>
+              {isMobile && (
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMobileOpen(false);
+                  }}
+                  variant="ghost"
+                  size="icon"
+                  className="text-white hover:bg-white/10 flex-shrink-0"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              )}
             </div>
           ) : (
             <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto">

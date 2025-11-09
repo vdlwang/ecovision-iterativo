@@ -204,6 +204,22 @@ app.post("/make-server-ea835390/config", async (c) => {
     
     const { gateConfigs, minAccuracy, modelVersion } = await c.req.json();
     
+    // MODO DEMO: Apenas retorna sucesso sem salvar no banco
+    if (user.id === 'demo-user-ecovision-2024') {
+      console.log('[CONFIG] Modo demo - configuração não será salva permanentemente');
+      return c.json({ 
+        success: true, 
+        config: {
+          gate_1_material: gateConfigs?.['1'] || null,
+          gate_2_material: gateConfigs?.['2'] || null,
+          gate_3_material: gateConfigs?.['3'] || null,
+          min_confidence: minAccuracy || 85,
+          model_version: modelVersion || 'YOLOv8n',
+          is_active: true
+        }
+      });
+    }
+    
     // Desativa configurações antigas
     await supabase
       .from('system_config')
@@ -248,6 +264,21 @@ app.get("/make-server-ea835390/config", async (c) => {
     
     if (!user) {
       return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    // MODO DEMO: Retorna valores padrão
+    if (user.id === 'demo-user-ecovision-2024') {
+      console.log('[CONFIG] Modo demo - retornando configuração padrão');
+      return c.json({ 
+        success: true, 
+        config: {
+          gate_1_material: null,
+          gate_2_material: null,
+          gate_3_material: null,
+          min_confidence: 85,
+          model_version: 'YOLOv8n'
+        }
+      });
     }
     
     const { data, error } = await supabase
@@ -424,7 +455,35 @@ app.get("/make-server-ea835390/stats", async (c) => {
     const user = await getUserFromToken(authHeader);
     
     if (!user) {
+      console.error('[STATS] Usuário não autorizado');
       return c.json({ success: false, error: 'Não autorizado' }, 401);
+    }
+    
+    console.log(`[STATS] Buscando estatísticas para usuário: ${user.email}`);
+    
+    // MODO DEMO: Retorna dados mockados
+    if (user.id === 'demo-user-ecovision-2024') {
+      console.log('[STATS] Modo demo detectado - retornando dados mockados');
+      return c.json({ 
+        success: true, 
+        stats: {
+          total: 0,
+          byMaterial: {
+            papel: 0,
+            metal: 0,
+            plastico: 0,
+            vidro: 0
+          },
+          byGate: {
+            '1': 0,
+            '2': 0,
+            '3': 0
+          },
+          avgConfidence: 0,
+          recentDetections: [],
+          totalSessions: 0
+        }
+      });
     }
     
     // Total de inferências
@@ -503,7 +562,7 @@ app.get("/make-server-ea835390/stats", async (c) => {
     });
     
   } catch (error) {
-    console.error('Erro ao obter estatísticas:', error);
+    console.error('[STATS] Erro ao obter estatísticas:', error);
     return c.json({ success: false, error: String(error) }, 500);
   }
 });
@@ -671,6 +730,21 @@ app.get("/make-server-ea835390/user/stats", async (c) => {
     }
     
     console.log(`[USER/STATS] Buscando estatísticas do usuário ${user.email}`);
+    
+    // MODO DEMO: Retorna dados mockados
+    if (user.id === 'demo-user-ecovision-2024') {
+      console.log('[USER/STATS] Modo demo detectado - retornando dados mockados');
+      return c.json({ 
+        success: true, 
+        stats: {
+          totalSessions: 0,
+          totalDetections: 0,
+          totalProcessed: 0,
+          lastSession: null,
+          favoriteConfiguration: null
+        }
+      });
+    }
     
     // Total de sessões
     const { count: totalSessions } = await supabase
