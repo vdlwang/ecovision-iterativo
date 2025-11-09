@@ -2,8 +2,76 @@
 
 Esta pasta deve conter os modelos treinados do YOLO para detecção de materiais recicláveis.
 
+## ⚡ NOVIDADE: Inferência no Navegador com ONNX
+
+O EcoVision agora suporta **inferência diretamente no navegador** usando ONNX Runtime Web! Isso elimina a necessidade de um servidor Python separado e oferece:
+
+- ✅ Processamento **local e privado** (dados não saem do navegador)
+- ✅ **Latência ultra-baixa** (sem necessidade de rede)
+- ✅ **Funciona offline** após carregar o modelo
+- ✅ **Sem custos de servidor** para inferência
+
+### ⚙️ Início Rápido com ONNX
+
+O sistema está configurado para usar ONNX no navegador por padrão. Para funcionar:
+
+1. **Tenha um modelo YOLO treinado** (arquivo `.pt`)
+2. **Converta para ONNX** (veja instruções abaixo)
+3. **Coloque o arquivo `.onnx` nesta pasta** `/models/`
+4. **Pronto!** O sistema detectará automaticamente
+
+### Como Converter Modelo YOLO para ONNX
+
+```python
+from ultralytics import YOLO
+
+# Carregar seu modelo treinado
+model = YOLO('models/yolov8n.pt')
+
+# Exportar para ONNX
+model.export(format='onnx', simplify=True, dynamic=False, imgsz=640)
+
+# Isso criará: models/yolov8n.onnx
+```
+
+**Ou use o script de conversão fornecido:**
+```bash
+# Ver convert_to_onnx.py na raiz do projeto
+python convert_to_onnx.py
+```
+
+### Colocar Modelo ONNX na Pasta /models
+
+Após exportar, coloque o arquivo `.onnx` na pasta `/models`:
+```bash
+cp models/yolov8n.onnx /path/to/ecovision/models/yolov8n.onnx
+```
+
+O sistema detectará automaticamente o modelo ONNX e usará inferência no navegador!
+
+### 🔄 Sistema Híbrido
+
+O EcoVision usa um sistema híbrido inteligente:
+
+1. **Primeira opção:** ONNX no navegador (se modelo `.onnx` disponível)
+2. **Fallback:** Servidor Python (se `inference_server.py` rodando)
+3. **Fallback final:** Mock detections (para desenvolvimento)
+
+**Recomendado:** Use ONNX para melhor performance e experiência do usuário.
+
+---
+
 ## Modelos Necessários
 
+Você pode usar tanto modelos `.pt` (para servidor Python) quanto `.onnx` (para navegador).
+
+### Formato ONNX (Recomendado - Navegador)
+- **yolov8n.onnx** - Modelo Nano ONNX (~12MB)
+  - Executa diretamente no navegador
+  - FPS: 30-60 FPS (varia com hardware do cliente)
+  - Sem necessidade de servidor Python
+
+### Formato PyTorch (Servidor Python)
 Coloque os seguintes arquivos `.pt` nesta pasta:
 
 1. **yolov8n.pt** - Modelo Nano (mais rápido, ~6MB)

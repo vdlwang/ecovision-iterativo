@@ -10,9 +10,23 @@
 
 **Sistema de controle para esteira de reciclagem integrado com IA para detecção e separação automática de materiais recicláveis**
 
-[🏗️ Arquitetura](#️-arquitetura) • [📊 Diagramas](./diagrams/INDEX.md) • [🚀 Deploy](#-deploy-em-produção)
+[🚀 Início Rápido](#-quick-start) • [📚 Documentação](#-documentação) • [🏗️ Arquitetura](#️-arquitetura) • [🆘 Suporte](#-suporte)
 
 </div>
+
+---
+
+## 🎯 Status Atual: ✅ Sistema Operacional
+
+**Última atualização:** 09/Nov/2025  
+**Versão:** 5.0 - ONNX Híbrido
+
+- ✅ **Sistema totalmente funcional**
+- ✅ **Erro "Connection Refused" resolvido**
+- ✅ **ONNX no navegador implementado**
+- ✅ **Sistema híbrido com fallbacks automáticos**
+
+📄 **[Ver STATUS completo →](/STATUS.md)**
 
 ---
 
@@ -29,8 +43,10 @@ O **EcoVision** é um sistema completo de controle para centros de reciclagem qu
 
 ### 🌟 Diferenciais
 
+- ✅ **Inferência no Navegador (ONNX)** - processamento local, sem servidor Python necessário
 - ✅ **Detecção em Tempo Real** com webcam/câmera
 - ✅ **3 Modelos YOLO** (nano, small, medium) para diferentes necessidades
+- ✅ **Dual-Mode**: Inferência local (ONNX) ou servidor Python
 - ✅ **Configurável** - defina qual cancela separa qual material
 - ✅ **Banco de Dados Real** - todas detecções persistidas no PostgreSQL
 - ✅ **Dashboard Completo** - gráficos e métricas em tempo real
@@ -41,7 +57,27 @@ O **EcoVision** é um sistema completo de controle para centros de reciclagem qu
 
 ## 🚀 Quick Start
 
-### ⚡ 3 Passos para Rodar o Projeto
+### 🆕 NOVO: Modo Inferência Local (Sem Servidor Python)
+
+**A maneira mais rápida de começar!**
+
+```bash
+# 1. Converter modelo YOLO para ONNX (apenas uma vez)
+pip install ultralytics
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', simplify=True)"
+
+# 2. Copiar modelo para pasta models/
+cp yolov8n.onnx models/
+
+# 3. Iniciar aplicação (sem servidor Python necessário!)
+npm run dev
+```
+
+📖 **Guia completo:** [`QUICKSTART_ONNX.md`](./QUICKSTART_ONNX.md)
+
+---
+
+### ⚡ Modo Tradicional (Servidor Python)
 
 ```bash
 # 1. Instalar dependências Python
@@ -58,6 +94,8 @@ run_dev.bat           # Windows
 ```
 
 **Pronto!** Acesse **http://localhost:5173** (frontend) e configure o backend no Supabase.
+
+📖 **Comparação de modos:** [`INFERENCE_MODES.md`](./INFERENCE_MODES.md)
 
 ### 📋 Requisitos
 
@@ -455,11 +493,50 @@ in the Software without restriction...
 
 ---
 
+## 📚 Documentação
+
+O EcoVision possui documentação completa e organizada:
+
+### 📖 Documentos Principais
+
+| Documento | Descrição |
+|-----------|-----------|
+| **[STATUS.md](/STATUS.md)** | ✅ Status atual do sistema e checklist |
+| **[TROUBLESHOOTING.md](/TROUBLESHOOTING.md)** | 🔧 Resolução de problemas completa |
+| **[SISTEMA_INFERENCIA.md](/SISTEMA_INFERENCIA.md)** | 🧠 Como funciona o sistema de IA |
+| **[QUICKSTART_ONNX.md](/QUICKSTART_ONNX.md)** | ⚡ Guia rápido ONNX |
+| **[INFERENCE_MODES.md](/INFERENCE_MODES.md)** | 🔄 Modos de inferência |
+| **[DOCS_INDEX.md](/DOCS_INDEX.md)** | 📑 Índice completo de documentação |
+
+### 🏗️ Arquitetura e Diagramas
+
+- **[diagrams/](/diagrams/)** - Todos os diagramas arquiteturais (PlantUML)
+- **[STRUCTURE.md](/STRUCTURE.md)** - Estrutura completa de arquivos
+- **[PROJECT_GUIDE.md](/PROJECT_GUIDE.md)** - Guia completo do projeto
+
+### 🎯 Guias Específicos
+
+- **[models/README.md](/models/README.md)** - Treinamento e conversão de modelos
+- **[convert_to_onnx.py](/convert_to_onnx.py)** - Script de conversão YOLO → ONNX
+- **[guidelines/Guidelines.md](/guidelines/Guidelines.md)** - Diretrizes de desenvolvimento
+
+**💡 Dica:** Comece pelo [STATUS.md](/STATUS.md) para ter uma visão geral do sistema atual!
+
+---
+
 ## 📞 Suporte
 
 **Problemas com o sistema?**
 
-1. Verifique se o servidor Python está rodando: `curl http://localhost:8000/health`
+### 1️⃣ Consulte a Documentação
+- **[TROUBLESHOOTING.md](/TROUBLESHOOTING.md)** - Soluções para problemas comuns
+- **[STATUS.md](/STATUS.md)** - Verificar status e requisitos
+
+### 2️⃣ Verificações Básicas
+
+```bash
+# Verificar se o servidor Python está rodando (opcional)
+curl http://localhost:8000/health
 2. Verifique se a câmera tem permissões no navegador
 3. Verifique os logs do console do navegador (F12)
 4. Consulte os [diagramas](./diagrams/INDEX.md) para entender a arquitetura

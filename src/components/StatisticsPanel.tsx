@@ -55,8 +55,9 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
 
   // Carrega estatísticas do banco de dados
   const loadStats = async () => {
-    if (!userToken) {
-      console.log('[DASHBOARD] Aguardando autenticação... Token não disponível.');
+    // Verifica se o token é válido (não é modo demo)
+    if (!userToken || userToken.startsWith('DEMO_MODE')) {
+      console.log('[DASHBOARD] Modo demo ou token inválido - estatísticas não disponíveis.');
       setLoading(false);
       return;
     }
@@ -145,6 +146,8 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
           <p className="text-sm text-gray-600">
             {lastUpdate ? (
               <>Última atualização: {lastUpdate.toLocaleTimeString()}</>
+            ) : userToken?.startsWith('DEMO_MODE') ? (
+              '⚠️ Modo Demo - Estatísticas reais requerem login com Google OAuth'
             ) : (
               'Carregando dados...'
             )}
@@ -152,7 +155,7 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
         </div>
         <Button 
           onClick={loadStats} 
-          disabled={loading}
+          disabled={loading || userToken?.startsWith('DEMO_MODE')}
           variant="outline"
           className="border-recycling-primary text-recycling-primary hover:bg-recycling-lighter"
         >
@@ -160,6 +163,24 @@ export function StatisticsPanel({ isSystemRunning, gateConfigs, userToken }: Sta
           Atualizar
         </Button>
       </div>
+      
+      {/* Aviso de Modo Demo */}
+      {userToken?.startsWith('DEMO_MODE') && (
+        <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-yellow-800 text-sm">
+                📊 Estatísticas Limitadas em Modo Demo
+              </p>
+              <p className="text-yellow-700 text-xs mt-1">
+                As estatísticas do dashboard requerem autenticação OAuth para acessar o banco de dados. 
+                Faça login com Google para visualizar dados reais de suas sessões.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cards de Métricas Principais */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
