@@ -61,9 +61,9 @@ Escolha o seu nível:
 │     ↓                                                │
 │  3. USUÁRIO CLICA "PERMITIR" NO POPUP                │
 │     ↓                                                │
-│  4. USUÁRIO CLICA "INICIAR SISTEMA"                  │
+│  4. USUÁRIO CLICA "INICIAR SISTEMA" NO FEED CÂMERA   │
 │     ↓                                                │
-│  5. LOOP A CADA 2 SEGUNDOS:                          │
+│  5. CÂMERA ATIVA - LOOP A CADA 2 SEGUNDOS:           │
 │     ┌────────────────────────────────────┐           │
 │     │ Webcam captura frame               │           │
 │     │        ↓                            │           │

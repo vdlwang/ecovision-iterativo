@@ -444,8 +444,15 @@ export function CameraFeed({ isRunning, onDetection, modelVersion, minConfidence
           <div className="absolute inset-0 flex items-center justify-center text-gray-400">
             <div className="text-center p-4">
               <Camera className="h-16 w-16 mx-auto mb-4 text-recycling-primary" />
-              <p className="text-sm mb-2 font-medium text-gray-300">Câmera Pronta para Iniciar</p>
-              <p className="text-xs opacity-75">Inicie o sistema para ativar</p>
+              <p className="text-sm mb-4 font-medium text-gray-300">Câmera Pronta</p>
+              <Button
+                onClick={startCamera}
+                size="sm"
+                className="bg-recycling-primary hover:bg-recycling-primary-dark text-white"
+              >
+                <Play className="h-3 w-3 mr-1.5" />
+                Iniciar Sistema
+              </Button>
             </div>
           </div>
         )}

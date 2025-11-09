@@ -80,9 +80,9 @@ http://localhost:5000
            ↓
 2. Você clica "Permitir" no popup do navegador → Câmera pronta ✅
            ↓
-3. Você clica "Iniciar Sistema" → Loop começa 🔄
+3. Você clica "Iniciar Sistema" no feed da câmera → Câmera ativa 📹
            ↓
-4. A cada 2 segundos:
+4. Loop começa 🔄 - A cada 2 segundos:
    
    Webcam → Captura Frame
       ↓

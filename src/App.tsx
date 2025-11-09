@@ -14,7 +14,7 @@
  * 1. pip install -r requirements.txt
  * 2. ./run_dev.sh (Linux/Mac) ou run_dev.bat (Windows)
  * 3. http://localhost:5000
- * 4. Faça login → Permita câmera → Clique "Iniciar Sistema"
+ * 4. Faça login → Permita câmera → Clique "Iniciar Sistema" no feed
  * 
  * IMPORTANTE:
  * - ✅ Funciona 100% em localhost (HTTP)

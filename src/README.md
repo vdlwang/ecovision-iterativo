@@ -107,7 +107,7 @@ run_dev.bat           # Windows
 1. Você faz login no sistema
 2. Navegador solicita permissão de câmera automaticamente
 3. Você clica em "Permitir" no popup
-4. Você clica em "Iniciar Sistema"
+4. Você clica em "Iniciar Sistema" no feed da câmera
 5. Pronto! Sistema começa a detectar automaticamente
 
 ---
