@@ -1,236 +1,301 @@
 # 📚 Índice de Documentação - EcoVision
 
-## 🚀 Para Começar Rápido
+## 🚀 Início Rápido
 
-| Arquivo | Quando Usar | Tempo |
-|---------|-------------|-------|
-| **[⚡ START.md](./START.md)** | Só quer os comandos | 30 segundos |
-| **[📖 LEIA_ME_PRIMEIRO.md](./LEIA_ME_PRIMEIRO.md)** | Primeira vez no projeto | 5 minutos |
-| **[🎯 COMO_EXECUTAR.md](./COMO_EXECUTAR.md)** | Guia detalhado de execução | 10 minutos |
-| **[📦 INSTALACAO.md](./INSTALACAO.md)** | Instalação completa | 15 minutos |
+Novo no projeto? Comece aqui:
 
----
-
-## 📖 Documentação Técnica
-
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[README.md](./README.md)** | Visão geral do projeto completo |
-| **[QUICKSTART.md](./QUICKSTART.md)** | Guia de início rápido original |
-| **[PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md)** | Estrutura de arquivos e pastas |
-| **[API.md](./API.md)** | Documentação da API REST |
-| **[WEBCAM_INFERENCE_SETUP.md](./WEBCAM_INFERENCE_SETUP.md)** | Setup de webcam e inferência |
-| **[CAMERA_TROUBLESHOOTING.md](./CAMERA_TROUBLESHOOTING.md)** | 🔧 Solução de problemas de câmera |
+1. **[STATUS.md](/STATUS.md)** - Status atual do sistema e visão geral
+2. **[README.md](/README.md)** - Visão geral do projeto
+3. **[QUICKSTART_ONNX.md](/QUICKSTART_ONNX.md)** - Guia rápido para começar
 
 ---
 
-## 🔐 Autenticação
+## 🎯 Por Caso de Uso
 
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[AUTH_FIX_COMPLETE.md](./AUTH_FIX_COMPLETE.md)** | Correções de autenticação |
-| **[AUTH_TROUBLESHOOTING.md](./AUTH_TROUBLESHOOTING.md)** | Solução de problemas de auth |
-| **[DEMO_MODE_SETUP.md](./DEMO_MODE_SETUP.md)** | Configuração do modo demo |
+### "Quero entender o sistema"
+- **[README.md](/README.md)** - O que é o EcoVision
+- **[PROJECT_GUIDE.md](/PROJECT_GUIDE.md)** - Guia completo do projeto
+- **[STRUCTURE.md](/STRUCTURE.md)** - Estrutura de arquivos
+- **[diagrams/](/diagrams/)** - Diagramas arquiteturais
 
----
+### "Quero começar a desenvolver"
+- **[STATUS.md](/STATUS.md)** - Status e checklist
+- **[guidelines/Guidelines.md](/guidelines/Guidelines.md)** - Diretrizes
+- **[CHANGELOG_ONNX.md](/CHANGELOG_ONNX.md)** - Mudanças recentes
 
-## 🏗️ Arquitetura
+### "Quero configurar inferência"
+- **[SISTEMA_INFERENCIA.md](/SISTEMA_INFERENCIA.md)** - Como funciona a inferência
+- **[INFERENCE_MODES.md](/INFERENCE_MODES.md)** - Modos disponíveis
+- **[QUICKSTART_ONNX.md](/QUICKSTART_ONNX.md)** - Setup ONNX
+- **[models/README.md](/models/README.md)** - Modelos e treinamento
 
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[diagrams/INDEX.md](./diagrams/INDEX.md)** | Índice de todos os diagramas |
-| **[diagrams/EXECUTIVE_SUMMARY.md](./diagrams/EXECUTIVE_SUMMARY.md)** | Resumo executivo da arquitetura |
-| **[diagrams/QUICK_REFERENCE.md](./diagrams/QUICK_REFERENCE.md)** | Referência rápida de diagramas |
+### "Tenho um problema"
+- **[TROUBLESHOOTING.md](/TROUBLESHOOTING.md)** - Resolução de problemas
+- **[STATUS.md](/STATUS.md)** - Verificar status atual
 
----
-
-## 🤖 Modelos de IA
-
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[models/README.md](./models/README.md)** | Como treinar modelos YOLO customizados |
-
----
-
-## 🗄️ Banco de Dados
-
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[supabase/migrations/README.md](./supabase/migrations/README.md)** | Migrations e schema do banco |
-| **[supabase/migrations/001_create_ecovision_tables.sql](./supabase/migrations/001_create_ecovision_tables.sql)** | Schema completo das tabelas |
+### "Quero treinar um modelo"
+- **[models/README.md](/models/README.md)** - Guia completo de treinamento
+- **[convert_to_onnx.py](/convert_to_onnx.py)** - Script de conversão
 
 ---
 
-## 📝 Outros
+## 📖 Documentação por Categoria
 
-| Arquivo | Conteúdo |
-|---------|----------|
-| **[CHANGELOG.md](./CHANGELOG.md)** | Histórico de mudanças |
-| **[Attributions.md](./Attributions.md)** | Créditos e atribuições |
-| **[guidelines/Guidelines.md](./guidelines/Guidelines.md)** | Diretrizes de desenvolvimento |
+### 🏗️ Arquitetura
+
+| Documento | Descrição | Quando usar |
+|-----------|-----------|-------------|
+| [diagrams/README.md](/diagrams/README.md) | Todos os diagramas | Entender arquitetura |
+| [diagrams/INDEX.md](/diagrams/INDEX.md) | Índice dos diagramas | Navegação rápida |
+| [diagrams/EXECUTIVE_SUMMARY.md](/diagrams/EXECUTIVE_SUMMARY.md) | Resumo executivo | Apresentações |
+| [diagrams/architecture-diagram.puml](/diagrams/architecture-diagram.puml) | Diagrama de arquitetura | Ver componentes |
+| [diagrams/class-diagram.puml](/diagrams/class-diagram.puml) | Diagrama de classes | Entender modelos |
+| [diagrams/sequence-diagram.puml](/diagrams/sequence-diagram.puml) | Diagrama de sequência | Entender fluxos |
+| [diagrams/database-diagram.puml](/diagrams/database-diagram.puml) | Diagrama do banco | Entender dados |
+
+### 🧠 Inferência e IA
+
+| Documento | Descrição | Quando usar |
+|-----------|-----------|-------------|
+| [SISTEMA_INFERENCIA.md](/SISTEMA_INFERENCIA.md) | Sistema de inferência | Entender como funciona |
+| [INFERENCE_MODES.md](/INFERENCE_MODES.md) | Modos de operação | Escolher modo |
+| [QUICKSTART_ONNX.md](/QUICKSTART_ONNX.md) | Guia rápido ONNX | Setup rápido |
+| [models/README.md](/models/README.md) | Modelos e treinamento | Treinar/converter |
+| [utils/onnxInference.tsx](/utils/onnxInference.tsx) | Código ONNX | Desenvolvimento |
+
+### 🛠️ Desenvolvimento
+
+| Documento | Descrição | Quando usar |
+|-----------|-----------|-------------|
+| [guidelines/Guidelines.md](/guidelines/Guidelines.md) | Diretrizes | Seguir padrões |
+| [STRUCTURE.md](/STRUCTURE.md) | Estrutura do projeto | Localizar arquivos |
+| [CHANGELOG_ONNX.md](/CHANGELOG_ONNX.md) | Mudanças ONNX | Ver o que mudou |
+| [Attributions.md](/Attributions.md) | Atribuições | Créditos |
+
+### 🔧 Operação e Suporte
+
+| Documento | Descrição | Quando usar |
+|-----------|-----------|-------------|
+| [STATUS.md](/STATUS.md) | Status do sistema | Verificar saúde |
+| [TROUBLESHOOTING.md](/TROUBLESHOOTING.md) | Resolução de problemas | Resolver erros |
+| [README.md](/README.md) | Visão geral | Primeira leitura |
+
+### 🗄️ Backend e Banco de Dados
+
+| Documento | Descrição | Quando usar |
+|-----------|-----------|-------------|
+| [supabase/migrations/](/supabase/migrations/) | Migrations SQL | Setup do banco |
+| [supabase/functions/server/](/supabase/functions/server/) | Edge Functions | Backend code |
+| [diagrams/database-diagram.puml](/diagrams/database-diagram.puml) | Schema do banco | Entender estrutura |
 
 ---
 
-## 🎯 Fluxo Recomendado de Leitura
-
-### 1️⃣ Iniciante (Quer apenas rodar)
-```
-START.md → Executar comandos → Testar no navegador
-```
-
-### 2️⃣ Desenvolvedor (Primeira vez)
-```
-LEIA_ME_PRIMEIRO.md → COMO_EXECUTAR.md → Testar → README.md
-```
-
-### 3️⃣ Desenvolvedor (Quer entender tudo)
-```
-README.md → PROJECT_STRUCTURE.md → diagrams/INDEX.md → API.md
-```
-
-### 4️⃣ Desenvolvedor (Problemas)
-```
-COMO_EXECUTAR.md (Troubleshooting) → AUTH_TROUBLESHOOTING.md → GitHub Issues
-```
-
-### 5️⃣ Arquiteto (Quer visualizar)
-```
-diagrams/EXECUTIVE_SUMMARY.md → diagrams/INDEX.md → Ver todos os diagramas
-```
-
-### 6️⃣ Cientista de Dados (Treinar modelos)
-```
-models/README.md → Preparar dataset → Treinar YOLO customizado
-```
-
----
-
-## 📊 Hierarquia de Documentação
+## 📂 Estrutura de Diretórios
 
 ```
-📦 EcoVision Documentation
+/
+├── 📄 README.md                    ← Comece aqui
+├── 📄 STATUS.md                    ← Status atual
+├── 📄 TROUBLESHOOTING.md           ← Problemas?
+├── 📄 SISTEMA_INFERENCIA.md        ← Como funciona IA
+├── 📄 INFERENCE_MODES.md           ← Modos de inferência
+├── 📄 QUICKSTART_ONNX.md           ← Setup rápido
+├── 📄 PROJECT_GUIDE.md             ← Guia completo
+├── 📄 STRUCTURE.md                 ← Estrutura de arquivos
+├── 📄 CHANGELOG_ONNX.md            ← O que mudou
 │
-├── 🚀 Quick Start
-│   ├── START.md                      ← Comandos rápidos
-│   ├── LEIA_ME_PRIMEIRO.md          ← Overview
-│   ├── COMO_EXECUTAR.md             ← Guia detalhado
-│   └── INSTALACAO.md                ← Instalação completa
+├── 📁 components/                  ← Componentes React
+│   ├── CameraFeed.tsx             ← Feed de câmera + IA
+│   ├── ConveyorSystem.tsx         ← Animação esteira
+│   ├── GateConfiguration.tsx      ← Config cancelas
+│   └── ... (outros componentes)
 │
-├── 📖 Core Documentation
-│   ├── README.md                     ← Documentação principal
-│   ├── QUICKSTART.md                 ← Guia original
-│   └── PROJECT_STRUCTURE.md          ← Estrutura do projeto
+├── 📁 supabase/                    ← Backend
+│   ├── functions/server/          ← Edge Functions
+│   │   ├── index.tsx              ← Servidor principal
+│   │   ├── Autenticacao.tsx       ← Classes de autenticação
+│   │   └── ... (outras classes)
+│   └── migrations/                ← SQL migrations
 │
-├── 🔧 Technical Guides
-│   ├── API.md                        ← API REST
-│   ├── WEBCAM_INFERENCE_SETUP.md     ← Webcam + IA
-│   └── models/README.md              ← Treinamento YOLO
+├── 📁 utils/                       ← Utilitários
+│   ├── onnxInference.tsx          ← ONNX Runtime
+│   └── supabase/                  ← Cliente Supabase
 │
-├── 🔐 Authentication
-│   ├── AUTH_FIX_COMPLETE.md
-│   ├── AUTH_TROUBLESHOOTING.md
-│   └── DEMO_MODE_SETUP.md
+├── 📁 models/                      ← Modelos YOLO
+│   └── README.md                  ← Guia de modelos
 │
-├── 🏗️ Architecture
-│   ├── diagrams/INDEX.md
-│   ├── diagrams/EXECUTIVE_SUMMARY.md
-│   └── diagrams/*.puml
+├── 📁 diagrams/                    ← Diagramas
+│   ├── README.md                  ← Índice
+│   ├── *.puml                     ← Arquivos PlantUML
+│   └── ... (diagramas)
 │
-└── 📝 Other
-    ├── CHANGELOG.md
-    ├── Attributions.md
-    └── guidelines/Guidelines.md
+├── 📁 guidelines/                  ← Diretrizes
+│   └── Guidelines.md              ← Padrões de código
+│
+├── 🐍 inference_server.py          ← Servidor Python (opcional)
+├── 🐍 convert_to_onnx.py           ← Converter YOLO → ONNX
+├── 🐍 test_setup.py                ← Testar setup
+└── 📄 requirements.txt             ← Deps Python
 ```
 
 ---
 
-## 🎯 Por Tipo de Usuário
+## 🎯 Fluxos de Leitura Recomendados
 
-### 👨‍💻 Desenvolvedor Frontend
-```
-1. COMO_EXECUTAR.md
-2. PROJECT_STRUCTURE.md (seção /components)
-3. API.md (endpoints do backend)
-```
+### Fluxo 1: "Quero entender tudo"
+1. README.md
+2. STATUS.md
+3. PROJECT_GUIDE.md
+4. SISTEMA_INFERENCIA.md
+5. diagrams/README.md
+6. STRUCTURE.md
 
-### 🐍 Desenvolvedor Python/ML
-```
-1. WEBCAM_INFERENCE_SETUP.md
-2. models/README.md
-3. inference_server.py (código fonte)
-```
+### Fluxo 2: "Quero começar rápido"
+1. STATUS.md (checklist)
+2. QUICKSTART_ONNX.md
+3. TROUBLESHOOTING.md (referência)
 
-### 🗄️ Desenvolvedor Backend
-```
-1. API.md
-2. supabase/migrations/001_create_ecovision_tables.sql
-3. supabase/functions/server/index.tsx
-```
+### Fluxo 3: "Quero desenvolver"
+1. guidelines/Guidelines.md
+2. STRUCTURE.md
+3. diagrams/architecture-diagram.puml
+4. supabase/functions/server/index.tsx
 
-### 🏗️ Arquiteto de Software
-```
-1. diagrams/EXECUTIVE_SUMMARY.md
-2. diagrams/INDEX.md
-3. PROJECT_STRUCTURE.md
-```
+### Fluxo 4: "Quero resolver um erro"
+1. TROUBLESHOOTING.md
+2. STATUS.md (verificar status)
+3. Logs do navegador (F12)
+4. SISTEMA_INFERENCIA.md (se erro de IA)
 
-### 👔 Gerente de Projeto
-```
-1. LEIA_ME_PRIMEIRO.md
-2. README.md
-3. diagrams/EXECUTIVE_SUMMARY.md
-```
+### Fluxo 5: "Quero treinar um modelo"
+1. models/README.md
+2. convert_to_onnx.py
+3. QUICKSTART_ONNX.md
+4. test_setup.py
 
 ---
 
-## 🔍 Buscar por Tópico
+## 🔍 Busca Rápida
 
-### Instalação
-- START.md
-- COMO_EXECUTAR.md
-- INSTALACAO.md
-- QUICKSTART.md
+### Por Tópico
 
-### Webcam
-- COMO_EXECUTAR.md (seção "O Que Vai Acontecer")
-- WEBCAM_INFERENCE_SETUP.md
-- components/CameraFeed.tsx (código fonte)
+**Autenticação:**
+- supabase/functions/server/Autenticacao.tsx
+- components/Login.tsx
+- STATUS.md (seção Autenticação)
 
-### YOLO/IA
-- models/README.md
-- WEBCAM_INFERENCE_SETUP.md
-- inference_server.py (código fonte)
+**Câmera e Inferência:**
+- components/CameraFeed.tsx
+- utils/onnxInference.tsx
+- SISTEMA_INFERENCIA.md
+- INFERENCE_MODES.md
 
-### Autenticação
-- AUTH_FIX_COMPLETE.md
-- AUTH_TROUBLESHOOTING.md
-- DEMO_MODE_SETUP.md
+**Configurações:**
+- components/GateConfiguration.tsx
+- components/AccuracyControl.tsx
+- supabase/functions/server/index.tsx (rotas /config)
 
-### Banco de Dados
+**Esteira e Animação:**
+- components/ConveyorSystem.tsx
+- diagrams/sequence-diagram.puml
+
+**Estatísticas:**
+- components/StatisticsPanel.tsx
+- components/MonitorPanel.tsx
+- supabase/functions/server/index.tsx (rotas /stats)
+
+**Banco de Dados:**
 - supabase/migrations/001_create_ecovision_tables.sql
-- API.md (endpoints de banco)
 - diagrams/database-diagram.puml
+- supabase/functions/server/BancoDeDados.tsx
 
-### API
-- API.md
-- supabase/functions/server/index.tsx
-
-### Arquitetura
-- diagrams/INDEX.md
-- diagrams/EXECUTIVE_SUMMARY.md
-- PROJECT_STRUCTURE.md
-
-### Troubleshooting
-- COMO_EXECUTAR.md (seção "Troubleshooting")
-- AUTH_TROUBLESHOOTING.md
-- WEBCAM_INFERENCE_SETUP.md (seção "Problemas Comuns")
+**Modelos YOLO:**
+- models/README.md
+- convert_to_onnx.py
+- inference_server.py
 
 ---
 
-<div align="center">
+## 📊 Referências Rápidas
 
-**📚 EcoVision Documentation Index**
+### Classes do Backend
+```typescript
+// Localizadas em: /supabase/functions/server/
+- Autenticacao.tsx      - Gerenciamento de auth
+- BancoDeDados.tsx      - Conexão DB
+- Camera.tsx            - Gerenciamento de câmeras
+- Cancela.tsx           - Controle de cancelas
+- Esteira.tsx           - Controle da esteira
+- ModeloIA.tsx          - Integração com IA
+- Usuario.tsx           - Gerenciamento de usuários
+- RegistroProcessamento.tsx - Logs de processamento
+- Dashboard.tsx         - Agregação de dados
+- OutputData.tsx        - Formatação de respostas
+```
 
-**Documentação completa e organizada para máxima produtividade**
+### Componentes Principais
+```typescript
+// Localizados em: /components/
+- App.tsx              - App principal
+- Sidebar.tsx          - Menu lateral
+- Login.tsx            - Tela de login
+- CameraFeed.tsx       - Feed de câmera + IA
+- ConveyorSystem.tsx   - Animação da esteira
+- GateConfiguration.tsx - Config de cancelas
+- AccuracyControl.tsx  - Controle de precisão
+- StatisticsPanel.tsx  - Estatísticas
+- MonitorPanel.tsx     - Monitoramento
+- UserProfile.tsx      - Perfil do usuário
+```
 
-</div>
+### Rotas da API
+```
+GET  /make-server-ea835390/health        - Health check
+GET  /make-server-ea835390/auth-test     - Teste de auth
+POST /make-server-ea835390/config        - Salvar config
+GET  /make-server-ea835390/config        - Obter config
+POST /make-server-ea835390/inference     - Inferência
+GET  /make-server-ea835390/stats         - Estatísticas
+GET  /make-server-ea835390/stats/period  - Stats por período
+POST /make-server-ea835390/session/end   - Encerrar sessão
+POST /make-server-ea835390/logs          - Salvar log
+GET  /make-server-ea835390/logs          - Obter logs
+GET  /make-server-ea835390/user/stats    - Stats do usuário
+```
+
+---
+
+## 🆕 Atualizações Recentes
+
+**Última atualização:** 09/Nov/2025
+
+**O que mudou:**
+- ✅ Resolvido erro Connection Refused
+- ✅ Sistema híbrido ONNX + Python
+- ✅ Documentação completa criada
+- ✅ Guias de troubleshooting
+- ✅ Scripts de conversão
+
+**Ver detalhes em:**
+- [CHANGELOG_ONNX.md](/CHANGELOG_ONNX.md)
+- [STATUS.md](/STATUS.md)
+
+---
+
+## 💡 Dicas de Navegação
+
+1. **Use Ctrl+F** para buscar palavras-chave neste índice
+2. **Comece pelo STATUS.md** para overview atual
+3. **Use TROUBLESHOOTING.md** como referência
+4. **Consulte diagramas** para entender visualmente
+5. **Leia os comentários** no código fonte
+
+---
+
+**📌 Favoritos Recomendados:**
+- STATUS.md
+- TROUBLESHOOTING.md
+- SISTEMA_INFERENCIA.md
+- models/README.md
+
+**Última atualização:** 09/Nov/2025

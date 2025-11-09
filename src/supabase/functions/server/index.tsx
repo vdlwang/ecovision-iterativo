@@ -338,27 +338,45 @@ app.post("/make-server-ea835390/inference", async (c) => {
     
     const { image_base64, model_version, min_confidence } = await c.req.json();
     
-    // Chama servidor de inferência Python
-    const inferenceResponse = await fetch(`${INFERENCE_SERVER_URL}/inference`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image_base64,
-        model_version: model_version || 'YOLOv8n',
-        min_confidence: (min_confidence || 85) / 100 // Converte para 0-1
-      })
-    });
+    let inferenceData: any = null;
     
-    if (!inferenceResponse.ok) {
-      const errorText = await inferenceResponse.text();
-      console.error('Erro na inferência:', errorText);
-      return c.json({ 
-        success: false, 
-        error: 'Servidor de inferência indisponível. Execute: python inference_server.py' 
-      }, 500);
+    // Tenta chamar servidor de inferência Python (opcional)
+    try {
+      console.log(`[INFERENCE] Tentando servidor Python em ${INFERENCE_SERVER_URL}...`);
+      
+      const inferenceResponse = await fetch(`${INFERENCE_SERVER_URL}/inference`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64,
+          model_version: model_version || 'YOLOv8n',
+          min_confidence: (min_confidence || 85) / 100 // Converte para 0-1
+        })
+      });
+      
+      if (inferenceResponse.ok) {
+        inferenceData = await inferenceResponse.json();
+        console.log('[INFERENCE] ✅ Servidor Python respondeu com sucesso');
+      } else {
+        const errorText = await inferenceResponse.text();
+        console.warn('[INFERENCE] ⚠️ Servidor Python respondeu com erro:', errorText);
+      }
+    } catch (pythonError: any) {
+      // Servidor Python não está disponível - isso é OK, o navegador usa ONNX
+      console.log('[INFERENCE] ℹ️ Servidor Python não disponível (usando ONNX no navegador):', pythonError.message);
     }
     
-    const inferenceData = await inferenceResponse.json();
+    // Se servidor Python não retornou dados, retorna sem detecções
+    // O frontend está usando ONNX no navegador
+    if (!inferenceData) {
+      console.log('[INFERENCE] Retornando sem detecções (ONNX no navegador)');
+      return c.json({ 
+        success: true, 
+        detections: [],
+        processing_time_ms: 0,
+        info: 'Usando inferência ONNX no navegador'
+      });
+    }
     
     // Se não há detecções, retorna sem salvar
     if (!inferenceData.detections || inferenceData.detections.length === 0) {

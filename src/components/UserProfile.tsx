@@ -46,8 +46,9 @@ export function UserProfile({ user, isDemoMode = false, userToken }: UserProfile
       return;
     }
     
-    if (!userToken) {
-      console.log('[PERFIL] Aguardando token de autenticação... Token não disponível.');
+    // Verifica se o token é válido (não é modo demo)
+    if (!userToken || userToken.startsWith('DEMO_MODE')) {
+      console.log('[PERFIL] Modo demo - estatísticas de perfil não disponíveis.');
       setLoading(false);
       return;
     }
@@ -97,6 +98,24 @@ export function UserProfile({ user, isDemoMode = false, userToken }: UserProfile
 
   return (
     <div className="space-y-6">
+      {/* Aviso de Modo Demo */}
+      {isDemoMode && (
+        <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <TestTube className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-yellow-800 text-sm">
+                👤 Perfil em Modo Demo
+              </p>
+              <p className="text-yellow-700 text-xs mt-1">
+                Você está usando o sistema em modo demonstração. As estatísticas detalhadas do perfil 
+                requerem autenticação OAuth. Faça login com Google para acessar suas estatísticas reais.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Informações do Usuário */}
       <Card className="border-2 border-recycling-primary/20">
         <CardHeader className="bg-recycling-lighter/30">
