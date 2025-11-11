@@ -48,7 +48,8 @@ def main():
     model = YOLO(MODEL_SOURCE)
 
     # Se for uma imagem única, você pode tirar o stream=True
-    results = model(source=IMG, save=True, conf=CONF, show=True, stream=USE_STREAM)
+    # results = model(source=IMG, save=True, conf=CONF, show=True, stream=USE_STREAM)
+    results = model(source=0, save=True, conf=0.4, show=True, stream=True)
 
     # Para evitar spam: memorize último ângulo enviado
     last_angle_sent = None
