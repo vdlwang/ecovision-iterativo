@@ -106,8 +106,8 @@ def send_angle(ser, angle):
         print(f"ESP32: {r}")
 
 # ==== WebSocket Server ====
-async def websocket_handler(websocket, path):
-    """Gerencia conexões WebSocket"""
+async def websocket_handler(websocket):
+    """Gerencia conexões WebSocket (compatível com websockets≥12)."""
     state.websocket_clients.add(websocket)
     print(f"Cliente WebSocket conectado. Total: {len(state.websocket_clients)}")
     
