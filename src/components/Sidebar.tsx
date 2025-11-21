@@ -1,213 +1,126 @@
-import { useState, useEffect } from "react";
-import { Button } from "./ui/button";
-import { 
-  Monitor, 
-  SlidersHorizontal, 
-  Brain, 
-  BarChart3, 
-  User,
-  ChevronLeft,
-  ChevronRight,
-  LogOut,
-  Leaf,
-  Menu,
-  X
-} from "lucide-react";
-import { cn } from "./ui/utils";
+import { Camera, Settings, Recycle, Menu, X, Sliders, LogOut, User } from 'lucide-react';
+import { Page } from '../App';
+import { Button } from './ui/button';
 
-interface SidebarProps {
-  activeTab: string;
-  onTabChange: (tab: string) => void;
-  userEmail?: string;
-  onLogout?: () => void;
+interface User {
+  name: string;
+  email: string;
+  avatar?: string;
+  isDemo: boolean;
 }
 
-export function Sidebar({ activeTab, onTabChange, userEmail, onLogout }: SidebarProps) {
-  const [isExpanded, setIsExpanded] = useState(false); // Inicia fechada
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+interface SidebarProps {
+  currentPage: Page;
+  onPageChange: (page: Page) => void;
+  isOpen: boolean;
+  onToggle: () => void;
+  user: User;
+  onLogout: () => void;
+}
 
-  // Detecta se é mobile
-  useEffect(() => {
-    const checkMobile = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (mobile) {
-        setIsExpanded(true); // No mobile, sempre expandido quando aberto
-      }
-    };
-
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
+export function Sidebar({ currentPage, onPageChange, isOpen, onToggle, user, onLogout }: SidebarProps) {
   const menuItems = [
-    { id: "monitor", label: "Monitor", icon: Monitor },
-    { id: "cancelas", label: "Cancelas", icon: SlidersHorizontal },
-    { id: "modelo", label: "Modelo", icon: Brain },
-    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "perfil", label: "Perfil", icon: User },
+    { id: 'monitor' as Page, label: 'Monitor', icon: Camera },
+    { id: 'config-gates' as Page, label: 'Cancelas de Separação', icon: Settings },
+    { id: 'config-model' as Page, label: 'Configuração do Modelo', icon: Sliders },
   ];
-
-  const handleLogout = () => {
-    if (onLogout) {
-      onLogout();
-    }
-  };
-
-  const handleTabChange = (tab: string) => {
-    onTabChange(tab);
-    if (isMobile) {
-      setIsMobileOpen(false);
-    }
-  };
-
-  const toggleSidebar = () => {
-    if (isMobile) {
-      setIsMobileOpen(!isMobileOpen);
-    } else {
-      setIsExpanded(!isExpanded);
-    }
-  };
 
   return (
     <>
-      {/* Mobile Menu Button - Apenas Menu (três barras) */}
-      {isMobile && !isMobileOpen && (
-        <Button
-          onClick={toggleSidebar}
-          className="fixed top-4 left-4 z-50 bg-recycling-primary hover:bg-recycling-primary-dark text-white md:hidden"
-          size="icon"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
-      )}
+      {/* Botão Menu Hambúrguer - Fixo no canto superior esquerdo em mobile */}
+      <button
+        onClick={onToggle}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-neutral-900 rounded-lg text-white hover:bg-neutral-800 transition-colors border border-neutral-800"
+      >
+        {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+      </button>
 
       {/* Overlay para mobile */}
-      {isMobile && isMobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 backdrop-blur-sm transition-opacity"
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
-
-      {/* Overlay para desktop quando sidebar expandida */}
-      {!isMobile && isExpanded && (
-        <div
-          className="fixed inset-0 bg-black/20 z-20 backdrop-blur-[2px] transition-opacity pointer-events-none"
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={onToggle}
         />
       )}
 
       {/* Sidebar */}
-      <div
-        className={cn(
-          "h-screen bg-gradient-to-b from-recycling-primary-dark to-recycling-primary flex flex-col transition-all duration-300",
-          "shadow-2xl",
-          // Desktop
-          !isMobile && "fixed left-0 top-0 z-30",
-          !isMobile && (isExpanded ? "w-64" : "w-20"),
-          // Mobile
-          isMobile && "fixed left-0 top-0 z-40 w-64",
-          isMobile && (isMobileOpen ? "translate-x-0" : "-translate-x-full")
-        )}
-    >
-      {/* Header */}
-      <div className="p-6 border-b border-white/20 cursor-pointer hover:bg-white/5 transition-colors" onClick={toggleSidebar}>
-        <div className="flex items-center justify-between">
-          {(isExpanded || isMobile) ? (
-            <div className="flex items-center gap-3 flex-1">
-              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center flex-shrink-0">
-                <Leaf className="w-6 h-6 text-recycling-primary" />
+      <aside className={`
+        fixed lg:relative
+        inset-y-0 left-0
+        z-50
+        w-64 bg-neutral-900 border-r border-neutral-800 
+        flex flex-col
+        transform transition-transform duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        {/* Header */}
+        <div className="p-6 border-b border-neutral-800">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center">
+                <Recycle className="w-6 h-6 text-white" />
               </div>
-              <div className="flex-1">
-                <h1 className="text-white font-bold">EcoVision</h1>
-                <p className="text-white/70 text-xs">Sistema de Reciclagem</p>
+              <div>
+                <h1 className="text-white">EcoVision</h1>
+                <p className="text-neutral-400 text-xs">Sistema de Reciclagem</p>
               </div>
-              {isMobile && (
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsMobileOpen(false);
-                  }}
-                  variant="ghost"
-                  size="icon"
-                  className="text-white hover:bg-white/10 flex-shrink-0"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
-              )}
             </div>
-          ) : (
-            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto">
-              <Leaf className="w-6 h-6 text-recycling-primary" />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Menu Items */}
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          
-          return (
-            <Button
-              key={item.id}
-              onClick={() => handleTabChange(item.id)}
-              variant="ghost"
-              className={cn(
-                "w-full justify-start gap-3 text-white hover:bg-white/10 transition-colors",
-                isActive && "bg-white/20 hover:bg-white/20",
-                !isExpanded && !isMobile && "justify-center px-2"
-              )}
-            >
-              <Icon className="w-5 h-5 flex-shrink-0" />
-              {(isExpanded || isMobile) && <span>{item.label}</span>}
-            </Button>
-          );
-        })}
-      </nav>
-
-      {/* Footer */}
-      <div className="p-4 border-t border-white/20 space-y-2 flex-shrink-0">
-        {/* User Info */}
-        {(isExpanded || isMobile) && userEmail && (
-          <div className="px-3 py-2 bg-white/10 rounded-lg mb-2">
-            <p className="text-white/90 text-xs truncate">{userEmail}</p>
           </div>
-        )}
 
-        {/* Logout Button */}
-        <Button
-          onClick={handleLogout}
-          variant="ghost"
-          className={cn(
-            "w-full gap-3 text-white hover:bg-white/10",
-            (isExpanded || isMobile) ? "justify-start" : "justify-center px-2"
-          )}
-        >
-          <LogOut className="w-5 h-5 flex-shrink-0" />
-          {(isExpanded || isMobile) && <span>Sair</span>}
-        </Button>
-
-        {/* Toggle Button - apenas desktop */}
-        {!isMobile && (
-          <Button
-            onClick={toggleSidebar}
-            variant="ghost"
-            className="w-full justify-center text-white hover:bg-white/10"
-          >
-            {isExpanded ? (
-              <ChevronLeft className="w-5 h-5" />
+          {/* User Info */}
+          <div className="flex items-center gap-3 p-3 bg-neutral-800 rounded-lg">
+            {user.avatar ? (
+              <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full" />
             ) : (
-              <ChevronRight className="w-5 h-5" />
+              <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center">
+                <User className="w-5 h-5 text-white" />
+              </div>
             )}
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-sm truncate">{user.name}</p>
+              <p className="text-neutral-500 text-xs truncate">{user.email}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 p-4 overflow-y-auto">
+          <ul className="space-y-2">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentPage === item.id;
+              
+              return (
+                <li key={item.id}>
+                  <button
+                    onClick={() => onPageChange(item.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                      isActive
+                        ? 'bg-green-600 text-white'
+                        : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+                    }`}
+                  >
+                    <Icon className="w-5 h-5 flex-shrink-0" />
+                    <span className="truncate text-sm">{item.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-neutral-800">
+          <Button
+            onClick={onLogout}
+            variant="outline"
+            className="w-full bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Sair
           </Button>
-        )}
-      </div>
-    </div>
+        </div>
+      </aside>
     </>
   );
 }

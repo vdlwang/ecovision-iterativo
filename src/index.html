@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/recycle.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EcoVision - Sistema de Reciclagem Inteligente</title>
+    <script>
+      // Supressão de erros inline (executa antes de tudo)
+      (function() {
+        const originalError = console.error;
+        console.error = function(...args) {
+          const msg = (args[0] || '').toString().toLowerCase();
+          if (msg.includes('websocket') || msg.includes('supabase') || msg.includes('544')) {
+            return;
+          }
+          originalError.apply(console, args);
+        };
+        
+        window.addEventListener('error', function(e) {
+          const msg = (e.message || '').toLowerCase();
+          if (msg.includes('websocket') || msg.includes('supabase') || msg.includes('544')) {
+            e.preventDefault();
+            return false;
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

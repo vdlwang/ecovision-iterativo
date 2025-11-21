@@ -1,327 +1,318 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Play, Pause, AlertTriangle, CheckCircle, ArrowRight } from "lucide-react";
-import { CameraFeed } from "./CameraFeed";
-import { projectId, publicAnonKey } from "../utils/supabase/info";
+import { useEffect, useState, useRef } from 'react';
+import { Card } from './ui/card';
+import { Label } from './ui/label';
+import { Slider } from './ui/slider';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Play, Pause, RotateCw, Menu } from 'lucide-react';
 
 interface Detection {
-  id: string;
-  material: string;
+  class: string;
   confidence: number;
-  timestamp: Date;
-  gateAssigned: number | null;
+  bbox: [number, number, number, number];
 }
 
-interface MonitorPanelProps {
-  gateConfigs: { [key: number]: string };
-  minAccuracy: number;
-  isRunning: boolean;
-  onToggleSystem: () => void;
-  modelVersion: string;
-  userId: string;
-  userToken: string | null;
+interface FrameData {
+  frame: string;
+  detections: Detection[];
+  fps: number;
+  motor_running: boolean;
 }
 
-const materialColors = {
-  papel: { bg: "bg-material-paper", text: "text-white" },
-  metal: { bg: "bg-material-metal", text: "text-white" },
-  plastico: { bg: "bg-material-plastic", text: "text-white" },
-  vidro: { bg: "bg-material-glass", text: "text-gray-800" }
-};
+export function MonitorPanel() {
+  const [confidence, setConfidence] = useState(0.4);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [fps, setFps] = useState(0);
+  const [motorRunning, setMotorRunning] = useState(true);
+  const [connected, setConnected] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-export function MonitorPanel({ 
-  gateConfigs, 
-  minAccuracy, 
-  isRunning, 
-  onToggleSystem,
-  modelVersion,
-  userId,
-  userToken
-}: MonitorPanelProps) {
-  const [recentDetections, setRecentDetections] = useState<Detection[]>([]);
-  const [beltRunning, setBeltRunning] = useState(false);
-  const [gateStates, setGateStates] = useState({
-    1: { active: false, lastActivated: null as Date | null },
-    2: { active: false, lastActivated: null as Date | null },
-    3: { active: false, lastActivated: null as Date | null }
-  });
-
-  // Handler para detecções da câmera
-  const handleCameraDetection = async (detection: any) => {
-    const material = detection.class;
-    const confidence = detection.confidence * 100;
-
-    console.log(`[DETECÇÃO] Material: ${material}, Confiança: ${confidence.toFixed(1)}%`);
-
-    const newDetection: Detection = {
-      id: Date.now().toString(),
-      material,
-      confidence,
-      timestamp: new Date(),
-      gateAssigned: null
-    };
-
-    // Verifica se confiança é suficiente
-    if (confidence >= minAccuracy) {
-      // Encontra cancela configurada para este material
-      const assignedGate = Object.entries(gateConfigs).find(
-        ([_, mat]) => mat === material
-      );
-
-      if (assignedGate) {
-        const gateNumber = parseInt(assignedGate[0]);
-        newDetection.gateAssigned = gateNumber;
-
-        console.log(`[CANCELA] Acionando cancela ${gateNumber} para ${material}`);
-
-        // Envia comando serial para ESP
-        try {
-          await sendSerialCommand(gateNumber);
-          
-          // Registra detecção no banco de dados
-          await saveDetection(newDetection, userId);
-
-          // Ativa cancela visualmente
-          setGateStates(prev => ({
-            ...prev,
-            [gateNumber]: { 
-              active: true, 
-              lastActivated: new Date() 
-            }
-          }));
-
-          // Desativa após 2 segundos
-          setTimeout(() => {
-            setGateStates(prev => ({
-              ...prev,
-              [gateNumber]: { 
-                active: false, 
-                lastActivated: prev[gateNumber as keyof typeof prev].lastActivated 
-              }
-            }));
-          }, 2000);
-        } catch (error) {
-          console.error('[ERRO] Falha ao acionar cancela:', error);
-        }
-      } else {
-        console.log(`[AVISO] Nenhuma cancela configurada para ${material}`);
-      }
-    } else {
-      console.log(`[REJEIÇÃO] Confiança ${confidence.toFixed(1)}% abaixo do mínimo ${minAccuracy}%`);
-    }
-
-    setRecentDetections(prev => [newDetection, ...prev.slice(0, 9)]);
-  };
-
-  // Simula envio de comando serial para ESP32
-  const sendSerialCommand = async (gateNumber: number) => {
-    console.log(`[SERIAL] Simulando comando - Esteira: ON, Cancela: ${gateNumber}`);
-    // Nota: Implementar endpoint /serial/send no backend se conectar ESP32 real
-  };
-
-  // Salva detecção no banco de dados
-  const saveDetection = async (detection: Detection, userId: string) => {
+  const connectWebSocket = () => {
     try {
-      // Detecções são salvas via endpoint /inference durante o processamento
-      console.log(`[BD] Detecção registrada: ${detection.material} (${detection.confidence.toFixed(1)}%)`);
+      // Limpa conexão anterior se existir
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch (e) {
+          // Ignora erros ao fechar
+        }
+      }
+
+      const ws = new WebSocket('ws://localhost:8765');
+      wsRef.current = ws;
+
+      // Suprime TODOS os eventos de erro
+      ws.onerror = null;
+      ws.addEventListener('error', () => {}, false);
+
+      ws.onopen = () => {
+        setConnected(true);
+        // Limpa timeout de reconexão se existir
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: FrameData = JSON.parse(event.data);
+          
+          // Atualizar canvas com frame
+          const canvas = canvasRef.current;
+          if (canvas && data.frame) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              const img = new Image();
+              img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                
+                // Desenhar bounding boxes
+                data.detections?.forEach(det => {
+                  const [x1, y1, x2, y2] = det.bbox;
+                  ctx.strokeStyle = '#22c55e';
+                  ctx.lineWidth = 3;
+                  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                  
+                  // Label
+                  ctx.fillStyle = '#22c55e';
+                  ctx.fillRect(x1, y1 - 25, 200, 25);
+                  ctx.fillStyle = '#000';
+                  ctx.font = '14px monospace';
+                  ctx.fillText(
+                    `${det.class} ${(det.confidence * 100).toFixed(1)}%`,
+                    x1 + 5,
+                    y1 - 8
+                  );
+                });
+              };
+              img.src = `data:image/jpeg;base64,${data.frame}`;
+            }
+          }
+          
+          setDetections(data.detections || []);
+          setFps(data.fps || 0);
+          setMotorRunning(data.motor_running ?? true);
+        } catch (error) {
+          // Silencioso
+        }
+      };
+
+      ws.onerror = () => {
+        // Silencioso - não faz nada
+        setConnected(false);
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        
+        // Tenta reconectar após 5 segundos
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, 5000);
+      };
     } catch (error) {
-      console.error('[BD] Erro ao salvar detecção:', error);
+      // Silencioso - ignora qualquer erro
+      setConnected(false);
     }
   };
 
-  const getMaterialColor = (material: string) => {
-    return materialColors[material as keyof typeof materialColors] || { bg: "bg-gray-500", text: "text-white" };
+  useEffect(() => {
+    connectWebSocket();
+
+    return () => {
+      // Cleanup
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
+
+  const sendCommand = (command: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ command }));
+      } catch (error) {
+        // Silencioso
+      }
+    }
   };
 
-  const getGateColor = (gateNumber: number) => {
-    const material = gateConfigs[gateNumber];
-    if (!material) return { bg: "bg-gray-200", text: "text-gray-600" };
-    return materialColors[material as keyof typeof materialColors];
+  const updateConfidence = (value: number) => {
+    setConfidence(value);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ 
+          type: 'config',
+          confidence: value 
+        }));
+      } catch (error) {
+        // Silencioso
+      }
+    }
+  };
+
+  const materialIcons: Record<string, string> = {
+    'plastic': '♻️',
+    'metal': '🔩',
+    'corrugated carton': '📦',
+    'paper': '📄',
+    'cardboard': '📦',
+    'glass': '🍾',
+  };
+
+  const getMaterialIcon = (className: string) => {
+    const lower = className.toLowerCase();
+    for (const [key, icon] of Object.entries(materialIcons)) {
+      if (lower.includes(key)) return icon;
+    }
+    return '📦';
   };
 
   return (
-    <div className="space-y-6">
-      {/* Card Unificado: Esteira + Câmera */}
-      <Card className="border-2 border-recycling-primary/20">
-        <CardHeader className="bg-recycling-lighter/30">
-          <CardTitle className="text-recycling-primary-darker">Monitor do Sistema</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6 pb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
-            {/* Coluna Esquerda: Câmera Principal */}
-            <div className="space-y-4 md:pr-8 md:border-r-2 md:border-recycling-primary/30 pb-6 md:pb-0 border-b-2 md:border-b-0 border-recycling-primary/30">
-              <CameraFeed
-                isRunning={isRunning}
-                onDetection={handleCameraDetection}
-                modelVersion={modelVersion}
-                minConfidence={minAccuracy}
-                onToggleSystem={onToggleSystem}
-                inline={true}
-                userToken={userToken}
+    <div className="p-8 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-white text-2xl mb-2">Monitor em Tempo Real</h2>
+          <p className="text-neutral-400">Detecções YOLO + Controle da Esteira</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className={`${connected ? 'bg-green-600/20 text-green-600 border-green-600/30' : 'bg-red-600/20 text-red-600 border-red-600/30'}`}>
+            {connected ? 'Conectado' : 'Desconectado'}
+          </Badge>
+          <Badge variant="outline" className="bg-neutral-800 text-white border-neutral-700">
+            {fps} FPS
+          </Badge>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="bg-neutral-900 border-neutral-800 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white">Feed da Câmera</h3>
+              <Badge variant="outline" className="bg-green-600/20 text-green-600 border-green-600/30">
+                {detections.length} detecções
+              </Badge>
+            </div>
+            
+            <div className="relative bg-neutral-950 rounded-lg overflow-hidden">
+              <canvas
+                ref={canvasRef}
+                className="w-full h-auto"
               />
-            </div>
-
-            {/* Coluna Direita: Esteira Rolante */}
-            <div className="space-y-4 md:pl-8">
-              {/* Título e Controles da Esteira */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-recycling-primary-darker">Esteira Rolante</h3>
-                  <Badge variant={beltRunning ? "default" : "secondary"} className={beltRunning ? "bg-recycling-accent text-white" : ""}>
-                    {beltRunning ? "EM MOVIMENTO" : "PARADA"}
-                  </Badge>
-                </div>
-                
-                {/* Controle da Esteira */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-white/50 rounded-lg border border-recycling-primary/20">
-                  <div className="flex items-center gap-2">
-                    {beltRunning ? (
-                      <CheckCircle className="h-4 w-4 text-recycling-primary" />
-                    ) : (
-                      <AlertTriangle className="h-4 w-4 text-material-glass" />
-                    )}
-                    <span className="text-sm font-medium text-recycling-primary-darker">
-                      {beltRunning ? "Transportador Ativo" : "Transportador Parado"}
-                    </span>
-                  </div>
-                  <Button 
-                    onClick={() => setBeltRunning(!beltRunning)}
-                    variant={beltRunning ? "destructive" : "default"}
-                    size="sm"
-                    className={beltRunning 
-                      ? "bg-material-rejected hover:bg-material-rejected/90" 
-                      : "bg-recycling-primary hover:bg-recycling-primary-dark"
-                    }
-                  >
-                    {beltRunning ? <Pause className="h-3 w-3 mr-1.5" /> : <Play className="h-3 w-3 mr-1.5" />}
-                    {beltRunning ? "Parar" : "Iniciar"}
-                  </Button>
-                </div>
-                
-                <p className="text-xs text-muted-foreground mt-2">Confiança mínima: {minAccuracy}%</p>
-              </div>
-
-              {/* Visualização da esteira */}
-              <div className="relative">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-recycling-primary-darker">Transportador</span>
-                </div>
               
-              <div className="relative w-full h-24 bg-gray-300 rounded-lg overflow-hidden border-2 border-recycling-primary/30">
-                {/* Animação de movimento */}
-                {beltRunning && (
-                  <>
-                    <div 
-                      className="absolute inset-0 opacity-30"
-                      style={{
-                        background: 'repeating-linear-gradient(90deg, transparent, transparent 20px, rgba(52, 71, 103, 0.1) 20px, rgba(52, 71, 103, 0.1) 40px)',
-                        animation: 'conveyor-move 2s linear infinite'
-                      }}
-                    />
-                    <style>{`
-                      @keyframes conveyor-move {
-                        0% { transform: translateX(0); }
-                        100% { transform: translateX(40px); }
-                      }
-                    `}</style>
-                  </>
-                )}
-                
-                {/* Labels */}
-                <div className="absolute top-1/2 left-3 transform -translate-y-1/2 flex items-center gap-2">
-                  <span className="text-xs font-medium text-recycling-primary-darker bg-white/80 px-2 py-1 rounded">Entrada</span>
-                  {beltRunning && <ArrowRight className="w-4 h-4 text-recycling-primary animate-pulse" />}
-                </div>
-                <div className="absolute top-1/2 right-3 transform -translate-y-1/2">
-                  <span className="text-xs font-medium text-recycling-primary-darker bg-white/80 px-2 py-1 rounded">Saída</span>
-                </div>
-              </div>
-
-              {/* Cancelas */}
-              <div className="flex justify-center mt-6 space-x-6">
-                {[1, 2, 3].map((gateNumber) => {
-                  const gateColor = getGateColor(gateNumber);
-                  const isActive = gateStates[gateNumber as keyof typeof gateStates].active;
-                  
-                  return (
-                    <div key={gateNumber} className="flex flex-col items-center space-y-2">
-                      <div className="text-xs font-medium text-recycling-primary-darker">Cancela {gateNumber}</div>
-                      <div 
-                        className={`w-16 h-16 rounded-lg flex items-center justify-center transition-all duration-300 border-2 ${
-                          isActive 
-                            ? `${gateColor.bg} ${gateColor.text} border-recycling-primary shadow-lg shadow-recycling-primary/30 scale-110` 
-                            : `${gateColor.bg} ${gateColor.text} border-recycling-primary/30`
-                        }`}
-                      >
-                        <span className="text-xs text-center font-medium leading-tight px-1">
-                          {gateConfigs[gateNumber] || "Não conf."}
-                        </span>
-                      </div>
-                      {isActive && (
-                        <Badge variant="default" className="text-[10px] px-2 py-0 bg-recycling-accent text-white">ATIVA</Badge>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Detecções Recentes */}
-      <Card className="border-2 border-recycling-primary/20">
-        <CardHeader className="bg-recycling-lighter/30">
-          <CardTitle className="text-recycling-primary-darker">Detecções Recentes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recentDetections.length === 0 ? (
-            <p className="text-muted-foreground text-center py-4 text-sm">
-              {isRunning ? "Aguardando detecções..." : "Sistema parado"}
-            </p>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {recentDetections.map((detection) => {
-                const materialColor = getMaterialColor(detection.material);
-                
-                return (
-                  <div 
-                    key={detection.id} 
-                    className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 bg-recycling-lighter/20 rounded-lg border border-recycling-primary/10 gap-2"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <Badge 
-                        className={`${materialColor.bg} ${materialColor.text} border-none text-xs`}
-                      >
-                        {detection.material}
-                      </Badge>
-                      <span className="text-xs">
-                        {detection.confidence.toFixed(1)}%
-                      </span>
-                      {detection.confidence < minAccuracy && (
-                        <span className="text-[10px] text-material-rejected font-medium">REJEITADO</span>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      {detection.gateAssigned && (
-                        <Badge variant="outline" className="border-recycling-primary text-recycling-primary text-[10px] px-1.5">
-                          C{detection.gateAssigned}
-                        </Badge>
-                      )}
-                      <span className="text-[10px] text-muted-foreground">
-                        {detection.timestamp.toLocaleTimeString()}
-                      </span>
-                    </div>
+              {!connected && (
+                <div className="absolute inset-0 flex items-center justify-center bg-neutral-950">
+                  <div className="text-center">
+                    <div className="text-6xl mb-4">📹</div>
+                    <p className="text-neutral-500 mb-2">Aguardando conexão...</p>
+                    <p className="text-neutral-600 text-sm">Execute: python backend/ecovision_local.py</p>
                   </div>
-                );
-              })}
+                </div>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </Card>
+
+          <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
+            <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Detecções Ativas</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+              {detections.slice(0, 4).map((detection, index) => (
+                <div
+                  key={index}
+                  className="p-3 md:p-4 bg-neutral-800 rounded-lg text-center"
+                >
+                  <div className="text-3xl md:text-4xl mb-2">
+                    {getMaterialIcon(detection.class)}
+                  </div>
+                  <p className="text-white text-xs md:text-sm mb-1 truncate" title={detection.class}>
+                    {detection.class}
+                  </p>
+                  <p className="text-green-500 text-xs">
+                    {(detection.confidence * 100).toFixed(1)}%
+                  </p>
+                </div>
+              ))}
+              
+              {detections.length === 0 && (
+                <div className="col-span-2 md:col-span-4 p-6 md:p-8 text-center text-neutral-500 text-sm md:text-base">
+                  Nenhuma detecção no momento
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-4 md:space-y-6">
+          <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
+            <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Controle da Esteira</h3>
+            
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 md:p-4 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-300 text-sm md:text-base">Motor</span>
+                <Badge className={motorRunning ? 'bg-green-600' : 'bg-red-600'}>
+                  {motorRunning ? 'Ligado' : 'Desligado'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:gap-3">
+                <Button
+                  onClick={() => sendCommand('MOTOR ON')}
+                  className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
+                >
+                  <Play className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Ligar
+                </Button>
+                <Button
+                  onClick={() => sendCommand('MOTOR OFF')}
+                  variant="outline"
+                  className="bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
+                >
+                  <Pause className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Parar
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
+            <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Status do Sistema</h3>
+            
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-400 text-xs md:text-sm">Câmera</span>
+                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {connected ? 'Ativo' : 'Inativo'}
+                </Badge>
+              </div>
+              
+              <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-400 text-xs md:text-sm">YOLO</span>
+                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {connected ? 'Rodando' : 'Parado'}
+                </Badge>
+              </div>
+              
+              <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-400 text-xs md:text-sm">ESP32</span>
+                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {connected ? 'COM7' : 'N/A'}
+                </Badge>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
