@@ -265,20 +265,26 @@ export function MonitorPanel() {
               <div className="flex items-center justify-between p-3 md:p-4 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-300 text-sm md:text-base">Motor</span>
                 <Badge className={motorRunning ? 'bg-green-600' : 'bg-red-600'}>
-                  {motorRunning ? 'Ligado' : 'Desligado'}
+                  {motorRunning ? 'Ligado' : 'Parado'}
                 </Badge>
               </div>
 
               <div className="grid grid-cols-2 gap-2 md:gap-3">
                 <Button
-                  onClick={() => sendCommand('MOTOR ON')}
+                  onClick={() => {
+                    setMotorRunning(true);
+                    sendCommand('MOTOR ON');
+                  }}
                   className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
                 >
                   <Play className="w-3 h-3 md:w-4 md:h-4 mr-2" />
                   Ligar
                 </Button>
                 <Button
-                  onClick={() => sendCommand('MOTOR OFF')}
+                  onClick={() => {
+                    setMotorRunning(false);
+                    sendCommand('MOTOR OFF');
+                  }}
                   variant="outline"
                   className="bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
                 >
