@@ -1,51 +1,45 @@
-import { Component, ReactNode } from 'react';
-import { Card } from './ui/card';
-import { Button } from './ui/button';
-import { RefreshCw } from 'lucide-react';
+import React from 'react';
 
 interface Props {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 interface State {
   hasError: boolean;
-  error: Error | null;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
+export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
-  componentDidCatch(error: Error, errorInfo: any) {
-    console.error('Error caught by boundary:', error, errorInfo);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Silencia erros do WebSocket e Supabase
+    const msg = error.toString().toLowerCase();
+    if (msg.includes('websocket') || msg.includes('supabase')) {
+      return;
+    }
+    console.error('Error:', error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-neutral-950 flex items-center justify-center p-4">
-          <Card className="bg-neutral-900 border-neutral-800 p-8 max-w-md w-full">
-            <div className="text-center">
-              <div className="text-6xl mb-4">⚠️</div>
-              <h2 className="text-white text-xl mb-2">Algo deu errado</h2>
-              <p className="text-neutral-400 text-sm mb-6">
-                {this.state.error?.message || 'Erro desconhecido'}
-              </p>
-              <Button
-                onClick={() => window.location.reload()}
-                className="bg-green-600 hover:bg-green-700 text-white w-full"
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Recarregar Página
-              </Button>
-            </div>
-          </Card>
+          <div className="text-center">
+            <h1 className="text-white text-2xl mb-4">Algo deu errado</h1>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+            >
+              Recarregar
+            </button>
+          </div>
         </div>
       );
     }

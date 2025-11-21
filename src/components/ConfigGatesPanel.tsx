@@ -84,14 +84,20 @@ export function ConfigGatesPanel() {
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 5000);
+        reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
       };
-    } catch (error) {
-      // Silencioso - ignora qualquer erro
+    } catch (e) {
+      // Silencioso
       setConnected(false);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
     }
+  };
+  
+  const silentWS = () => {
+    connectWebSocket();
   };
 
   useEffect(() => {

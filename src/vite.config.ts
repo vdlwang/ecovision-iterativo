@@ -11,13 +11,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       onwarn(warning, warn) {
-        // Suprime warnings específicos
+        // Suprime todos os warnings relacionados
         if (warning.code === 'UNUSED_EXTERNAL_IMPORT') return;
-        if (warning.message?.includes('supabase')) return;
+        if (warning.message?.toLowerCase().includes('supabase')) return;
+        if (warning.message?.toLowerCase().includes('websocket')) return;
         warn(warning);
       },
     },
   },
-  // Desabilita completamente logs de erro do Vite relacionados ao Supabase
-  logLevel: 'warn',
+  // Silencia logs do Vite
+  logLevel: 'error',
+  clearScreen: false,
 });

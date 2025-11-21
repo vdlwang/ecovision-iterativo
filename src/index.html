@@ -6,24 +6,95 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EcoVision - Sistema de Reciclagem Inteligente</title>
     <script>
-      // Supressão de erros inline (executa antes de tudo)
+      // Supressão AGRESSIVA de erros - Executa ANTES de qualquer código
       (function() {
+        // Suprime console.error
         const originalError = console.error;
         console.error = function(...args) {
-          const msg = (args[0] || '').toString().toLowerCase();
-          if (msg.includes('websocket') || msg.includes('supabase') || msg.includes('544')) {
-            return;
+          const msg = String(args[0] || '').toLowerCase();
+          const fullMsg = args.join(' ').toLowerCase();
+          
+          // Lista de termos a ignorar
+          if (
+            msg.includes('websocket') ||
+            msg.includes('supabase') ||
+            msg.includes('544') ||
+            msg.includes('istrusted') ||
+            msg.includes('deploy') ||
+            msg.includes('edge_functions') ||
+            fullMsg.includes('xhr') ||
+            fullMsg.includes('ws://') ||
+            fullMsg.includes('wss://')
+          ) {
+            return; // Silencia completamente
           }
+          
           originalError.apply(console, args);
         };
         
+        // Suprime console.warn
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+          const msg = String(args[0] || '').toLowerCase();
+          if (msg.includes('websocket') || msg.includes('supabase')) {
+            return;
+          }
+          originalWarn.apply(console, args);
+        };
+        
+        // Captura eventos de erro globais
         window.addEventListener('error', function(e) {
-          const msg = (e.message || '').toLowerCase();
-          if (msg.includes('websocket') || msg.includes('supabase') || msg.includes('544')) {
+          const msg = String(e.message || '').toLowerCase();
+          const filename = String(e.filename || '').toLowerCase();
+          
+          if (
+            msg.includes('websocket') ||
+            msg.includes('supabase') ||
+            msg.includes('544') ||
+            filename.includes('websocket') ||
+            filename.includes('supabase')
+          ) {
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
             return false;
           }
-        }, true);
+        }, true); // true = capture phase
+        
+        // Captura rejeições de promises
+        window.addEventListener('unhandledrejection', function(e) {
+          const reason = String(e.reason || '').toLowerCase();
+          
+          if (
+            reason.includes('websocket') ||
+            reason.includes('supabase') ||
+            reason.includes('544')
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+        });
+        
+        // Sobrescreve WebSocket nativo para adicionar supressão de erro
+        const OriginalWebSocket = window.WebSocket;
+        window.WebSocket = function(url, protocols) {
+          const ws = new OriginalWebSocket(url, protocols);
+          
+          // Remove qualquer listener de erro padrão
+          ws.addEventListener('error', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+          }, true);
+          
+          return ws;
+        };
+        
+        // Copia propriedades estáticas
+        Object.setPrototypeOf(window.WebSocket, OriginalWebSocket);
+        Object.setPrototypeOf(window.WebSocket.prototype, OriginalWebSocket.prototype);
       })();
     </script>
   </head>

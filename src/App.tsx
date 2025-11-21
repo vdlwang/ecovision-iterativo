@@ -7,87 +7,59 @@ import { MonitorPanel } from './components/MonitorPanel';
 import { ConfigGatesPanel } from './components/ConfigGatesPanel';
 import { ConfigModelPanel } from './components/ConfigModelPanel';
 
-export type Page = 'monitor' | 'config-gates' | 'config-model';
-
-interface User {
-  name: string;
-  email: string;
-  avatar?: string;
-  isDemo: boolean;
-}
+type Panel = 'monitor' | 'gates' | 'model';
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [currentPage, setCurrentPage] = useState<Page>('monitor');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentPanel, setCurrentPanel] = useState<Panel>('monitor');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Verifica se há sessão salva
+  // Verificar se há sessão salva
   useEffect(() => {
-    const savedUser = localStorage.getItem('ecovision_user');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (error) {
-        localStorage.removeItem('ecovision_user');
-      }
+    const savedAuth = localStorage.getItem('ecovision_authenticated');
+    if (savedAuth === 'true') {
+      setIsAuthenticated(true);
     }
   }, []);
 
-  const handleLogin = (userData: User) => {
-    setUser(userData);
-    localStorage.setItem('ecovision_user', JSON.stringify(userData));
+  const handleLogin = () => {
+    setIsAuthenticated(true);
+    localStorage.setItem('ecovision_authenticated', 'true');
   };
 
   const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('ecovision_user');
-    setCurrentPage('monitor');
+    setIsAuthenticated(false);
+    localStorage.removeItem('ecovision_authenticated');
+    setCurrentPanel('monitor');
   };
 
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'monitor':
-        return <MonitorPanel />;
-      case 'config-gates':
-        return <ConfigGatesPanel />;
-      case 'config-model':
-        return <ConfigModelPanel />;
-      default:
-        return <MonitorPanel />;
-    }
-  };
-
-  const handlePageChange = (page: Page) => {
-    setCurrentPage(page);
-    setSidebarOpen(false); // Fecha sidebar no mobile ao trocar de página
-  };
-
-  // Mostra tela de login se não estiver autenticado
-  if (!user) {
+  if (!isAuthenticated) {
     return (
       <ErrorBoundary>
-        <ToastProvider />
         <LoginScreen onLogin={handleLogin} />
+        <ToastProvider />
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary>
-      <ToastProvider />
       <div className="flex h-screen bg-neutral-950 overflow-hidden">
-        <Sidebar 
-          currentPage={currentPage} 
-          onPageChange={handlePageChange}
+        <Sidebar
+          currentPanel={currentPanel}
+          onPanelChange={setCurrentPanel}
+          onLogout={handleLogout}
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen(!sidebarOpen)}
-          user={user}
-          onLogout={handleLogout}
         />
+        
         <main className="flex-1 overflow-auto">
-          {renderPage()}
+          {currentPanel === 'monitor' && <MonitorPanel />}
+          {currentPanel === 'gates' && <ConfigGatesPanel />}
+          {currentPanel === 'model' && <ConfigModelPanel />}
         </main>
       </div>
+      <ToastProvider />
     </ErrorBoundary>
   );
 }
