@@ -70,10 +70,14 @@ state = SystemState()
 # ==== Serial (ESP32) ====
 def send_line(ser, msg):
     """Envia comando via serial"""
+    if ser is None:
+        print(f"[DEMO] Serial indisponível; comando ignorado: {msg.strip()}")
+        return False
     if not msg.endswith("\n"):
         msg += "\n"
     ser.write(msg.encode("utf-8"))
     ser.flush()
+    return True
 
 def read_reply(ser, timeout=1.5):
     """Lê resposta do ESP32"""
@@ -86,24 +90,24 @@ def read_reply(ser, timeout=1.5):
 
 def motor_on(ser):
     """Liga o motor da esteira"""
-    send_line(ser, "MOTOR ON")
-    r = read_reply(ser)
-    if r:
-        print(f"ESP32: {r}")
+    if send_line(ser, "MOTOR ON"):
+        r = read_reply(ser)
+        if r:
+            print(f"ESP32: {r}")
 
 def motor_off(ser):
     """Desliga o motor da esteira"""
-    send_line(ser, "MOTOR OFF")
-    r = read_reply(ser)
-    if r:
-        print(f"ESP32: {r}")
+    if send_line(ser, "MOTOR OFF"):
+        r = read_reply(ser)
+        if r:
+            print(f"ESP32: {r}")
 
 def send_angle(ser, angle):
     """Envia ângulo para o servo"""
-    send_line(ser, str(angle))
-    r = read_reply(ser)
-    if r:
-        print(f"ESP32: {r}")
+    if send_line(ser, str(angle)):
+        r = read_reply(ser)
+        if r:
+            print(f"ESP32: {r}")
 
 # ==== WebSocket Server ====
 async def websocket_handler(websocket):
@@ -262,10 +266,10 @@ def process_yolo_stream():
         state.current_detections = detections
         
         # Processa fila de detecções
-        if not state.processing and state.detection_queue and ser:
+        if not state.processing and state.detection_queue:
             target = state.detection_queue.popleft()
             angle = config['class_to_angle'][target]
-            
+
             print(f"→ Processando: {target} → {angle}°")
             send_angle(ser, angle)
             
@@ -276,7 +280,7 @@ def process_yolo_stream():
         if state.processing:
             elapsed = time.time() - state.processing_started_at
             if elapsed >= config['servo_actuation_seconds']:
-                if not state.motor_running and ser:
+                if not state.motor_running:
                     motor_on(ser)
                     state.motor_running = True
                 state.processing = False
