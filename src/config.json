@@ -8,10 +8,11 @@
   "roi_y_max": 0.55,
   "class_to_angle": {
     "plastic": 50,
-    "metal": 90,
+    "metal": 145,
     "corrugated carton": 130,
     "paper": 130
   },
   "servo_actuation_seconds": 5.0,
-  "detection_cooldown": 1.0
+  "detection_cooldown": 1.0,
+  "type": "save_config"
 }

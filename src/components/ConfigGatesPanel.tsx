@@ -17,9 +17,9 @@ interface MaterialConfig {
 
 export function ConfigGatesPanel() {
   const [materials, setMaterials] = useState<MaterialConfig[]>([
-    { name: 'Plástico', key: 'plastic', servoAngle: 50, icon: '♻️', color: 'bg-red-600' },
+    { name: 'Plástico', key: 'plastic', servoAngle: 50, icon: '🥤', color: 'bg-red-600' },
     { name: 'Metal', key: 'metal', servoAngle: 90, icon: '🔩', color: 'bg-yellow-600' },
-    { name: 'Papelão', key: 'corrugated carton', servoAngle: 130, icon: '📦', color: 'bg-blue-600' },
+    { name: 'Vidro', key: 'vidro', servoAngle: 130, icon: '🍷', color: 'bg-blue-600' },
     { name: 'Papel', key: 'paper', servoAngle: 130, icon: '📄', color: 'bg-blue-600' },
   ]);
 
