@@ -1,4 +1,4 @@
-@startuml EcoVision - Diagrama de Classes Simplificado
+@startuml EcoVision - Diagrama de Classes
 !theme plain
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontSize 12
@@ -6,404 +6,196 @@ skinparam classAttributeIconSize 0
 
 title EcoVision - Diagrama de Classes (Frontend + Backend)
 
-' ==================== FRONTEND COMPONENTS ====================
-
-package "Frontend React Components" #EDFEF4 {
-  
+package "Frontend (React + TypeScript)" #EDFEF4 {
   class App <<Component>> {
-    - user: User | null
-    - userToken: string | null
-    - isDemoMode: boolean
-    - loading: boolean
-    - activeTab: string
-    - isSystemRunning: boolean
-    - minAccuracy: number
-    - modelVersion: string
-    - gateConfigs: Map<number, string>
+    - isAuthenticated: boolean
+    - currentPanel: "monitor"|"gates"|"model"
+    - sidebarOpen: boolean
     --
-    + handleDemoMode(): void
-    + handleToggleSystem(): void
-    + handleAccuracyChange(accuracy: number): void
-    + handleModelVersionChange(version: string): void
-    + handleGateConfigChange(configs: object): void
+    + handleLogin(): void
+    + handleLogout(): void
     --
-    **Gerencia estado global**
-    **Renderiza componentes baseado em activeTab**
+    **Gerencia sessão localStorage**
+    **Alterna painéis principais**
   }
-  
-  class Login <<Component>> {
-    - isLoading: boolean
+
+  class LoginScreen <<Component>> {
+    - loading: boolean
     --
     + handleGoogleLogin(): Promise<void>
     + handleDemoMode(): void
     --
-    **Props:**
-    • onDemoMode: () => void
+    **Props:** onLogin(user)
   }
-  
+
   class Sidebar <<Component>> {
-    --
-    **Props:**
-    • activeTab: string
-    • onTabChange: (tab) => void
-    • userEmail: string
-    • onLogout: () => void
-    --
-    **Features:**
-    • Menu expansível
-    • 5 abas navegáveis
-    • Avatar do usuário
+    **Props:** currentPanel, onPanelChange, onLogout, isOpen, onToggle
+    **Renderiza navegação das abas**
   }
-  
+
   class MonitorPanel <<Component>> {
-    - recentDetections: Detection[]
-    - gateStates: GateStates
-    - beltRunning: boolean
-    --
-    + handleCameraDetection(detection): void
-    + activateGate(gateNumber): void
-    + sendSerialCommand(gateNumber): void
-    + saveDetection(detection, userId): void
-    --
-    **Props:**
-    • gateConfigs: object
-    • minAccuracy: number
-    • isRunning: boolean
-    • onToggleSystem: () => void
-    • modelVersion: string
-    • userId: string
-    • userToken: string
-  }
-  
-  class CameraFeed <<Component>> {
-    - videoRef: RefObject<HTMLVideoElement>
-    - canvasRef: RefObject<HTMLCanvasElement>
+    - confidence: number
     - detections: Detection[]
     - fps: number
-    - cameraError: string | null
-    - inferenceMode: "onnx" | "server" | "mock"
+    - motorRunning: boolean
+    - connected: boolean
+    - canvasRef: Ref<HTMLCanvasElement>
+    - wsRef: WebSocket
     --
-    + startCamera(): Promise<void>
-    + stopCamera(): void
-    + processFrame(): void
-    + drawBoundingBoxes(): void
-    + runONNXInference(imageData): Promise<Detection[]>
-    + runServerInference(imageData): Promise<Detection[]>
+    + connectWebSocket(): void
+    + sendCommand(cmd: string): void
+    + updateConfidence(value: number): void
     --
-    **Props:**
-    • isRunning: boolean
-    • onDetection: (detection) => void
-    • modelVersion: string
-    • minConfidence: number
-    • onToggleSystem: () => void
-    • inline: boolean
-    • userToken: string
+    **Exibe vídeo, bounding boxes e status**
   }
-  
-  class GateConfiguration <<Component>> {
-    - tempConfigs: Map<number, string>
+
+  class ConfigGatesPanel <<Component>> {
+    - materials: MaterialConfig[]
+    - connected: boolean
+    - wsRef: WebSocket
     --
-    + handleConfigSave(): void
+    + connectWebSocket(): void
+    + updateMaterialAngle(index, angle): void
+    + testServo(angle, name): void
+    + saveConfiguration(): void
     --
-    **Props:**
-    • gateConfigs: object
-    • onConfigChange: (configs) => void
-    • isSystemRunning: boolean
+    **Mapeia materiais → ângulos do servo**
   }
-  
-  class AccuracyControl <<Component>> {
-    - tempAccuracy: number
+
+  class ConfigModelPanel <<Component>> {
+    - confidence: number
+    - modelType: string
+    - modelPath: string
+    - serialPort: string
+    - baudRate: number
+    - cameraIndex: number
+    - connected: boolean
+    - wsRef: WebSocket
     --
-    + handleAccuracySave(): void
-    + handleModelChange(version): void
+    + connectWebSocket(): void
+    + handleModelTypeChange(value): void
+    + saveConfiguration(): void
+    + testConnection(): void
     --
-    **Props:**
-    • minAccuracy: number
-    • onAccuracyChange: (accuracy) => void
-    • isSystemRunning: boolean
-    • modelVersion: string
-    • onModelVersionChange: (version) => void
+    **Ajusta modelo YOLO e hardware**
   }
-  
-  class StatisticsPanel <<Component>> {
-    - stats: StatisticsData
-    - loading: boolean
-    - timeRange: string
-    --
-    + fetchStats(): Promise<void>
-    + renderCharts(): JSX.Element
-    --
-    **Props:**
-    • isSystemRunning: boolean
-    • gateConfigs: object
-    • userToken: string
+
+  class ErrorBoundary <<Component>> {
+    **Captura erros de renderização**
   }
-  
-  class UserProfile <<Component>> {
-    - userStats: UserStatistics
-    - loading: boolean
-    --
-    + fetchUserStats(): Promise<void>
-    --
-    **Props:**
-    • user: User
-    • isDemoMode: boolean
-    • userToken: string
+
+  class ToastProvider <<Context>> {
+    **Dispara notificações via sonner**
   }
 }
-
-' ==================== FRONTEND UTILS ====================
-
-package "Frontend Utils" #ABF2AB {
-  
-  class ONNXInference <<Utility>> {
-    + loadONNXModel(modelPath: string): Promise<InferenceSession>
-    + runInference(session, imageData): Promise<Tensor>
-    + preprocessImage(imageData): Tensor
-    + postprocessYOLOOutput(output): Detection[]
-    + applyNMS(detections, threshold): Detection[]
-    --
-    **Inferência ONNX no navegador**
-    **Zero latência de rede**
-  }
-  
-  class SupabaseClient <<Utility>> {
-    - client: SupabaseClient | null
-    --
-    + getSupabaseClient(): SupabaseClient
-    + createClient(): SupabaseClient
-    --
-    **Singleton do cliente Supabase**
-  }
-}
-
-' ==================== BACKEND API ====================
-
-package "Backend Hono Server" #FEF4ED {
-  
-  class HonoServer <<API>> {
-    - app: Hono
-    - supabase: SupabaseClient
-    --
-    + GET /health
-    + GET /auth-test
-    + POST /config
-    + GET /config
-    + POST /inference
-    + GET /stats
-    + GET /stats/period
-    + POST /session/end
-    + POST /logs
-    + GET /logs
-    + GET /user/stats
-    --
-    **Middleware:**
-    • CORS
-    • Logger
-    • JWT Auth
-  }
-  
-  note right of HonoServer
-    **Autenticação:**
-    • Suporta Google OAuth (JWT)
-    • Suporta Modo Demo (token especial)
-    • Valida tokens em cada request
-    
-    **CORS:**
-    • Origin: *
-    • Methods: GET, POST, PUT, DELETE
-    • Headers: Content-Type, Authorization
-  end note
-}
-
-' ==================== DATABASE ====================
-
-package "Supabase Database" #E8F4FD {
-  
-  class KVStore <<Persistence>> {
-    --
-    + get(key: string): Promise<any>
-    + set(key: string, value: any): Promise<void>
-    + mget(keys: string[]): Promise<any[]>
-    + mset(entries: object): Promise<void>
-    + del(key: string): Promise<void>
-    + mdel(keys: string[]): Promise<void>
-    + getByPrefix(prefix: string): Promise<any[]>
-    --
-    **Table: kv_store_ea835390**
-    • key: TEXT (PK)
-    • value: JSONB
-    • created_at: TIMESTAMP
-    • updated_at: TIMESTAMP
-  }
-  
-  note right of KVStore
-    **Chaves Usadas:**
-    • system_config_{userId}
-    • detection_{userId}_{timestamp}
-    • stats_{userId}_{date}
-    • session_{sessionId}
-    • user_profile_{userId}
-    • inference_{requestId}
-  end note
-}
-
-package "Supabase Auth" #E8F4FD {
-  
-  class SupabaseAuth <<Service>> {
-    --
-    + signInWithOAuth(provider): Promise<Session>
-    + signOut(): Promise<void>
-    + getSession(): Promise<Session>
-    + getUser(token): Promise<User>
-    + onAuthStateChange(callback): Subscription
-    --
-    **Providers:**
-    • Google OAuth
-    • Demo Mode (custom)
-  }
-}
-
-' ==================== EXTERNAL SERVICES ====================
-
-package "External Services" #FFF9E8 {
-  
-  class ONNXRuntimeWeb <<Service>> {
-    --
-    + InferenceSession.create(modelPath): Promise<Session>
-    + session.run(feeds): Promise<Tensor>
-    --
-    **Modelos:**
-    • yolov8n.onnx (~12MB)
-    • yolov8s.onnx (~45MB)
-    • yolov8m.onnx (~100MB)
-  }
-  
-  class PythonInferenceServer <<Service>> {
-    --
-    + POST /predict
-    + GET /health
-    --
-    **Framework:** FastAPI
-    **Modelos:** .pt files
-    **Opcional:** Fallback quando ONNX falha
-  }
-  
-  class WebcamAPI <<Browser API>> {
-    --
-    + getUserMedia(constraints): Promise<MediaStream>
-    --
-    **Constraints:**
-    • video: { width: 640, height: 480, facingMode: "environment" }
-  }
-}
-
-' ==================== DOMAIN MODELS ====================
 
 package "Domain Models" #008148 {
-  
-  class Detection <<Model>> {
-    + material: string
+  class Detection {
+    + class: string
     + confidence: number
-    + bbox: BoundingBox
-    + timestamp: Date
-    + gateAssigned: number
+    + bbox: [number, number, number, number]
   }
-  
-  class BoundingBox <<Model>> {
-    + x: number
-    + y: number
-    + width: number
-    + height: number
+
+  class FrameData {
+    + frame: string
+    + detections: Detection[]
+    + fps: number
+    + motor_running: boolean
   }
-  
-  class User <<Model>> {
-    + id: string
-    + email: string
-    + name?: string
-    + avatar_url?: string
+
+  class MaterialConfig {
+    + name: string
+    + key: string
+    + servoAngle: number
+    + icon: string
+    + color: string
   }
-  
-  class StatisticsData <<Model>> {
-    + totalDetections: number
-    + byMaterial: Map<string, number>
-    + timeline: TimelinePoint[]
-    + averageConfidence: number
-  }
-  
-  class UserStatistics <<Model>> {
-    + totalSessions: number
-    + totalDetections: number
-    + totalProcessed: number
-    + lastSession: Date | null
-    + favoriteConfiguration: object | null
-  }
-  
-  class GateConfig <<Model>> {
-    + gate1Material: string
-    + gate2Material: string
-    + gate3Material: string
-    + minConfidence: number
-    + modelVersion: string
+
+  class ModelConfig {
+    + confidence: number
+    + model_path: string
+    + serial_port: string
+    + baud_rate: number
+    + camera_index: number
   }
 }
 
-' ==================== RELATIONSHIPS ====================
+package "Backend (Python)" #FEF4ED {
+  class SystemState {
+    + motor_running: bool
+    + processing: bool
+    + processing_started_at: float
+    + last_enqueue_ts: float
+    + detection_queue: deque
+    + current_detections: list
+    + fps: int
+    + serial_port: Serial | None
+    + websocket_clients: set
+  }
 
-' App para Components
-App *-- Login : "renderiza quando !user"
-App *-- Sidebar : "renderiza quando user"
-App *-- MonitorPanel : "renderiza quando activeTab=monitor"
-App *-- GateConfiguration : "renderiza quando activeTab=cancelas"
-App *-- AccuracyControl : "renderiza quando activeTab=modelo"
-App *-- StatisticsPanel : "renderiza quando activeTab=dashboard"
-App *-- UserProfile : "renderiza quando activeTab=perfil"
+  class SerialController {
+    + motor_on(): void
+    + motor_off(): void
+    + send_angle(angle): void
+    **Envia comandos ao ESP32**
+  }
 
-' MonitorPanel composição
-MonitorPanel *-- CameraFeed : "contém"
+  class WebSocketHandler {
+    + websocket_handler(websocket): coroutine
+    + broadcast_frame(frame_data): coroutine
+    **Recebe comandos e envia frames**
+  }
 
-' Components usam Utils
-CameraFeed --> ONNXInference : "usa para inferência local"
-App --> SupabaseClient : "usa para auth"
-Login --> SupabaseClient : "usa para OAuth"
+  class YOLOPipeline {
+    + process_yolo_stream(): void
+    **Captura webcam → YOLO → aciona servo → envia frame**
+  }
+}
 
-' Components usam API
-MonitorPanel --> HonoServer : "HTTP requests"
-CameraFeed --> HonoServer : "POST /inference (fallback)"
-GateConfiguration --> HonoServer : "POST /config"
-AccuracyControl --> HonoServer : "POST /config"
-StatisticsPanel --> HonoServer : "GET /stats"
-UserProfile --> HonoServer : "GET /user/stats"
+package "External" #FFF9E8 {
+  class ESP32 <<Hardware>>
+  class Webcam <<Device>>
+  class YOLOModel <<Model>>
+}
 
-' API usa Database
-HonoServer --> KVStore : "persiste dados"
-HonoServer --> SupabaseAuth : "valida tokens"
+App *-- LoginScreen : "exibe se !isAuthenticated"
+App *-- Sidebar : "layout"
+App *-- MonitorPanel : "currentPanel=monitor"
+App *-- ConfigGatesPanel : "currentPanel=gates"
+App *-- ConfigModelPanel : "currentPanel=model"
+App o-- ToastProvider
+App o-- ErrorBoundary
 
-' External Services
-CameraFeed --> WebcamAPI : "captura vídeo"
-CameraFeed --> ONNXRuntimeWeb : "inferência local"
-CameraFeed --> PythonInferenceServer : "fallback inferência"
-ONNXInference --> ONNXRuntimeWeb : "carrega modelo"
+MonitorPanel --> WebSocketHandler : "consome frames"
+MonitorPanel --> Detection
+MonitorPanel --> FrameData
+MonitorPanel --> SerialController : "envia comandos"
 
-' Domain Models
-Detection *-- BoundingBox
-StatisticsData *-- Detection
-UserStatistics --> User
-GateConfig --> User
-MonitorPanel --> Detection : "processa"
-CameraFeed --> Detection : "cria"
-StatisticsPanel --> StatisticsData : "exibe"
-UserProfile --> UserStatistics : "exibe"
+ConfigGatesPanel --> MaterialConfig
+ConfigGatesPanel --> WebSocketHandler : "busca config"
+ConfigGatesPanel --> SerialController : "testa servo"
 
-' ==================== LEGENDA ====================
+ConfigModelPanel --> ModelConfig
+ConfigModelPanel --> WebSocketHandler : "salva config"
+ConfigModelPanel --> SerialController : "teste motor"
+
+YOLOPipeline --> YOLOModel
+YOLOPipeline --> SerialController
+YOLOPipeline --> WebSocketHandler : "envia frames"
+YOLOPipeline --> Detection
+YOLOPipeline --> FrameData
+
+SerialController --> ESP32
+YOLOPipeline --> Webcam
+WebSocketHandler --> SystemState
+SerialController --> SystemState
+YOLOPipeline --> SystemState
 
 legend right
   |<#EDFEF4>    | Frontend Components |
-  |<#ABF2AB>    | Frontend Utils |
-  |<#FEF4ED>    | Backend API |
-  |<#E8F4FD>    | Database & Auth |
-  |<#FFF9E8>    | External Services |
   |<#008148>    | Domain Models |
+  |<#FEF4ED>    | Backend |
+  |<#FFF9E8>    | External |
 endlegend
 
 @enduml
