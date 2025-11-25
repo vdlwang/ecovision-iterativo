@@ -1,201 +1,205 @@
 @startuml EcoVision - Diagrama de Classes
-!theme plain
-skinparam backgroundColor #FFFFFF
-skinparam defaultFontSize 12
+' !theme plain
+' skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 40
 skinparam classAttributeIconSize 0
+skinparam maxWidth 2600
 
-title EcoVision - Diagrama de Classes (Frontend + Backend)
+' title EcoVision - Diagrama de Classes (Frontend + Backend)
 
-package "Frontend (React + TypeScript)" #EDFEF4 {
-  class App <<Component>> {
-    - isAuthenticated: boolean
-    - currentPanel: "monitor"|"gates"|"model"
-    - sidebarOpen: boolean
-    --
-    + handleLogin(): void
-    + handleLogout(): void
-    --
-    **Gerencia sessão localStorage**
-    **Alterna painéis principais**
-  }
+' package "Frontend (React + TypeScript)" #EDFEF4 {
+'   class App <<Component>> {
+'     - isAuthenticated: boolean
+'     - currentPanel: "monitor"|"gates"|"model"
+'     - sidebarOpen: boolean
+'     --
+'     + handleLogin(): void
+'     + handleLogout(): void
+'     --
+'     **Gerencia sessão localStorage**
+'     **Alterna painéis principais**
+'   }
 
-  class LoginScreen <<Component>> {
-    - loading: boolean
-    --
-    + handleGoogleLogin(): Promise<void>
-    + handleDemoMode(): void
-    --
-    **Props:** onLogin(user)
-  }
+'   class LoginScreen <<Component>> {
+'     - loading: boolean
+'     --
+'     + handleGoogleLogin(): Promise<void>
+'     + handleDemoMode(): void
+'     --
+'     **Props:** onLogin(user)
+'   }
 
-  class Sidebar <<Component>> {
-    **Props:** currentPanel, onPanelChange, onLogout, isOpen, onToggle
-    **Renderiza navegação das abas**
-  }
+'   class Sidebar <<Component>> {
+'     **Props:** currentPanel, onPanelChange, onLogout, isOpen, onToggle
+'     **Renderiza navegação das abas**
+'   }
 
-  class MonitorPanel <<Component>> {
-    - confidence: number
-    - detections: Detection[]
-    - fps: number
-    - motorRunning: boolean
-    - connected: boolean
-    - canvasRef: Ref<HTMLCanvasElement>
-    - wsRef: WebSocket
-    --
-    + connectWebSocket(): void
-    + sendCommand(cmd: string): void
-    + updateConfidence(value: number): void
-    --
-    **Exibe vídeo, bounding boxes e status**
-  }
+'   class MonitorPanel <<Component>> {
+'     - confidence: number
+'     - detections: Detection[]
+'     - fps: number
+'     - motorRunning: boolean
+'     - connected: boolean
+'     - canvasRef: Ref<HTMLCanvasElement>
+'     - wsRef: WebSocket
+'     --
+'     + connectWebSocket(): void
+'     + sendCommand(cmd: string): void
+'     + updateConfidence(value: number): void
+'     --
+'     **Exibe vídeo, bounding boxes e status**
+'   }
 
-  class ConfigGatesPanel <<Component>> {
-    - materials: MaterialConfig[]
-    - connected: boolean
-    - wsRef: WebSocket
-    --
-    + connectWebSocket(): void
-    + updateMaterialAngle(index, angle): void
-    + testServo(angle, name): void
-    + saveConfiguration(): void
-    --
-    **Mapeia materiais → ângulos do servo**
-  }
+'   class ConfigGatesPanel <<Component>> {
+'     - materials: MaterialConfig[]
+'     - connected: boolean
+'     - wsRef: WebSocket
+'     --
+'     + connectWebSocket(): void
+'     + updateMaterialAngle(index, angle): void
+'     + testServo(angle, name): void
+'     + saveConfiguration(): void
+'     --
+'     **Mapeia materiais → ângulos do servo**
+'   }
 
-  class ConfigModelPanel <<Component>> {
-    - confidence: number
-    - modelType: string
-    - modelPath: string
-    - serialPort: string
-    - baudRate: number
-    - cameraIndex: number
-    - connected: boolean
-    - wsRef: WebSocket
-    --
-    + connectWebSocket(): void
-    + handleModelTypeChange(value): void
-    + saveConfiguration(): void
-    + testConnection(): void
-    --
-    **Ajusta modelo YOLO e hardware**
-  }
+'   class ConfigModelPanel <<Component>> {
+'     - confidence: number
+'     - modelType: string
+'     - modelPath: string
+'     - serialPort: string
+'     - baudRate: number
+'     - cameraIndex: number
+'     - connected: boolean
+'     - wsRef: WebSocket
+'     --
+'     + connectWebSocket(): void
+'     + handleModelTypeChange(value): void
+'     + saveConfiguration(): void
+'     + testConnection(): void
+'     --
+'     **Ajusta modelo YOLO e hardware**
+'   }
 
-  class ErrorBoundary <<Component>> {
-    **Captura erros de renderização**
-  }
+'   ' class ErrorBoundary <<Component>> {
+'   '   **Captura erros de renderização**
+'   ' }
 
-  class ToastProvider <<Context>> {
-    **Dispara notificações via sonner**
-  }
+'   ' class ToastProvider <<Context>> {
+'   '   **Dispara notificações via sonner**
+'   ' }
+' }
+
+' package "Domain Models" #cbf7c7 {
+class Detection {
+  + class: string
+  + confidence: number
+  + bbox: [number, number, number, number]
 }
 
-package "Domain Models" #008148 {
-  class Detection {
-    + class: string
-    + confidence: number
-    + bbox: [number, number, number, number]
-  }
-
-  class FrameData {
-    + frame: string
-    + detections: Detection[]
-    + fps: number
-    + motor_running: boolean
-  }
-
-  class MaterialConfig {
-    + name: string
-    + key: string
-    + servoAngle: number
-    + icon: string
-    + color: string
-  }
-
-  class ModelConfig {
-    + confidence: number
-    + model_path: string
-    + serial_port: string
-    + baud_rate: number
-    + camera_index: number
-  }
+class FrameData {
+  + frame: string
+  + detections: Detection[]
+  + fps: number
+  + motor_running: boolean
 }
 
-package "Backend (Python)" #FEF4ED {
-  class SystemState {
-    + motor_running: bool
-    + processing: bool
-    + processing_started_at: float
-    + last_enqueue_ts: float
-    + detection_queue: deque
-    + current_detections: list
-    + fps: int
-    + serial_port: Serial | None
-    + websocket_clients: set
-  }
-
-  class SerialController {
-    + motor_on(): void
-    + motor_off(): void
-    + send_angle(angle): void
-    **Envia comandos ao ESP32**
-  }
-
-  class WebSocketHandler {
-    + websocket_handler(websocket): coroutine
-    + broadcast_frame(frame_data): coroutine
-    **Recebe comandos e envia frames**
-  }
-
-  class YOLOPipeline {
-    + process_yolo_stream(): void
-    **Captura webcam → YOLO → aciona servo → envia frame**
-  }
+class MaterialConfig {
+  + name: string
+  + key: string
+  + servoAngle: number
+  + icon: string
+  + color: string
 }
 
-package "External" #FFF9E8 {
-  class ESP32 <<Hardware>>
-  class Webcam <<Device>>
-  class YOLOModel <<Model>>
+class ModelConfig {
+  + confidence: number
+  + model_path: string
+  + serial_port: string
+  + baud_rate: number
+  + camera_index: number
+}
+' }
+
+' package "Backend (Python)" #FEF4ED {
+class SystemState {
+  + motor_running: bool
+  + processing: bool
+  + processing_started_at: float
+  + last_enqueue_ts: float
+  + detection_queue: deque
+  + current_detections: list
+  + fps: int
+  + serial_port: Serial | None
+  + websocket_clients: set
 }
 
-App *-- LoginScreen : "exibe se !isAuthenticated"
-App *-- Sidebar : "layout"
-App *-- MonitorPanel : "currentPanel=monitor"
-App *-- ConfigGatesPanel : "currentPanel=gates"
-App *-- ConfigModelPanel : "currentPanel=model"
-App o-- ToastProvider
-App o-- ErrorBoundary
+class SerialController {
+  + motor_on(): void
+  + motor_off(): void
+  + send_angle(angle): void
+  **Envia comandos ao ESP32**
+}
 
-MonitorPanel --> WebSocketHandler : "consome frames"
-MonitorPanel --> Detection
-MonitorPanel --> FrameData
-MonitorPanel --> SerialController : "envia comandos"
+class WebSocketHandler {
+  + websocket_handler(websocket): coroutine
+  + broadcast_frame(frame_data): coroutine
+  **Recebe comandos e envia frames**
+}
 
-ConfigGatesPanel --> MaterialConfig
-ConfigGatesPanel --> WebSocketHandler : "busca config"
-ConfigGatesPanel --> SerialController : "testa servo"
+class YOLOPipeline {
+  + process_yolo_stream(): void
+  **Captura webcam → YOLO → aciona servo → envia frame**
+}
+' }
 
-ConfigModelPanel --> ModelConfig
-ConfigModelPanel --> WebSocketHandler : "salva config"
-ConfigModelPanel --> SerialController : "teste motor"
+' package "External" #FFF9E8 {
+' class ESP32 <<Hardware>>
+' class Webcam <<Device>>
+' class YOLOModel <<Model>>
+' }
 
-YOLOPipeline --> YOLOModel
+' App *-- LoginScreen : "exibe se !isAuthenticated"
+' App *-- Sidebar : "layout"
+' App *-- MonitorPanel : "currentPanel=monitor"
+' App *-- ConfigGatesPanel : "currentPanel=gates"
+' App *-- ConfigModelPanel : "currentPanel=model"
+' App o-- ToastProvider
+' App o-- ErrorBoundary
+
+' YOLOPipeline --> YOLOModel
 YOLOPipeline --> SerialController
 YOLOPipeline --> WebSocketHandler : "envia frames"
 YOLOPipeline --> Detection
 YOLOPipeline --> FrameData
 
-SerialController --> ESP32
-YOLOPipeline --> Webcam
+' SerialController --> ESP32
+' YOLOPipeline --> Webcam
 WebSocketHandler --> SystemState
 SerialController --> SystemState
 YOLOPipeline --> SystemState
 
-legend right
-  |<#EDFEF4>    | Frontend Components |
-  |<#008148>    | Domain Models |
-  |<#FEF4ED>    | Backend |
-  |<#FFF9E8>    | External |
-endlegend
+SystemState --> ModelConfig
+SystemState --> MaterialConfig
+
+' MonitorPanel --> WebSocketHandler : "consome frames"
+' MonitorPanel --> Detection
+' MonitorPanel --> FrameData
+' MonitorPanel --> SerialController : "envia comandos"
+
+' ConfigGatesPanel --> MaterialConfig
+' ConfigGatesPanel --> WebSocketHandler : "busca config"
+' ConfigGatesPanel --> SerialController : "testa servo"
+
+' ConfigModelPanel --> ModelConfig
+' ConfigModelPanel --> WebSocketHandler : "salva config"
+' ConfigModelPanel --> SerialController : "teste motor"
+
+' legend right
+'   ' |<#EDFEF4>    | Frontend Components |
+'   |<#cbf7c7>    | Domain Models |
+'   |<#FEF4ED>    | Backend |
+'   |<#FFF9E8>    | External |
+' endlegend
 
 @enduml

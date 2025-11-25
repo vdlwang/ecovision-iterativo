@@ -29,7 +29,7 @@ def load_config():
     default_config = {
         "serial_port": "COM7",
         "baud_rate": 115200,
-        "camera_index": 1,
+        "camera_index": 0,
         "model_path": "../yolo_models/taco/yolov8s.pt",
         "confidence": 0.4,
         "roi_y_min": 0.45,
