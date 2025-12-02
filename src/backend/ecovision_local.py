@@ -37,7 +37,7 @@ def load_config():
         "class_to_angle": {
             "plastic": 50,
             "metal": 90,
-            "corrugated carton": 130,
+            "glass": 130,
             "paper": 130
         },
         "servo_actuation_seconds": 5.0,
@@ -51,6 +51,94 @@ def load_config():
     return default_config
 
 config = load_config()
+
+# ==== Mapeamento TACO -> material genérico ====
+PLASTIC = "plastic"
+METAL   = "metal"
+GLASS   = "glass"
+PAPER   = "paper"
+OTHER   = "other"  # opcional
+
+# Dicionário: nome da classe TACO (lowercase) -> grupo de material
+taco_to_material = {
+    # --- Metal ---
+    "aluminium foil": METAL,
+    "battery": METAL,
+    "aluminium blister pack": METAL,
+    "metal bottle cap": METAL,
+    "food can": METAL,
+    "aerosol": METAL,
+    "drink can": METAL,
+    "metal lid": METAL,
+    "scrap metal": METAL,
+    "pop tab": METAL,
+
+    # --- Glass ---
+    "glass bottle": GLASS,
+    "broken glass": GLASS,
+    "glass cup": GLASS,
+    "glass jar": GLASS,
+
+    # --- Paper / papel ---
+    "toilet tube": PAPER,
+    "other carton": PAPER,
+    "egg carton": PAPER,
+    "drink carton": PAPER,          # Tetrapak: aqui tratado como papel
+    "corrugated carton": PAPER,
+    "meal carton": PAPER,
+    "pizza box": PAPER,
+    "paper cup": PAPER,
+    "magazine paper": PAPER,
+    "tissues": PAPER,
+    "wrapping paper": PAPER,
+    "normal paper": PAPER,
+    "paper bag": PAPER,
+    "plastified paper bag": PAPER,
+    "paper straw": PAPER,
+
+    # --- Plastic / plástico ---
+    "other plastic bottle": PLASTIC,
+    "clear plastic bottle": PLASTIC,
+    "plastic bottle cap": PLASTIC,
+    "disposable plastic cup": PLASTIC,
+    "foam cup": PLASTIC,             # isopor
+    "other plastic cup": PLASTIC,
+    "plastic lid": PLASTIC,
+    "other plastic": PLASTIC,
+    "plastic film": PLASTIC,
+    "six pack rings": PLASTIC,
+    "garbage bag": PLASTIC,
+    "other plastic wrapper": PLASTIC,
+    "single-use carrier bag": PLASTIC,
+    "polypropylene bag": PLASTIC,
+    "crisp packet": PLASTIC,         # embalagem metalizada
+    "spread tub": PLASTIC,
+    "tupperware": PLASTIC,
+    "disposable food container": PLASTIC,
+    "foam food container": PLASTIC,
+    "other plastic container": PLASTIC,
+    "plastic glooves": PLASTIC,
+    "plastic gloves": PLASTIC,       # por segurança
+    "plastic utensils": PLASTIC,
+    "squeezable tube": PLASTIC,
+    "plastic straw": PLASTIC,
+    "styrofoam piece": PLASTIC,
+    "rope & strings": PLASTIC,       # assumindo corda sintética
+
+    # --- Outros / não mapeados nos 4 grupos ---
+    "food waste": OTHER,
+    "shoe": OTHER,
+    "unlabeled litter": OTHER,
+    "cigarette": OTHER,
+}
+
+def map_taco_to_material(class_name: str) -> str:
+    """
+    Recebe o nome da classe TACO (como vem do YOLO) e
+    devolve 'plastic', 'metal', 'glass', 'paper' ou 'other'.
+    """
+    key = class_name.strip().lower()
+    return taco_to_material.get(key, OTHER)
 
 # ==== Estado Global ====
 class SystemState:
@@ -228,19 +316,24 @@ def process_yolo_stream():
             now = time.time()
             
             for i, cls_id in enumerate(cls_ids):
-                class_name = names[cls_id].lower()
+                class_name_raw = names[cls_id]       # nome original
+                class_name = class_name_raw.lower()  # em lowercase
                 confidence = float(confs[i])
                 x1, y1, x2, y2 = xyxy[i]
                 
-                # Adiciona à lista de detecções
+                # Descobre o material genérico a partir da classe TACO
+                material = map_taco_to_material(class_name)
+                
+                # Adiciona à lista de detecções (incluindo material)
                 detections.append({
-                    'class': class_name,
+                    'class': class_name,   # ou class_name_raw se preferir
+                    'material': material,
                     'confidence': confidence,
                     'bbox': [float(x1), float(y1), float(x2), float(y2)]
                 })
                 
-                # Verifica se é uma classe de interesse
-                if not any(key in class_name for key in config['class_to_angle'].keys()):
+                # Verifica se esse material tem ângulo configurado
+                if material not in config['class_to_angle']:
                     continue
                 
                 # Calcula centro Y normalizado
@@ -251,17 +344,11 @@ def process_yolo_stream():
                 if config['roi_y_min'] <= cy_norm <= config['roi_y_max']:
                     # Cooldown para evitar múltiplas detecções
                     if now - state.last_enqueue_ts >= config['detection_cooldown']:
-                        # Escolhe primeiro match na configuração
-                        chosen_key = None
-                        for key in config['class_to_angle'].keys():
-                            if key in class_name:
-                                chosen_key = key
-                                break
+                        chosen_key = material  # grupo genérico
                         
-                        if chosen_key:
-                            state.detection_queue.append(chosen_key)
-                            state.last_enqueue_ts = now
-                            print(f"✓ Enfileirado: {chosen_key} (y={cy_norm:.2f})")
+                        state.detection_queue.append(chosen_key)
+                        state.last_enqueue_ts = now
+                        print(f"✓ Enfileirado: {class_name_raw} → {chosen_key} (y={cy_norm:.2f})")
         
         state.current_detections = detections
         
@@ -288,10 +375,11 @@ def process_yolo_stream():
         # Desenha bounding boxes no frame
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
+            label_material = det.get('material', '?')
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (34, 197, 94), 2)
-            label = f"{det['class']} {det['confidence']*100:.1f}%"
+            label = f"{det['class']} ({label_material}) {det['confidence']*100:.1f}%"
             cv2.putText(frame, label, (int(x1), int(y1)-10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (34, 197, 94), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (34, 197, 94), 2)
         
         # Converte frame para base64
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
