@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from './ui/card';
 import { Label } from './ui/label';
 import { Slider } from './ui/slider';
@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { RotateCw, Save } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { useStableWebSocket } from '../hooks/useStableWebSocket';
 
 interface MaterialConfig {
   name: string;
@@ -24,94 +25,30 @@ export function ConfigGatesPanel() {
   ]);
 
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const connectWebSocket = () => {
-    try {
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch (e) {
-          // Ignora erros ao fechar
+  const { connected: wsConnected, send } = useStableWebSocket('ws://localhost:8765', {
+    onMessage: (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'config' && data.class_to_angle) {
+          // Atualizar ângulos com dados do backend
+          const newMaterials = materials.map(m => ({
+            ...m,
+            servoAngle: data.class_to_angle[m.key] || m.servoAngle
+          }));
+          setMaterials(newMaterials);
         }
+      } catch (error) {
+        // Silencioso
       }
-
-      const ws = new WebSocket('ws://localhost:8765');
-      wsRef.current = ws;
-
-      // Suprime TODOS os eventos de erro
-      ws.onerror = null;
-      ws.addEventListener('error', () => {}, false);
-
-      ws.onopen = () => {
-        setConnected(true);
-        try {
-          ws.send(JSON.stringify({ type: 'get_config' }));
-        } catch (e) {
-          // Silencioso
-        }
-        
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'config' && data.class_to_angle) {
-            // Atualizar ângulos com dados do backend
-            const newMaterials = materials.map(m => ({
-              ...m,
-              servoAngle: data.class_to_angle[m.key] || m.servoAngle
-            }));
-            setMaterials(newMaterials);
-          }
-        } catch (error) {
-          // Silencioso
-        }
-      };
-
-      ws.onerror = () => {
-        // Silencioso - não faz nada
-        setConnected(false);
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-      };
-    } catch (e) {
-      // Silencioso
-      setConnected(false);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-    }
-  };
-  
-  const silentWS = () => {
-    connectWebSocket();
-  };
+    },
+  });
 
   useEffect(() => {
-    connectWebSocket();
-
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
+    setConnected(wsConnected);
+    if (wsConnected) {
+      send({ type: 'get_config' });
+    }
+  }, [wsConnected, send]);
 
   const updateMaterialAngle = (index: number, angle: number) => {
     const newMaterials = [...materials];
@@ -120,15 +57,8 @@ export function ConfigGatesPanel() {
   };
 
   const testServo = (angle: number, materialName: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ 
-          command: angle.toString() 
-        }));
-        toast.success(`Testando ${materialName}: servo → ${angle}°`);
-      } catch (error) {
-        toast.error('Erro ao enviar comando');
-      }
+    if (send({ command: angle.toString() })) {
+      toast.success(`Testando ${materialName}: servo → ${angle}°`);
     } else {
       toast.error('Backend desconectado. Execute: python backend/ecovision_local.py');
     }
@@ -143,13 +73,8 @@ export function ConfigGatesPanel() {
       }, {} as Record<string, number>),
     };
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify(config));
-        toast.success('Configuração salva! Reinicie o backend para aplicar.');
-      } catch (error) {
-        toast.error('Erro ao salvar configuração');
-      }
+    if (send(config)) {
+      toast.success('Configuração salva! Reinicie o backend para aplicar.');
     } else {
       try {
         localStorage.setItem('ecovision_config_gates', JSON.stringify(config));

@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Card } from './ui/card';
 import { Label } from './ui/label';
 import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Play, Pause, RotateCw, Menu } from 'lucide-react';
+import { useStableWebSocket } from '../hooks/useStableWebSocket';
 
 interface Detection {
   class: string;
@@ -24,146 +25,65 @@ export function MonitorPanel() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [fps, setFps] = useState(0);
   const [motorRunning, setMotorRunning] = useState(true);
-  const [connected, setConnected] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const connectWebSocket = () => {
-    try {
-      // Limpa conexão anterior se existir
-      if (wsRef.current) {
-        try {
-          wsRef.current.close();
-        } catch (e) {
-          // Ignora erros ao fechar
-        }
-      }
-
-      const ws = new WebSocket('ws://localhost:8765');
-      wsRef.current = ws;
-
-      // Suprime TODOS os eventos de erro
-      ws.onerror = null;
-      ws.addEventListener('error', () => {}, false);
-
-      ws.onopen = () => {
-        setConnected(true);
-        // Limpa timeout de reconexão se existir
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data: FrameData = JSON.parse(event.data);
-          
-          // Atualizar canvas com frame
-          const canvas = canvasRef.current;
-          if (canvas && data.frame) {
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              const img = new Image();
-              img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                
-                // Desenhar bounding boxes
-                data.detections?.forEach(det => {
-                  const [x1, y1, x2, y2] = det.bbox;
-                  ctx.strokeStyle = '#22c55e';
-                  ctx.lineWidth = 3;
-                  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-                  
-                  // Label
-                  ctx.fillStyle = '#22c55e';
-                  ctx.fillRect(x1, y1 - 25, 200, 25);
-                  ctx.fillStyle = '#000';
-                  ctx.font = '14px monospace';
-                  ctx.fillText(
-                    `${det.class} ${(det.confidence * 100).toFixed(1)}%`,
-                    x1 + 5,
-                    y1 - 8
-                  );
-                });
-              };
-              img.src = `data:image/jpeg;base64,${data.frame}`;
-            }
-          }
-          
-          setDetections(data.detections || []);
-          setFps(data.fps || 0);
-          setMotorRunning(data.motor_running ?? true);
-        } catch (error) {
-          // Silencioso
-        }
-      };
-
-      ws.onerror = () => {
-        // Silencioso - não faz nada
-        setConnected(false);
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-      };
-    } catch (e) {
-      // Silencioso
-      setConnected(false);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-    }
-  };
-  
-  const silentWS = () => {
-    connectWebSocket();
-  };
-
-  useEffect(() => {
-    connectWebSocket();
-
-    return () => {
-      // Cleanup
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
-  const sendCommand = (command: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+  const { connected, send } = useStableWebSocket('ws://localhost:8765', {
+    onMessage: (event) => {
       try {
-        wsRef.current.send(JSON.stringify({ command }));
+        const data: FrameData = JSON.parse(event.data);
+
+        // Atualizar canvas com frame
+        const canvas = canvasRef.current;
+        if (canvas && data.frame) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const img = new Image();
+            img.onload = () => {
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.drawImage(img, 0, 0);
+
+              // Desenhar bounding boxes
+              data.detections?.forEach(det => {
+                const [x1, y1, x2, y2] = det.bbox;
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+                // Label
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(x1, y1 - 25, 200, 25);
+                ctx.fillStyle = '#000';
+                ctx.font = '14px monospace';
+                ctx.fillText(
+                  `${det.class} ${(det.confidence * 100).toFixed(1)}%`,
+                  x1 + 5,
+                  y1 - 8
+                );
+              });
+            };
+            img.src = `data:image/jpeg;base64,${data.frame}`;
+          }
+        }
+
+        setDetections(data.detections || []);
+        setFps(data.fps || 0);
+        setMotorRunning(data.motor_running ?? true);
       } catch (error) {
         // Silencioso
       }
-    }
+    },
+  });
+
+  const sendCommand = (command: string) => {
+    send({ command });
   };
 
   const updateConfidence = (value: number) => {
     setConfidence(value);
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ 
-          type: 'config',
-          confidence: value 
-        }));
-      } catch (error) {
-        // Silencioso
-      }
-    }
+    send({
+      type: 'config',
+      confidence: value
+    });
   };
 
   const materialIcons: Record<string, string> = {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from './ui/card';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
@@ -7,6 +7,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Save, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { useStableWebSocket } from '../hooks/useStableWebSocket';
 import {
   Select,
   SelectContent,
@@ -23,87 +24,29 @@ export function ConfigModelPanel() {
   const [baudRate, setBaudRate] = useState(115200);
   const [cameraIndex, setCameraIndex] = useState(0);
   const [connected, setConnected] = useState(false);
-  
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const connectWebSocket = () => {
-    try {
-      if (wsRef.current) {
-        wsRef.current.close();
+  const { connected: wsConnected, send } = useStableWebSocket('ws://localhost:8765', {
+    onMessage: (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'config') {
+          if (data.confidence !== undefined) setConfidence(data.confidence);
+          if (data.model_path) setModelPath(data.model_path);
+          if (data.serial_port) setSerialPort(data.serial_port);
+          if (data.baud_rate) setBaudRate(data.baud_rate);
+          if (data.camera_index !== undefined) setCameraIndex(data.camera_index);
+        }
+      } catch (error) {
+        // Silencioso
       }
+    },
+  });
 
-      const ws = new WebSocket('ws://localhost:8765');
-      wsRef.current = ws;
-
-      // Suprime completamente o erro do WebSocket
-      ws.addEventListener('error', () => {
-        // Silencioso - não faz nada
-        setConnected(false);
-      });
-
-      ws.onopen = () => {
-        setConnected(true);
-        try {
-          ws.send(JSON.stringify({ type: 'get_config' }));
-        } catch (e) {
-          // Silencioso
-        }
-        
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'config') {
-            if (data.confidence !== undefined) setConfidence(data.confidence);
-            if (data.model_path) setModelPath(data.model_path);
-            if (data.serial_port) setSerialPort(data.serial_port);
-            if (data.baud_rate) setBaudRate(data.baud_rate);
-            if (data.camera_index !== undefined) setCameraIndex(data.camera_index);
-          }
-        } catch (error) {
-          // Silencioso
-        }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-      };
-    } catch (e) {
-      // Silencioso
-      setConnected(false);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      reconnectTimeoutRef.current = setTimeout(silentWS, 5000);
-    }
-  };
-  
-  const silentWS = () => {
-    connectWebSocket();
-  };
-  
   useEffect(() => {
-    silentWS();
-
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
+    setConnected(wsConnected);
+    if (wsConnected) {
+      send({ type: 'get_config' });
+    }
+  }, [wsConnected, send]);
 
   const handleModelTypeChange = (value: string) => {
     setModelType(value);
@@ -120,13 +63,8 @@ export function ConfigModelPanel() {
       camera_index: cameraIndex,
     };
 
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify(config));
-        toast.success('Configuração salva! Reinicie o backend para aplicar.');
-      } catch (error) {
-        toast.error('Erro ao salvar configuração');
-      }
+    if (send(config)) {
+      toast.success('Configuração salva! Reinicie o backend para aplicar.');
     } else {
       try {
         localStorage.setItem('ecovision_config_model', JSON.stringify(config));
@@ -138,18 +76,11 @@ export function ConfigModelPanel() {
   };
 
   const testConnection = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ command: 'MOTOR ON' }));
-        setTimeout(() => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ command: 'MOTOR OFF' }));
-          }
-        }, 2000);
-        toast.success('Teste de conexão enviado! Verifique o motor.');
-      } catch (error) {
-        toast.error('Erro ao testar conexão');
-      }
+    if (send({ command: 'MOTOR ON' })) {
+      setTimeout(() => {
+        send({ command: 'MOTOR OFF' });
+      }, 2000);
+      toast.success('Teste de conexão enviado! Verifique o motor.');
     } else {
       toast.error('Backend desconectado');
     }
