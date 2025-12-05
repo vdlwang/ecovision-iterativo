@@ -29,8 +29,8 @@ def load_config():
     default_config = {
         "serial_port": "COM8",
         "baud_rate": 115200,
-        "camera_index": 2,
-        "model_path": "../yolo_models/taco/150ep_best.pt",
+        "camera_index": 0,
+        "model_path": "../yolo_models/taco/best.pt",
         "confidence": 0.4,
         "roi_y_min": 0.45,
         "roi_y_max": 0.55,

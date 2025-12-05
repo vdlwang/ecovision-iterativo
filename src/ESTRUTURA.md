@@ -66,9 +66,9 @@ ecovision/
    {
      "serial_port": "COM8",
      "baud_rate": 115200,
-     "camera_index": 2,
+     "camera_index": 0,
      "confidence": 0.4,
-     "model_path": "../yolo_models/taco/150ep_best.pt"
+     "model_path": "../yolo_models/taco/best.pt"
    }
    ```
    💡 Pode configurar via interface web

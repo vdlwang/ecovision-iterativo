@@ -133,7 +133,7 @@ export function ConfigModelPanel() {
                   id="model-path"
                   value={modelPath}
                   onChange={(e) => setModelPath(e.target.value)}
-                  placeholder="../yolo_models/taco/150ep_best.pt"
+                  placeholder="../yolo_models/taco/best.pt"
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
                 <p className="text-neutral-500 text-xs mt-1">
