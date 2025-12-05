@@ -207,11 +207,11 @@ Edite `config.json` (se existir) ou configure via interface:
 
 ```json
 {
-  "serial_port": "COM7",
+  "serial_port": "COM8",
   "baud_rate": 115200,
-  "camera_index": 0,
+  "camera_index": 2,
   "confidence": 0.4,
-  "model_path": "../yolo_models/taco/yolov8s.pt"
+  "model_path": "../yolo_models/taco/150ep_best.pt"
 }
 ```
 
@@ -235,8 +235,8 @@ python backend/ecovision_local.py
 ```
 [INFO] Carregando modelo YOLO: yolov8s.pt
 [INFO] Modelo carregado com sucesso
-[INFO] Conectando porta serial: COM7
-[INFO] Serial conectada: COM7 @ 115200 baud
+[INFO] Conectando porta serial: COM8
+[INFO] Serial conectada: COM8 @ 115200 baud
 [INFO] Abrindo câmera (índice 0)...
 [INFO] Câmera aberta: 640x480
 [INFO] WebSocket iniciado em: ws://localhost:8765

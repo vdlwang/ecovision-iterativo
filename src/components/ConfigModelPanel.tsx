@@ -18,8 +18,8 @@ import {
 export function ConfigModelPanel() {
   const [confidence, setConfidence] = useState(0.4);
   const [modelType, setModelType] = useState('yolov8s');
-  const [modelPath, setModelPath] = useState('../yolo_models/taco/yolov8s.pt');
-  const [serialPort, setSerialPort] = useState('COM7');
+  const [modelPath, setModelPath] = useState('');
+  const [serialPort, setSerialPort] = useState('COM8');
   const [baudRate, setBaudRate] = useState(115200);
   const [cameraIndex, setCameraIndex] = useState(0);
   const [connected, setConnected] = useState(false);
@@ -202,7 +202,7 @@ export function ConfigModelPanel() {
                   id="model-path"
                   value={modelPath}
                   onChange={(e) => setModelPath(e.target.value)}
-                  placeholder="../yolo_models/taco/yolov8s.pt"
+                  placeholder="../yolo_models/taco/150ep_best.pt"
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
                 <p className="text-neutral-500 text-xs mt-1">
@@ -242,7 +242,7 @@ export function ConfigModelPanel() {
                   id="serial-port"
                   value={serialPort}
                   onChange={(e) => setSerialPort(e.target.value)}
-                  placeholder="COM7 ou /dev/ttyUSB0"
+                  placeholder="COM8 ou /dev/ttyUSB0"
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
                 <p className="text-neutral-500 text-xs mt-1">

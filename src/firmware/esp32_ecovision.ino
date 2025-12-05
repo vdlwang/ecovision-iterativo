@@ -11,8 +11,8 @@
 #include <Servo.h>
 
 // ==== Pinos ====
-const int SERVO_PIN = 18;  // Servo de direcionamento
-const int MOTOR_PIN = 19;  // Relé do motor da esteira
+const int SERVO_PIN = 22;  // Servo de direcionamento
+const int MOTOR_PIN = 23;  // Relé do motor da esteira
 
 // ==== Configuração ====
 const int SERVO_HOLD_TIME = 5000;  // 5 segundos mantendo posição

@@ -27,10 +27,10 @@ def load_config():
     
     # Configuração padrão
     default_config = {
-        "serial_port": "COM7",
+        "serial_port": "COM8",
         "baud_rate": 115200,
-        "camera_index": 0,
-        "model_path": "../yolo_models/taco/yolov8s.pt",
+        "camera_index": 2,
+        "model_path": "../yolo_models/taco/150ep_best.pt",
         "confidence": 0.4,
         "roi_y_min": 0.45,
         "roi_y_max": 0.55,
@@ -200,10 +200,10 @@ def send_angle(ser, angle):
 # ==== WebSocket Server ====
 async def websocket_handler(websocket):
     """Gerencia conexões WebSocket (compatível com websockets≥12)."""
-    state.websocket_clients.add(websocket)
-    print(f"Cliente WebSocket conectado. Total: {len(state.websocket_clients)}")
-    
+
     try:
+        state.websocket_clients.add(websocket)
+        print(f"Cliente WebSocket conectado. Total: {len(state.websocket_clients)}")
         async for message in websocket:
             try:
                 data = json.loads(message)

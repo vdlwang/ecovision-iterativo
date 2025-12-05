@@ -2,7 +2,7 @@ import serial
 import time
 
 # Ajuste a porta conforme o seu sistema:
-PORT = "COM5"     # ex.: "COM5" (Windows) ou "/dev/ttyUSB0" (Linux/Mac)
+PORT = "COM8"     # ex.: "COM5" (Windows) ou "/dev/ttyUSB0" (Linux/Mac)
 BAUD = 115200
 
 def send_line(ser, msg):

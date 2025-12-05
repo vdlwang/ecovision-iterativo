@@ -64,11 +64,11 @@ ecovision/
 2. **config.json** (opcional):
    ```json
    {
-     "serial_port": "COM7",
+     "serial_port": "COM8",
      "baud_rate": 115200,
-     "camera_index": 0,
+     "camera_index": 2,
      "confidence": 0.4,
-     "model_path": "../yolo_models/taco/yolov8s.pt"
+     "model_path": "../yolo_models/taco/150ep_best.pt"
    }
    ```
    💡 Pode configurar via interface web
@@ -133,7 +133,7 @@ styles/globals.css
 
 - **8765** - WebSocket (Python ↔ React)
 - **5173** - Frontend React (Vite dev server)
-- **COM7** - Serial (Python ↔ ESP32) - configurável
+- **COM8** - Serial (Python ↔ ESP32) - configurável
 
 ## Tecnologias
 

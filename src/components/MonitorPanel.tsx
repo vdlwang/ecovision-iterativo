@@ -316,7 +316,7 @@ export function MonitorPanel() {
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">ESP32</span>
                 <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'COM7' : 'N/A'}
+                  {connected ? 'COM8' : 'N/A'}
                 </Badge>
               </div>
             </div>

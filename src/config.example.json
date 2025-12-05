@@ -1,9 +1,9 @@
 {
-  "serial_port": "COM7",
+  "serial_port": "COM8",
   "baud_rate": 115200,
-  "camera_index": 0,
+  "camera_index": 2,
   "confidence": 0.4,
-  "model_path": "../yolo_models/taco/yolov8s.pt",
+  "model_path": "../yolo_models/taco/150ep_best.pt",
   "class_to_angle": {
     "plastic": 50,
     "metal": 90,
