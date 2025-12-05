@@ -154,6 +154,7 @@ class SystemState:
         self.websocket_clients = set()
 
 state = SystemState()
+SERVER_LOOP: asyncio.AbstractEventLoop | None = None
 
 # ==== Serial (ESP32) ====
 def send_line(ser, msg):
@@ -161,11 +162,20 @@ def send_line(ser, msg):
     if ser is None:
         print(f"[DEMO] Serial indisponível; comando ignorado: {msg.strip()}")
         return False
-    if not msg.endswith("\n"):
-        msg += "\n"
-    ser.write(msg.encode("utf-8"))
-    ser.flush()
-    return True
+    try:
+        if not msg.endswith("\n"):
+            msg += "\n"
+        ser.write(msg.encode("utf-8"))
+        ser.flush()
+        return True
+    except Exception as exc:
+        # Quando a serial está ocupada ou inacessível no Windows o pyserial
+        # levanta PermissionError("WriteFile failed..."). Neste caso
+        # desativamos a serial para evitar quedas no WebSocket e seguimos em
+        # modo demonstração.
+        print(f"[DEMO] Falha ao enviar para serial ({exc}); desativando serial")
+        state.serial_port = None
+        return False
 
 def read_reply(ser, timeout=1.5):
     """Lê resposta do ESP32"""
@@ -240,7 +250,7 @@ async def websocket_handler(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        state.websocket_clients.remove(websocket)
+        state.websocket_clients.discard(websocket)
         print(f"Cliente WebSocket desconectado. Total: {len(state.websocket_clients)}")
 
 async def broadcast_frame(frame_data):
@@ -395,12 +405,12 @@ def process_yolo_stream():
         
         # Envia para WebSocket (asyncio)
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(broadcast_frame(frame_data))
-            loop.close()
-        except Exception as e:
-            pass  # Ignora erros se não houver clientes
+            if SERVER_LOOP and SERVER_LOOP.is_running():
+                asyncio.run_coroutine_threadsafe(broadcast_frame(frame_data), SERVER_LOOP)
+        except Exception:
+            # Ignora erros se não houver clientes ou se o loop ainda não estiver
+            # pronto. O pool de conexões do frontend fará nova tentativa.
+            pass
     
     # Cleanup
     if ser:
@@ -420,6 +430,9 @@ async def main():
     print(f"WebSocket: ws://localhost:8765")
     print("=" * 50)
     
+    global SERVER_LOOP
+    SERVER_LOOP = asyncio.get_running_loop()
+
     # Inicia thread YOLO
     yolo_thread = Thread(target=process_yolo_stream, daemon=True)
     yolo_thread.start()
