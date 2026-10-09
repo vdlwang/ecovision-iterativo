@@ -228,7 +228,7 @@ Edite `config.json` (se existir) ou configure via interface:
 # Linux/Mac: source venv/bin/activate
 
 # Rodar backend
-python backend/ecovision_local.py
+python backend/ecovision_local_modf.py
 ```
 
 **Saída esperada:**
