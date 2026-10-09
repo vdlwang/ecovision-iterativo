@@ -34,9 +34,11 @@ Most scripts hardcode `PORT = "COM5"` and Windows-style paths (`r"..\yolo_models
 
 ## Architecture
 
+This repo does not contain the final system described in the thesis: the React/WebSocket dashboard, the backend classes `YOLOPipeline`/`SerialController`/`SystemState`, the fine-tuned YOLOv8s weights, and the servo/motor ESP32 firmware. The real hardware is 1 servo (MG996R) + L298N + 4 DC motors, which matches the `scripts/` protocol, not `esp32_cancela.ino`. Known issues are in `PROBLEMAS.md`.
+
 **Models** (`yolo_models/taco/*.pt`) are YOLOv8 n/s/m trained on the TACO dataset. They have 61 classes, and the class list is in any `database/*/YOLO_dataset/data.yaml`. The project only uses 6 TACO class IDs: `5` plastic bottle, `6` glass bottle, `7` plastic bottle cap, `12` drink can, `17` corrugated carton, `33` normal paper. `val.py`, `example_integration_ultralytics.py` and `middleware_gui.py` (`MATERIAIS`) all repeat this mapping, so keep the copies in sync. `yolov8s` is the default model.
 
-**Datasets** (`database/tcc-<scenario>/`) are the team's own photos in 4 capture scenarios: `0`/`45` is the camera angle in degrees, and `CF`/`SF` is likely *com/sem fundo* (with/without background). Each scenario has a `COCO_dataset/` export and a `YOLO_dataset/`, but only the `validation` split is committed. The `path:` field in each `data.yaml` is an absolute Windows path from a teammate's machine. Ultralytics resolves `val:` relative to it, so fix or override `path` before running `val.py` locally. `scripts/convert-to-yolo-format.py` converts the COCO exports. `images/` holds loose test photos.
+**Datasets** (`database/tcc-<scenario>/`) are the team's own photos in 4 capture scenarios: `0`/`45` is the camera angle in degrees, and `CF`/`SF` is *com/sem flash* (with/without flash). Images in the 4 scenarios were taken seconds apart, so they show the same scenes. Each scenario has a `COCO_dataset/` export and a `YOLO_dataset/`, but only the `validation` split is committed. The `path:` field in each `data.yaml` is an absolute Windows path from a teammate's machine. Ultralytics resolves `val:` relative to it, so fix or override `path` before running `val.py` locally. `scripts/convert-to-yolo-format.py` converts the COCO exports. `images/` holds loose test photos.
 
 **Two separate control paths. Their serial protocols are not compatible:**
 

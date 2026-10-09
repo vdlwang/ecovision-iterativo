@@ -2,6 +2,10 @@
 
 Análise feita em 2026-10-08 por leitura do código, dos labels e da planilha `scripts/avaliacao_modelos_resultados_2.xlsx`. Nada foi executado: não havia `ultralytics` instalado nem ESP32 conectado.
 
+Atualizado no mesmo dia após cruzar com o fonte da monografia (zip do Overleaf). Os problemas do texto estão na seção **Monografia**, no fim do arquivo.
+
+> **Atenção:** a monografia descreve um sistema que **não está neste repositório**: dashboard React + WebSocket, backend com as classes `YOLOPipeline`, `SerialController` e `SystemState`, o YOLOv8s com fine-tuning e o firmware de servo/motor. Os itens E1–M7 abaixo valem para o código daqui, que pode ser uma versão anterior.
+
 **Níveis de complexidade:**
 
 - 🟢 **Pontual:** correção local, de minutos.
@@ -20,7 +24,7 @@ Os itens com ❓ são dúvidas em aberto (consolidadas no fim).
 - O middleware (`interface/reciclagem_middleware_v1/`) envia `PULSE:<gate>,<ms>`, e `esp32_cancela.ino` aceita apenas `PULSE`, `OPEN` e `CLOSE`.
 - Esse firmware liga e desliga pinos digitais (16/17/18), o que serve para relé ou solenoide, não para servo (servo precisa de PWM).
 - Na prática, rodar `model_2.py` com o `.ino` do repo resulta em `ERR comando` para tudo.
-- ❓ Qual é o hardware real: servo único com ângulos ou 3 cancelas on/off? Qual dos dois caminhos é o oficial? O histórico de commits ("functional version", "using webcam") sugere que é `model_2.py`.
+- ✅ **Resolvido pela monografia:** o hardware real é 1 servo MG996R + ponte H L298N + 4 motores DC, o que corresponde ao protocolo dos `scripts/`. Portanto o middleware e o `esp32_cancela.ino` estão **obsoletos** e poderiam ser removidos ou marcados como tal. O firmware de servo/motor continua faltando no repo.
 
 ### E2. O mapeamento de classes por substring não cobre os materiais do projeto
 
@@ -38,7 +42,7 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 - Os `.pt` em `yolo_models/taco/` foram treinados só no TACO.
 - Os 4 datasets próprios têm apenas o split `validation`, com cerca de 24 imagens e 100 anotações cada.
 - Na planilha, o mAP@0.5 fica entre 0,34 e 0,64, com recall abaixo de 0,25 em várias classes. O yolov8m é pior que o yolov8s, o que indica *domain gap* e amostra pequena, não falta de capacidade do modelo.
-- ❓ O fine-tuning com fotos da esteira está planejado? Se estiver, faltam os splits `train/` e `test/`, que os `data.yaml` já referenciam mas não existem.
+- ✅ **Resolvido pela monografia:** o fine-tuning do YOLOv8s foi feito (split 80/20, ~100 imagens), mas os pesos, o script de treino e os splits não estão no repo. Veja também T2 na seção Monografia.
 
 ### E4. Repositório pesado: 1,3 GB de dados e 739 MB de `.git`
 
@@ -75,6 +79,7 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 
 - ❓ Confiança alta, mas sem execução. Para confirmar, rode `print(metrics.box.ap_class_index)`.
 - **Correção:** `i = list(metrics.box.ap_class_index).index(class_id)` e então `metrics.box.class_result(i)`.
+- ✅ **A monografia não é afetada:** ela só usa `mean_precision` (Tabela `tab:bench-cenarios`), que é uma média e não depende da ordem. A planilha continua errada se for usada em outro lugar.
 
 ### M2. `scripts/model_2.py:144`: um mesmo objeto aciona o servo várias vezes
 
@@ -109,7 +114,7 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 - `labels_dir` espera um diretório, não um arquivo.
 - O padrão `cls91to80=True` remapearia os IDs das classes.
 - Os labels atuais estão corretos (IDs TACO e polígonos), então a conversão foi feita de outro jeito.
-- ❓ Como os labels YOLO foram gerados? Vale documentar isso para conseguir reproduzir.
+- ✅ **Resolvido pela monografia:** a anotação e a exportação foram feitas no Roboflow. O script está obsoleto e pode ser removido.
 
 ---
 
@@ -131,18 +136,80 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 
 ---
 
+## Monografia (fonte Overleaf)
+
+Referências no formato `CapN:linha` dos arquivos em `tcc2025/`. Não foi possível compilar localmente (falta o pacote `textcase.sty`), então os itens de LaTeX vêm de análise estática.
+
+### 🔴 T1. O sistema descrito no texto não está no repositório
+
+- Cap5:18-21 e 81-83 descrevem um frontend React/Vite/Tailwind com WebSocket e um backend com `YOLOPipeline`, `SerialController` e `SystemState`. Nada disso existe aqui.
+- Também faltam os pesos do YOLOv8s com fine-tuning e o firmware do servo/motor.
+- A Figura `fig:esteira_funcionando` mostra metal, plástico e papel sendo separados. Com o mapeamento por substring deste repo (E2), metal (`Drink can`) e papel nunca seriam reconhecidos, o que confirma que a demo usou outro código.
+- ❓ Onde está esse código? Para a banca e para reprodutibilidade, vale versioná-lo e citar o repositório no texto.
+
+### 🔴 T2. A avaliação do fine-tuning provavelmente tem vazamento de dados
+
+- Os 4 cenários fotografam **as mesmas cenas** com segundos de diferença (ex.: `45CF 14:18:21`, `0CF 14:18:29`, `0SF 14:18:39`, `45SF 14:18:49`). São a mesma disposição de objetos, só com ângulo ou flash diferentes.
+- Cap5:182-184: o fine-tuning usou "a mesma base de dados" (~100 imagens) com split aleatório 80/20. Assim, quase certamente há a mesma cena no treino e na validação, o que deixa os valores de precisão ~0,78 e mAP50 ~0,80 **otimistas**. A validação também tem só ~18-20 imagens.
+- Cap5:214 compara esse mAP50 com o dos modelos pré-treinados, mas estes foram avaliados na base inteira (incluindo as imagens que depois viraram treino), e a tabela de mAP pré-treinado está comentada (Cap5:149-162). O leitor não tem a linha de base.
+- **Correção:** dividir treino e validação **por cena** (agrupando as 4 fotos da mesma cena), retreinar e reavaliar. Se não houver tempo, declarar a limitação explicitamente.
+- ❓ Como o split foi feito: aleatório por imagem no Roboflow?
+
+### 🟡 T3. A métrica "Precisão Média" da Tabela `tab:bench-cenarios` é enganosa
+
+- Os valores vêm de `metrics.box.mp` (batem com a planilha). No Ultralytics, isso é a precisão por classe **no limiar de confiança que maximiza o F1**, avaliada com `conf=0.001`. Não é "a proporção de predições corretas" no limiar de operação (0,4), como diz Cap5:147.
+- Classes sem nenhuma detecção correta aparecem com P = 1,0 e R = 0 e **inflam a média**. Exemplos: YOLOv8n 0SF (67,63%) tem 2 das 6 classes nessa situação, e YOLOv8s 45SF (76,98%) tem 1.
+- Escolher o modelo só pela precisão ignora o recall, que é ~0 em algumas classes.
+- **Correção:** reportar mAP@0.5 (a tabela comentada em Cap5:149-162; o YOLOv8s continua vencendo, então a conclusão se mantém) e/ou P e R juntos.
+
+### 🟡 T4. O texto e o código divergem na lógica de controle da esteira
+
+- Cap4:89 diz que a velocidade é mantida constante, e Cap5:120,127 fala em regular a velocidade pela ponte H. O código só tem `MOTOR ON` e `MOTOR OFF`, e o `model_2.py` **para** a esteira a cada detecção.
+- A limitação "separação descompassada" (Cap5:307) só faz sentido com a esteira em movimento contínuo.
+- As limitações "múltiplas detecções" e "separação descompassada" (Cap5:305-309) são exatamente M2 e M3. Os trabalhos futuros (Cap6) falam só de dataset e hardware. Vale citar as soluções de software: tracking com IDs e contagem por cruzamento de linha, e compensação de atraso por distância/velocidade.
+- ❓ Qual lógica a versão final usa: para a esteira ou movimento contínuo?
+
+### 🟡 T5. Os critérios de aceitação citados não existem mais, e falta resultado quantitativo do sistema
+
+- Cap4:297 afirma que a viabilidade foi "garantida pelo cumprimento dos requisitos [...] taxa mínima de acerto [...] tempo máximo de resposta". Porém os critérios numéricos foram comentados (RF01: 40%; RF03: 10% e < 1 s), e nenhum tempo de resposta é medido.
+- Cap5:137 anuncia testes em cinco níveis (modelo, software, hardware, sistema completo e validação geral), mas só há subseções de modelo, software e sistema completo, sem números.
+- Cap6:327 conclui que tudo funcionou "corretamente", mas nenhum dado sustenta isso, e as limitações relatam acionamentos indevidos.
+- **Sugestão:** passar N objetos de cada material pela esteira e reportar a taxa de separação correta por material e a latência entre detecção e atuação.
+
+### 🟢 Pontuais
+
+| # | Local | Problema |
+|---|---|---|
+| T6 | Cap1:43, Cap4:89,104 vs Cap5:11,238 | Os materiais aparecem como "papelão" em um lugar e "papel" em outro, mas o dataset tem os dois (`normal paper` e `corrugated carton`). Uniformizar. |
+| T7 | Cap4:301 | "64 subgrupos" do TACO. O TACO tem 60 categorias (o `data.yaml` tem 60 + `Background`). Conferir com `TACO_TAXONOMY`. |
+| T8 | Cap2:132 | "otimiza apenas suas camadas finais": o Ultralytics treina todas as camadas, a menos que se use `freeze`. ❓ Foi usado `freeze`? |
+| T9 | Cap1:58 | `\cite{Evreka_2025}`, mas a chave no `refs.bib` é `EVREKA_2025`. O BibTeX pode acusar *case mismatch* e a citação sair como "?". Conferir no PDF. |
+| T10 | Cap5:28,111 vs Cap4:265 | O texto fala em "uma ponte H", e a tabela de custos lista 2 módulos L298N. |
+| T11 | Cap4:118-136,178 | RF02, RF03, RF04 e RNF03 falam em "cancelas" (plural), mas o sistema tem um único servo. |
+| T12 | `main.tex:543` | O capítulo "Método de Trabalho" (Cap3) está comentado e o conteúdo dele foi duplicado no Cap4. ❓ É intencional? O modelo da Poli prevê esse capítulo. |
+
+---
+
 ## Dúvidas em aberto
 
-1. **Hardware:** é um servo com ângulos (scripts) ou 3 cancelas on/off (middleware)? Onde está o firmware que aceita `MOTOR ON` e `SERVO`?
-2. **Caminho oficial:** vale `model_2.py` ou o middleware com GUI? A `interface.html` deve ser ligada a algum deles?
-3. **Geometria:** qual é a distância entre a câmera e o desviador, e qual a velocidade da esteira? (necessário para M3)
-4. **Fine-tuning:** está planejado, ou o TCC avalia apenas o modelo TACO pré-treinado?
-5. **CF/SF:** significa "com fundo" / "sem fundo"?
-6. **M1:** confirmar com `print(metrics.box.ap_class_index)`. Se o resultado for `[5 6 7 12 17 33]`, as colunas da planilha atual estão trocadas.
+1. **Código final:** onde estão o frontend React, o backend (`YOLOPipeline`, `SerialController`), o firmware de servo/motor e os pesos do fine-tuning? (T1)
+2. **Lógica de controle:** a esteira para a cada detecção ou se move continuamente? (T4)
+3. **Geometria:** qual é a distância entre a câmera e o servo, e qual a velocidade da esteira? (M3, T4)
+4. **Fine-tuning:** o split foi aleatório por imagem? Usou `freeze`? Treinou com as 6 classes TACO ou com 4 materiais? (T2, T8)
+5. **Capítulo de Método:** a remoção foi intencional? (T12)
+6. **M1:** confirmar com `print(metrics.box.ap_class_index)`.
+7. **Citação Evreka:** ela aparece corretamente no PDF? (T9)
+
+Respondidas pela monografia: hardware real (E1), CF/SF = **com/sem flash**, fine-tuning realizado (E3), anotação no Roboflow (M7).
 
 ## Prioridade sugerida
 
-1. **M1:** pode invalidar os resultados do TCC.
-2. **E2:** papelão e latas nunca são separados.
-3. **M2:** gera acionamentos duplicados no protótipo.
-4. **E1:** decidir depois de responder à dúvida 1.
+**Monografia:**
+
+1. **T2:** o principal resultado quantitativo pode estar inflado.
+2. **T5:** falta resultado do sistema completo, o que a banca tende a cobrar.
+3. **T3:** trocar ou complementar a métrica. A conclusão se mantém.
+4. **T1:** versionar o código final.
+5. **T6–T12:** correções rápidas de texto.
+
+**Código (se este repo continuar em uso):** E2, M2 e M1.
