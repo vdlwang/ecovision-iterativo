@@ -19,9 +19,9 @@ fi
 
 echo "[1/3] Iniciando Backend Python..."
 cd backend
-gnome-terminal -- bash -c "python3 ecovision_local.py; exec bash" || \
-xterm -e "python3 ecovision_local.py" || \
-python3 ecovision_local.py &
+gnome-terminal -- bash -c "python3 ecovision_local_modf.py; exec bash" || \
+xterm -e "python3 ecovision_local_modf.py" || \
+python3 ecovision_local_modf.py &
 cd ..
 sleep 3
 

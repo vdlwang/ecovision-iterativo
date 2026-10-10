@@ -1,0 +1,66 @@
+# Backend - EcoVision
+
+Processo Python que junta câmera, YOLO, WebSocket e serial. Visão geral do sistema no [README principal](../README.md).
+
+## Execução
+
+```bash
+pip install -r requirements.txt
+python ecovision_local_modf.py      # pode ser chamado de qualquer pasta
+```
+
+- **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). Quando um objeto entra na ROI, envia o ângulo na hora e ignora novas detecções até passar `servo_actuation_seconds`. O intervalo mínimo entre disparos é fixo no código (`DETECTION_COOLDOWN = 1.5` s).
+- `ecovision_local.py` é a variante anterior: enfileira os materiais detectados e os envia um a um, usando `detection_cooldown` do `config.json`.
+
+O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o backend segue em modo demonstração: detecta e transmite, mas não aciona o ESP32.
+
+## `config.json`
+
+Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão. O frontend também grava neste arquivo ao clicar em "Salvar".
+
+| Campo | Uso |
+|-------|-----|
+| `serial_port`, `baud_rate` | Porta do ESP32 (`COM8` / `/dev/ttyUSB0`) e velocidade (115200) |
+| `camera_index` | Índice da webcam no OpenCV |
+| `model_path` | Pesos do YOLO. Caminho relativo é resolvido a partir de `backend/`. Padrão: `../yolo_models/taco/best.pt` (veja [`yolo_models/README.md`](../yolo_models/README.md)) |
+| `confidence` | Confiança mínima do YOLO, aplicada só na inicialização |
+| `roi_y_min`, `roi_y_max` | Faixa horizontal do quadro (fração da altura) em que o centro do objeto dispara o servo |
+| `class_to_angle` | Ângulo do servo por material: chaves `plastic`, `metal`, `glass`, `paper` |
+| `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
+| `detection_cooldown` | Usado só por `ecovision_local.py` |
+
+`serial_port`, `camera_index`, `model_path` e `confidence` só passam a valer depois de reiniciar o backend. `class_to_angle` e a ROI valem na hora.
+
+Cada classe TACO detectada é convertida em material pela tabela `taco_to_material` (por exemplo, `drink can` → `metal`, `corrugated carton` → `paper`). Classes fora dos quatro grupos viram `other` e não acionam o servo.
+
+## Protocolo WebSocket (JSON)
+
+Do frontend para o backend:
+
+| Mensagem | Efeito |
+|----------|--------|
+| `{"command": "MOTOR ON"}` / `{"command": "MOTOR OFF"}` | Liga ou desliga a esteira |
+| `{"command": "<ângulo>"}` | Move o servo direto (botão "Testar") |
+| `{"type": "config", "confidence": <n>}` | Atualiza a confiança em memória |
+| `{"type": "save_config", ...}` | Mescla os campos no `config.json` e salva |
+
+Do backend para o frontend, um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running"}`.
+
+## Scripts de teste
+
+```bash
+python test_connection.py    # bibliotecas instaladas, câmera 0, portas seriais disponíveis e porta 8765 livre
+python testes_serial.py      # REPL para mandar comandos ao ESP32 (porta fixa no topo do arquivo: PORT = "COM8")
+```
+
+Em `testes_serial.py`, evite `PING`: o firmware atual interpreta qualquer comando não numérico como 0 e move o servo para 0°. Os comandos aceitos estão em [`firmware/README.md`](../firmware/README.md).
+
+## Troubleshooting
+
+**"Could not open camera":** tente outro `camera_index` (1, 2...). No Linux, o usuário precisa estar no grupo `video` (`sudo usermod -a -G video $USER`).
+
+**Porta serial não abre:**
+- Confira a porta com `python test_connection.py`.
+- Windows: instale o driver CH340/CP2102 do ESP32.
+- Linux: adicione o usuário ao grupo `dialout` (`sudo usermod -a -G dialout $USER`) ou, temporariamente, `sudo chmod 666 /dev/ttyUSB0`.
+- Feche o monitor serial do PlatformIO ou da Arduino IDE, que mantém a porta ocupada.

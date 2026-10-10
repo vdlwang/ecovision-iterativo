@@ -1,6 +1,6 @@
 # Firmware ESP32 - EcoVision
 
-Projeto PlatformIO (`platformio.ini`, placa `esp32dev`, framework Arduino, biblioteca `ESP32Servo`). O código está em `src/main.cpp`.
+Projeto PlatformIO (`platformio.ini`, placa `esp32dev`, framework Arduino, biblioteca `ESP32Servo`). O código está em `src/main.cpp`. Visão geral do sistema no [README principal](../README.md); o lado Python da serial está em [`backend/README.md`](../backend/README.md).
 
 ## Upload
 
@@ -40,6 +40,8 @@ O motor começa **desligado** até receber `MOTOR ON`.
 | `SERVO <n>` | `Servo movido para <n> graus` | Enfileira o ângulo `n` |
 | `<n>` (0–180) | `Servo movido para <n> graus` | Igual a `SERVO <n>` |
 
+⚠️ Comandos não reconhecidos não são rejeitados: o texto é convertido com `toInt()`, que devolve 0, e o servo vai para 0°. Isso inclui o `PING` oferecido pelo `backend/testes_serial.py`.
+
 ## Troubleshooting
 
 ### "Serial port not found"
@@ -52,10 +54,15 @@ O motor começa **desligado** até receber `MOTOR ON`.
 - Tente outra porta USB
 - Reduza a velocidade de upload: `upload_speed = 115200` em `platformio.ini`
 
+### Comandos não funcionam
+- Abra o monitor serial (`pio device monitor -b 115200`) e confira se aparece `ESP32 pronto.` ao resetar
+- Teste os comandos com `python backend/testes_serial.py`
+- Feche o monitor serial antes de rodar o backend: só um programa pode usar a porta
+
 ### Servo não se move
 - Verifique alimentação (servo precisa de 5V/1A+)
-- Use fonte externa se ESP32 não fornecer corrente suficiente
-- Teste com um exemplo básico de servo primeiro
+- Use fonte externa se ESP32 não fornecer corrente suficiente, com GND comum
+- Confira se o sinal está no GPIO 32
 
 ### Motor não liga
 - Confirme que `MOTOR ON` foi enviado (o motor começa desligado) e que a resposta `OK MOTOR ON` chegou

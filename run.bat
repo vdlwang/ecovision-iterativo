@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 echo [1/3] Iniciando Backend Python...
-start "EcoVision Backend" cmd /k "cd backend && python ecovision_local.py"
+start "EcoVision Backend" cmd /k "cd backend && python ecovision_local_modf.py"
 timeout /t 3 /nobreak >nul
 
 echo [2/3] Iniciando Frontend React...
