@@ -1,0 +1,216 @@
+@startuml EcoVision - Arquitetura de Três Camadas
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+title EcoVision - Arquitetura de Três Camadas (Frontend -> Server -> Database)
+
+' ==================== CAMADA 1: FRONTEND ====================
+
+rectangle "CAMADA 1: FRONTEND (React + Tailwind)" #EDFEF4 {
+  
+  rectangle "App.tsx\n(Componente Principal)" as AppMain #034732 {
+    [Estado Global]
+    [Roteamento de Abas]
+    [Gerenciamento de Auth]
+  }
+  
+  rectangle "Componentes de Tela" #ABF2AB {
+    component "Login" as LoginComp
+    component "MonitorPanel" as MonitorComp
+    component "GateConfiguration" as GateComp
+    component "AccuracyControl" as AccuracyComp
+    component "StatisticsPanel" as StatsComp
+    component "UserProfile" as ProfileComp
+  }
+  
+  rectangle "Componentes de UI" #ABF2AB {
+    component "Sidebar" as SidebarComp
+    component "CameraFeed" as CameraComp
+    component "Shadcn/UI" as ShadcnComp
+  }
+  
+  rectangle "Utils" #008148 {
+    component "onnxInference.tsx" as ONNXUtil
+    component "supabase/client.tsx" as SupabaseClient
+  }
+}
+
+' ==================== CAMADA 2: SERVER ====================
+
+rectangle "CAMADA 2: SERVER (Hono + Deno)" #FEF4ED {
+  
+  rectangle "Edge Function\n/supabase/functions/server" as EdgeFunction #196626 {
+    
+    rectangle "index.tsx\n(API REST)" as ServerAPI {
+      [Endpoints HTTP]
+      [Middleware CORS]
+      [Logger]
+      [Autenticação JWT]
+    }
+    
+    rectangle "kv_store.tsx\n(Persistência)" as KVStore {
+      [get/set]
+      [mget/mset]
+      [getByPrefix]
+      [del/mdel]
+    }
+  }
+}
+
+' ==================== CAMADA 3: DATABASE ====================
+
+rectangle "CAMADA 3: DATABASE (Supabase)" #E8F4FD {
+  
+  database "PostgreSQL" as PostgresDB #163B6F {
+    rectangle "Tabela: kv_store_ea835390" as KVTable {
+      [key: string (PK)]
+      [value: jsonb]
+      [created_at: timestamp]
+      [updated_at: timestamp]
+    }
+  }
+  
+  rectangle "Supabase Auth" as SupabaseAuth #163B6F {
+    [Google OAuth]
+    [Sessões]
+    [Tokens JWT]
+    [Demo Mode]
+  }
+}
+
+' ==================== HARDWARE/EXTERNAL ====================
+
+rectangle "HARDWARE & SERVIÇOS EXTERNOS" #FFF9E8 {
+  
+  rectangle "Webcam" as Webcam {
+    [MediaDevices API]
+    [getUserMedia()]
+    [Video Stream]
+  }
+  
+  rectangle "ONNX Runtime Web" as ONNXRuntime {
+    [Inferência no Navegador]
+    [Modelos .onnx]
+    [WebAssembly]
+  }
+  
+  rectangle "Python Inference Server\n(Fallback Opcional)" as PythonServer {
+    [inference_server.py]
+    [Modelos YOLO (.pt)]
+    [Ultralytics]
+    [FastAPI]
+  }
+}
+
+' ==================== CONEXÕES ====================
+
+' Frontend para Server
+AppMain --> ServerAPI : "HTTP REST\nhttps://{projectId}.supabase.co/\nfunctions/v1/make-server-ea835390"
+LoginComp --> SupabaseAuth : "OAuth Google / Demo Mode"
+MonitorComp --> ServerAPI : "Estado do sistema"
+GateComp --> ServerAPI : "POST /config"
+AccuracyComp --> ServerAPI : "POST /config"
+StatsComp --> ServerAPI : "GET /stats"
+ProfileComp --> ServerAPI : "GET /user/stats"
+CameraComp --> ServerAPI : "POST /inference"
+CameraComp --> Webcam : "getUserMedia()"
+
+' Frontend Components
+AppMain --> LoginComp
+AppMain --> MonitorComp
+AppMain --> GateComp
+AppMain --> AccuracyComp
+AppMain --> StatsComp
+AppMain --> ProfileComp
+AppMain --> SidebarComp
+MonitorComp --> CameraComp
+CameraComp --> ONNXUtil : "Inferência local"
+
+' ONNX & Python
+ONNXUtil --> ONNXRuntime : "WASM inference"
+CameraComp --> PythonServer : "HTTP (fallback)"
+
+' Server para Database
+ServerAPI --> KVStore : "persiste dados"
+KVStore --> KVTable : "SQL Queries"
+ServerAPI --> SupabaseAuth : "valida tokens"
+
+' Frontend Utils
+AppMain --> SupabaseClient
+SupabaseClient --> SupabaseAuth
+
+' ==================== NOTAS ====================
+
+note right of AppMain
+  **Estado Global:**
+  • user, isDemoMode
+  • activeTab
+  • isSystemRunning
+  • minAccuracy (85%)
+  • modelVersion (YOLOv8n/s/m)
+  • gateConfigs {1: papel, 2: plastico, 3: metal}
+end note
+
+note right of ServerAPI
+  **Principais Endpoints:**
+  • GET /health
+  • GET /auth-test
+  • POST /config
+  • GET /config
+  • POST /inference
+  • GET /stats
+  • GET /stats/period
+  • POST /session/end
+  • POST /logs
+  • GET /logs
+  • GET /user/stats
+end note
+
+note right of KVTable
+  **Estrutura de Chaves:**
+  • system_config_{userId}
+  • detection_{userId}_{timestamp}
+  • stats_{userId}_{date}
+  • session_{sessionId}
+  • user_profile_{userId}
+end note
+
+note left of ONNXRuntime
+  **Modo Híbrido de Inferência:**
+  1. ONNX no navegador (preferido)
+  2. Servidor Python (fallback)
+  3. Mock detections (desenvolvimento)
+  
+  **Modelos Suportados:**
+  • yolov8n.onnx (~12MB)
+  • yolov8s.onnx (~45MB)
+  • yolov8m.onnx (~100MB)
+end note
+
+note left of PythonServer
+  **Classes Detectadas:**
+  • papel/papelão (#163b6f)
+  • metal (#196626)
+  • plástico (#dc1f2e)
+  • vidro (#d2b91f)
+  
+  Confiança mínima: 50-95%
+  FPS esperado: 30-60
+end note
+
+' ==================== LEGENDA ====================
+
+legend right
+  |<#EDFEF4>    | Frontend (React) |
+  |<#FEF4ED>    | Backend (Hono/Deno) |
+  |<#E8F4FD>    | Database (Supabase) |
+  |<#FFF9E8>    | Hardware/Externo |
+  |<#034732>    | Componente Principal |
+  |<#ABF2AB>    | Componentes React |
+  |<#008148>    | Utilitários |
+  |<#196626>    | Lógica de Negócio |
+  |<#163B6F>    | Persistência |
+endlegend
+
+@enduml

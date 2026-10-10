@@ -1,0 +1,17 @@
+{
+  "serial_port": "COM8",
+  "baud_rate": 115200,
+  "camera_index": 0,
+  "confidence": 0.45,
+  "model_path": "../yolo_models/taco/best.pt",
+  "class_to_angle": {
+    "plastic": 50,
+    "metal": 150,
+    "corrugated carton": 130,
+    "paper": 110
+  },
+  "websocket_port": 8765,
+  "frame_width": 640,
+  "frame_height": 480,
+  "fps_target": 30
+}
