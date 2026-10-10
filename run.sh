@@ -26,9 +26,11 @@ cd ..
 sleep 3
 
 echo "[2/3] Iniciando Frontend React..."
+cd frontend
 gnome-terminal -- bash -c "npm run dev; exec bash" || \
 xterm -e "npm run dev" || \
 npm run dev &
+cd ..
 sleep 2
 
 echo "[3/3] Sistema iniciado!"

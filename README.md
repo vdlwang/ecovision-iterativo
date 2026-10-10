@@ -1,5 +1,7 @@
 # 🌿 EcoVision - Sistema Inteligente de Reciclagem
 
+> **Origem:** TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**. Este repositório une a versão final (`vitor-scosta/Ecovision@d6f5181`, na raiz) e a versão iterativa (`vitor-scosta/tcc-testes`, em [`legado/`](legado/)), com o histórico de ambas preservado.
+
 Sistema de controle para esteira rolante de centro de reciclagem integrado com IA que identifica e separa automaticamente materiais (papel/papelão, metal, plástico e vidro) através de um servomotor único.
 
 ![EcoVision](https://img.shields.io/badge/YOLO-v8-green) ![Python](https://img.shields.io/badge/Python-3.8+-blue) ![React](https://img.shields.io/badge/React-18+-cyan) ![ESP32](https://img.shields.io/badge/ESP32-Arduino-orange)
@@ -117,85 +119,25 @@ source venv/bin/activate
 pip install ultralytics opencv-python pyserial websockets
 ```
 
-#### Baixar Modelo YOLO (se necessário)
+#### Modelo YOLO
 
-```bash
-# Crie a pasta para modelos
-mkdir -p yolo_models/taco
-
-# Coloque seu modelo .pt treinado em:
-# yolo_models/taco/yolov8s.pt
-```
-
-Se não tiver um modelo treinado, você pode usar o modelo padrão YOLO:
-```python
-# O Ultralytics baixará automaticamente na primeira execução
-```
+Os pesos já estão em `yolo_models/taco/`. O padrão (`model_path` em `backend/config.json`) é `best.pt`, o YOLOv8s com fine-tuning nas imagens do projeto. Caminhos relativos em `model_path` são resolvidos a partir de `backend/`.
 
 ### 3️⃣ Frontend React
 
 ```bash
-# Instalar dependências
+cd frontend
 npm install
-
-# Ou usando yarn
-yarn install
 ```
 
 ### 4️⃣ Firmware ESP32
 
-1. Abra Arduino IDE
-2. Instale suporte para ESP32:
-   - Vá em **File > Preferences**
-   - Adicione em "Additional Boards Manager URLs":
-     ```
-     https://dl.espressif.com/dl/package_esp32_index.json
-     ```
-   - Vá em **Tools > Board > Boards Manager**
-   - Procure "ESP32" e instale
+O firmware é um projeto PlatformIO em `firmware/` (`firmware/src/main.cpp`). Veja [`firmware/README.md`](firmware/README.md) para pinagem e comandos.
 
-3. Conecte o ESP32 via USB
-4. Selecione a placa e porta:
-   - **Tools > Board > ESP32 Dev Module**
-   - **Tools > Port > COMx** (Windows) ou **/dev/ttyUSBx** (Linux)
-
-5. Crie o firmware (exemplo básico):
-
-```cpp
-// firmware_ecovision.ino
-#include <ESP32Servo.h>
-
-Servo servoMotor;
-const int SERVO_PIN = 18;
-const int MOTOR_PIN = 19;
-
-void setup() {
-  Serial.begin(115200);
-  servoMotor.attach(SERVO_PIN);
-  pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, HIGH); // Motor ligado por padrão
-}
-
-void loop() {
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    
-    if (command.startsWith("SERVO:")) {
-      int angle = command.substring(6).toInt();
-      servoMotor.write(angle);
-    } 
-    else if (command == "MOTOR ON") {
-      digitalWrite(MOTOR_PIN, HIGH);
-    } 
-    else if (command == "MOTOR OFF") {
-      digitalWrite(MOTOR_PIN, LOW);
-    }
-  }
-}
+```bash
+cd firmware
+pio run -t upload
 ```
-
-6. Faça upload (**Sketch > Upload**)
 
 ---
 
@@ -203,7 +145,7 @@ void loop() {
 
 ### Passo 1: Configurar Porta Serial
 
-Edite `config.json` (se existir) ou configure via interface:
+Edite `backend/config.json` (se existir) ou configure via interface:
 
 ```json
 {
@@ -248,11 +190,8 @@ python backend/ecovision_local_modf.py
 **Em outro terminal:**
 
 ```bash
-# Desenvolvimento
+cd frontend
 npm run dev
-
-# Ou com yarn
-yarn dev
 ```
 
 **Saída esperada:**
@@ -293,25 +232,29 @@ VITE v5.x.x  ready in 500 ms
 ## 📁 Estrutura do Projeto
 
 ```
-ecovision/
+.
 ├── backend/
-│   └── ecovision_local.py      # Backend Python principal
-├── components/
-│   ├── LoginScreen.tsx          # Tela de login
-│   ├── Sidebar.tsx              # Barra lateral
-│   ├── MonitorPanel.tsx         # Dashboard principal
-│   ├── ConfigGatesPanel.tsx     # Config. cancelas
-│   ├── ConfigModelPanel.tsx     # Config. modelo
-│   └── ui/                      # Componentes shadcn
-├── yolo_models/
-│   └── taco/
-│       └── yolov8s.pt           # Modelo treinado (você adiciona)
-├── App.tsx                      # App principal React
-├── index.html                   # HTML base
-├── vite.config.ts               # Config Vite
-├── package.json                 # Dependências Node
-├── config.json                  # Configurações (opcional)
-└── README.md                    # Este arquivo
+│   ├── ecovision_local.py       # Backend: YOLO + WebSocket + Serial (usado por run.sh/run.bat)
+│   ├── ecovision_local_modf.py  # Variante: dispara na hora, sem fila
+│   ├── config.json              # Configuração (gravada também pela interface)
+│   ├── requirements.txt
+│   ├── test_connection.py       # Testa câmera e serial
+│   └── testes_serial.py         # REPL serial para o ESP32
+├── frontend/                    # React + Vite
+│   ├── index.html
+│   ├── vite.config.ts
+│   └── src/
+│       ├── App.tsx
+│       ├── components/          # Painéis + componentes shadcn (ui/)
+│       └── hooks/useStableWebSocket.ts
+├── firmware/                    # ESP32 (PlatformIO)
+│   ├── platformio.ini
+│   └── src/main.cpp
+├── yolo_models/taco/            # Pesos YOLO (best.pt = padrão)
+├── docs/diagrams/               # Diagramas PlantUML e renderizações
+├── legado/                      # Versão iterativa do TCC (scripts, datasets, middleware, maquete)
+├── run.sh / run.bat             # Sobe backend e frontend
+└── README.md
 ```
 
 ---
@@ -344,22 +287,21 @@ ecovision/
 
 ### Diagrama de Conexão Hardware
 
+Pinagem de `firmware/src/main.cpp`:
+
 ```
-ESP32 DevKit           Servo Motor        Motor Esteira
-┌───────────┐         ┌──────────┐       ┌──────────┐
-│           │         │          │       │          │
-│  GPIO 18  ├────────▶│  Signal  │       │          │
-│  GPIO 19  ├────────────────────────────▶  IN+     │
-│   5V/3.3V ├────────▶│  VCC     │       │          │
-│    GND    ├────────▶│  GND     │       │  GND     │
-│           │         │          │       │          │
-└───────────┘         └──────────┘       └──────────┘
+ESP32 DevKit           Servo MG996R       L298N (ponte H)      Motores DC da esteira
+┌───────────┐         ┌──────────┐       ┌──────────┐         ┌──────────┐
+│  GPIO 32  ├────────▶│  Signal  │       │          │         │          │
+│  GPIO 22  ├────────────────────────────▶  IN1     ├────────▶│  OUT1/2  │
+│  GPIO 23  ├────────────────────────────▶  IN2     │         │          │
+│    GND    ├────────▶│  GND     │◀──────┤  GND     │         │          │
+└───────────┘         └──────────┘       └──────────┘         └──────────┘
 ```
 
 **Importante:**
-- Servo requer alimentação estável (5V/1A+)
-- Use fonte externa se necessário
-- Motor DC pode precisar de driver (L298N, etc)
+- Servo requer alimentação estável e externa (5V/1A+), com GND comum ao ESP32
+- O firmware aciona só o IN1 com PWM fixo (255): a esteira gira num único sentido e velocidade
 
 ---
 
@@ -404,7 +346,7 @@ pip install ultralytics opencv-python pyserial websockets
 **Servo não move:**
 - Verifique alimentação (5V suficiente)
 - Teste servo com código básico
-- Verifique GPIO 18 está correto
+- Verifique se o sinal está no GPIO 32
 
 ---
 
@@ -425,6 +367,8 @@ python backend/test_connection.py  # Se existir
 
 ### Frontend
 ```bash
+cd frontend
+
 # Desenvolvimento
 npm run dev
 
@@ -470,8 +414,8 @@ npm install --save-dev @types/react @types/node
 ### Estrutura de Código
 
 - **Backend**: `backend/ecovision_local.py` - Tudo em um arquivo
-- **Frontend**: Componentes modulares em `/components`
-- **Config**: `config.json` (opcional, pode usar interface)
+- **Frontend**: Componentes modulares em `frontend/src/components`
+- **Config**: `backend/config.json` (opcional, pode usar interface)
 
 ---
 

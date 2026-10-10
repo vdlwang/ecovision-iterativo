@@ -15,7 +15,8 @@ from pathlib import Path
 from threading import Thread
 
 # ==== Configuração ====
-CONFIG_FILE = Path(__file__).parent.parent / "config.json"
+BACKEND_DIR = Path(__file__).parent
+CONFIG_FILE = BACKEND_DIR / "config.json"
 
 # Cooldown fixo entre detecções enviadas (em segundos)
 DETECTION_COOLDOWN = 1.5
@@ -292,7 +293,11 @@ def process_yolo_stream():
     
     # Carregar YOLO
     print(f"Carregando modelo YOLO: {config['model_path']}")
-    model = YOLO(config['model_path'])
+    # Caminho relativo é resolvido a partir de backend/, não do diretório atual
+    model_path = Path(config['model_path'])
+    if not model_path.is_absolute():
+        model_path = BACKEND_DIR / model_path
+    model = YOLO(str(model_path))
     
     # Stream da webcam
     results_gen = model(

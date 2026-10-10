@@ -1,4 +1,6 @@
 node_modules
 venv
+__pycache__/
+frontend/build
 legado/datasets
 legado/scripts/runs

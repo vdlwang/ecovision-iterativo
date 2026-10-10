@@ -25,7 +25,7 @@ start "EcoVision Backend" cmd /k "cd backend && python ecovision_local.py"
 timeout /t 3 /nobreak >nul
 
 echo [2/3] Iniciando Frontend React...
-start "EcoVision Frontend" cmd /k "npm run dev"
+start "EcoVision Frontend" cmd /k "cd frontend && npm run dev"
 timeout /t 2 /nobreak >nul
 
 echo [3/3] Sistema iniciado!
