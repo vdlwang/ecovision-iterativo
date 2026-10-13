@@ -60,11 +60,11 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 ## Documentation layout
 
-The root `README.md` stays short (overview, install, run, limitations) and links to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints). Put details in the matching one.
+The root `README.md` stays short (overview, install, run, limitations) and links to `PROBLEMAS.md` and to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints). Put details in the matching one.
 
 ## legado/
 
-The thesis's preliminary version, kept as reference (don't develop here), with its own README and `PROBLEMAS.md` (issue list from 2026-10-08, including notes on the thesis text). Highlights:
+The thesis's preliminary version, kept as reference (don't develop here), with its own README. Its issue list (2026-10-08, including notes on the thesis text) is the root `PROBLEMAS.md`; items the final version fixes are marked there. Highlights:
 
 - `legado/scripts/` (run from inside that dir; relative `../yolo_models` paths): `model_2.py` (webcam → YOLO → serial, stops the belt on each detection), `val.py` (benchmarks yolov8 n/s/m on the 4 scenarios), `infer.py`, `testes_serial.py`. Same serial protocol as the current firmware, but substring class mapping that misses cans and paper.
 - `legado/interface/reciclagem_middleware_v1/`: obsolete Tk middleware + `esp32_cancela.ino` speaking an incompatible `PULSE:<gate>,<ms>` protocol.

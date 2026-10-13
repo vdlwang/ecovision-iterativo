@@ -47,4 +47,3 @@ Adapte o caminho do modelo `.pt` e a fonte (`source=0` para webcam).
 ```
 PULSE:1,500
 ```
-s

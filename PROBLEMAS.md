@@ -1,10 +1,10 @@
 # Problemas conhecidos — CyberReciclagem
 
-Análise feita em 2026-10-08 por leitura do código, dos labels e da planilha `scripts/avaliacao_modelos_resultados_2.xlsx`. Nada foi executado: não havia `ultralytics` instalado nem ESP32 conectado.
+Análise feita em 2026-10-08 por leitura do código, dos labels e da planilha `legado/scripts/avaliacao_modelos_resultados_2.xlsx`. Nada foi executado: não havia `ultralytics` instalado nem ESP32 conectado.
 
 Atualizado no mesmo dia após cruzar com o fonte da monografia (zip do Overleaf). Os problemas do texto estão na seção **Monografia**, no fim do arquivo.
 
-> **Atenção:** a monografia descreve um sistema que **não está neste repositório**: dashboard React + WebSocket, backend com as classes `YOLOPipeline`, `SerialController` e `SystemState`, o YOLOv8s com fine-tuning e o firmware de servo/motor. Os itens E1–M7 abaixo valem para o código daqui, que pode ser uma versão anterior.
+> **Escopo:** a análise foi feita sobre a versão preliminar do TCC (`vitor-scosta/tcc-testes`), hoje em [`legado/`](legado/). Os itens E1–M7 e P1–P11 valem para esse código. Depois disso, a versão final (`vitor-scosta/Ecovision`) foi incorporada na raiz e tem o sistema descrito na monografia: frontend React + WebSocket, backend, firmware de servo/motor e o YOLOv8s com fine-tuning. Os itens que ela resolve estão marcados com ✅ **Resolvido pela versão final**. Os problemas conhecidos da versão final estão em [`README.md`](README.md#limitações-conhecidas).
 
 **Níveis de complexidade:**
 
@@ -20,11 +20,12 @@ Os itens com ❓ são dúvidas em aberto (consolidadas no fim).
 
 ### E1. Dois sistemas de controle incompatíveis, e o firmware de um deles não está no repo
 
-- `scripts/model.py`, `model_2.py`, `final_model.py` e `testes_serial.py` falam um protocolo de servo e motor: `50` (ângulo puro), `SERVO <n>`, `MOTOR ON`, `MOTOR OFF`, `PING`. O firmware que entende esses comandos **não está versionado**.
-- O middleware (`interface/reciclagem_middleware_v1/`) envia `PULSE:<gate>,<ms>`, e `esp32_cancela.ino` aceita apenas `PULSE`, `OPEN` e `CLOSE`.
+- `legado/scripts/model.py`, `model_2.py`, `final_model.py` e `testes_serial.py` falam um protocolo de servo e motor: `50` (ângulo puro), `SERVO <n>`, `MOTOR ON`, `MOTOR OFF`, `PING`. O firmware que entende esses comandos **não está versionado**.
+- O middleware (`legado/interface/reciclagem_middleware_v1/`) envia `PULSE:<gate>,<ms>`, e `esp32_cancela.ino` aceita apenas `PULSE`, `OPEN` e `CLOSE`.
 - Esse firmware liga e desliga pinos digitais (16/17/18), o que serve para relé ou solenoide, não para servo (servo precisa de PWM).
 - Na prática, rodar `model_2.py` com o `.ino` do repo resulta em `ERR comando` para tudo.
-- ✅ **Resolvido pela monografia:** o hardware real é 1 servo MG996R + ponte H L298N + 4 motores DC, o que corresponde ao protocolo dos `scripts/`. Portanto o middleware e o `esp32_cancela.ino` estão **obsoletos** e poderiam ser removidos ou marcados como tal. O firmware de servo/motor continua faltando no repo.
+- ✅ **Resolvido pela monografia:** o hardware real é 1 servo MG996R + ponte H L298N + 4 motores DC, o que corresponde ao protocolo dos `legado/scripts/`. Portanto o middleware e o `esp32_cancela.ino` estão **obsoletos** e poderiam ser removidos ou marcados como tal.
+- ✅ **Resolvido pela versão final:** o firmware de servo/motor está em [`firmware/`](firmware/) e entende `MOTOR ON`, `MOTOR OFF`, `SERVO <n>` e `<n>`. `PING` não é reconhecido e move o servo para 0° (veja [`firmware/README.md`](firmware/README.md)).
 
 ### E2. O mapeamento de classes por substring não cobre os materiais do projeto
 
@@ -37,18 +38,21 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 
 **Correção sugerida:** mapear por ID de classe, como o middleware já faz em `ALVOS` (IDs 5, 6, 7, 12, 17, 33).
 
+✅ **Resolvido pela versão final:** `backend/ecovision_local_modf.py` converte cada classe TACO em material por uma tabela explícita (`taco_to_material`), que cobre latas, papel e papelão. Os scripts de `legado/` continuam com o mapeamento por substring.
+
 ### E3. O modelo não foi treinado com dados do projeto
 
-- Os `.pt` em `yolo_models/taco/` foram treinados só no TACO.
+- Os `.pt` em `legado/yolo_models/taco/` foram treinados só no TACO.
 - Os 4 datasets próprios têm apenas o split `validation`, com cerca de 24 imagens e 100 anotações cada.
 - Na planilha, o mAP@0.5 fica entre 0,34 e 0,64, com recall abaixo de 0,25 em várias classes. O yolov8m é pior que o yolov8s, o que indica *domain gap* e amostra pequena, não falta de capacidade do modelo.
-- ✅ **Resolvido pela monografia:** o fine-tuning do YOLOv8s foi feito (split 80/20, ~100 imagens), mas os pesos, o script de treino e os splits não estão no repo. Veja também T2 na seção Monografia.
+- ✅ **Resolvido pela monografia:** o fine-tuning do YOLOv8s foi feito (split 80/20, ~100 imagens), mas o script de treino e os splits não estão no repo. Veja também T2 na seção Monografia.
+- ✅ **Resolvido pela versão final:** os pesos com fine-tuning estão em `yolo_models/taco/` (`best.pt` e anteriores; veja [`yolo_models/README.md`](yolo_models/README.md)).
 
-### E4. Repositório pesado: 1,3 GB de dados e 739 MB de `.git`
+### E4. Repositório pesado: 1,3 GB de dados e 857 MB de `.git`
 
 - As fotos têm cerca de 9,5 MB cada (resolução de celular) e cada uma está gravada **3 vezes**: em `COCO_dataset/`, em `YOLO_dataset/validation/images/` e uma versão menor em `.thumbnail/`.
-- Os pesos `.pt` (83 MB) estão no git sem LFS.
-- `database/tcc-0SF/YOLO_dataset/validation/labels.cache` está commitado.
+- Os pesos `.pt` (83 MB em `legado/`; 289 MB somando os de `yolo_models/` da raiz) estão no git sem LFS.
+- `legado/database/tcc-0SF/YOLO_dataset/validation/labels.cache` está commitado.
 - **Sugestão:** usar Git LFS ou armazenamento externo e redimensionar as imagens para cerca de 1280 px. Isso não altera o resultado com `imgsz=640`.
 
 ### E5. Sem configuração centralizada nem código compartilhado
@@ -62,7 +66,7 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 
 ## 🟡 Moderado
 
-### M1. `scripts/val.py:59`: métricas por classe com rótulos trocados ⚠️ afeta os resultados do TCC
+### M1. `legado/scripts/val.py:59`: métricas por classe com rótulos trocados ⚠️ afeta os resultados do TCC
 
 - `metrics.box.p[idx]` segue a ordem de `ap_class_index`, que são as classes presentes em ordem crescente: 5, 6, 7, 12, 17, 33.
 - O código, porém, percorre `id_interesse = [6, 33, 17, 12, 7, 5]`.
@@ -81,19 +85,19 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 - **Correção:** `i = list(metrics.box.ap_class_index).index(class_id)` e então `metrics.box.class_result(i)`.
 - ✅ **A monografia não é afetada:** ela só usa `mean_precision` (Tabela `tab:bench-cenarios`), que é uma média e não depende da ordem. A planilha continua errada se for usada em outro lugar.
 
-### M2. `scripts/model_2.py:144`: um mesmo objeto aciona o servo várias vezes
+### M2. `legado/scripts/model_2.py:144`: um mesmo objeto aciona o servo várias vezes
 
 - O debounce (`DETECTION_COOLDOWN`) é global e baseado só em tempo.
 - Quando um objeto é detectado na ROI a esteira **para**, e o objeto continua parado dentro da ROI.
 - Durante os ~5,5 s de atuação ele é enfileirado de novo a cada 1 s, o que gera 4 ou 5 acionamentos fantasmas.
 - **Correção:** usar tracking (`model.track` com IDs) ou ignorar detecções enquanto `processing=True`.
 
-### M3. `scripts/model_2.py`: a geometria entre câmera e desviador não é considerada
+### M3. `legado/scripts/model_2.py`: a geometria entre câmera e desviador não é considerada
 
 - O servo atua no instante em que o objeto cruza a ROI, e a esteira para nesse mesmo momento.
 - ❓ O desviador fica logo abaixo da câmera? Se estiver mais adiante, falta um atraso de transporte (distância ÷ velocidade).
 
-### M4. `scripts/model.py:61`: o filtro de ângulo repetido descarta objetos
+### M4. `legado/scripts/model.py:61`: o filtro de ângulo repetido descarta objetos
 
 - `if angle != last_angle_sent` faz com que dois plásticos seguidos acionem só o primeiro.
 - Também não há ROI: dispara assim que o objeto aparece em qualquer parte do frame.
@@ -103,12 +107,12 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 - Enquanto o objeto estiver visível, a GUI envia um `PULSE` a cada 300 ms de cooldown.
 - No firmware, `delay(ms)` (`esp32_cancela.ino:28`) bloqueia o loop. Os pulsos se acumulam no buffer serial e continuam sendo executados depois que o objeto já passou.
 
-### M6. `database/*/YOLO_dataset/data.yaml`: `path:` absoluto do Windows
+### M6. `legado/database/*/YOLO_dataset/data.yaml`: `path:` absoluto do Windows
 
 - O caminho `C:/Users/vitor/Documents/...` faz `val.py` e `test-yolo-format.py` falharem em qualquer outra máquina.
 - **Correção:** remover o `path:` ou torná-lo relativo.
 
-### M7. `scripts/convert-to-yolo-format.py` está quebrado
+### M7. `legado/scripts/convert-to-yolo-format.py` está quebrado
 
 - O caminho `../datasets/45-SF/45-SF.json` não existe.
 - `labels_dir` espera um diretório, não um arquivo.
@@ -122,17 +126,17 @@ Afeta `model.py`, `model_2.py` e `final_model.py`. As chaves são `plastic`, `me
 
 | # | Local | Problema |
 |---|---|---|
-| P1 | `scripts/final_model.py:13-17` | `MODEL_SOURCE` é definido duas vezes. `USE_WEBCAM` não é usado. A inferência roda em `IMG`, um caminho `C:\Users\natha\...`, e não na webcam. |
-| P2 | `scripts/final_model.py:44-50` | O ramo `glass` não envia nada mas chama `readline()` mesmo assim. `sleep(5)` bloqueia o stream a cada detecção. A serial é aberta no nível do módulo com `sleep(10)`. |
-| P3 | `scripts/model.py:52` | `save=True` na webcam grava vídeo continuamente em `runs/`. |
+| P1 | `legado/scripts/final_model.py:13-17` | `MODEL_SOURCE` é definido duas vezes. `USE_WEBCAM` não é usado. A inferência roda em `IMG`, um caminho `C:\Users\natha\...`, e não na webcam. |
+| P2 | `legado/scripts/final_model.py:44-50` | O ramo `glass` não envia nada mas chama `readline()` mesmo assim. `sleep(5)` bloqueia o stream a cada detecção. A serial é aberta no nível do módulo com `sleep(10)`. |
+| P3 | `legado/scripts/model.py:52` | `save=True` na webcam grava vídeo continuamente em `runs/`. |
 | P4 | `middleware_gui.py:239,252` | Se o usuário digitar algo não numérico num Spinbox, `.get()` lança `TclError`. A exceção sai de `_poll_queue` antes do `root.after` (linha 227), e **a GUI para de processar detecções sem avisar**. |
 | P5 | `middleware_gui.py:176` | Não espera o reset do ESP32 ao conectar, então os primeiros comandos podem se perder. Também nunca lê as respostas `OK ...`. |
 | P6 | `esp32_cancela.ino:82` | `inbuf` cresce sem limite se nunca chegar `\n`. |
-| P7 | `yolo_models/yolo11.py:3` | O caminho `./yolo/yolo11n.pt` não existe. O arquivo está em `yolo_models/yolo11n.pt`. |
-| P8 | `scripts/test-yolo-format.py` | Imprime "base 1" fixo. Na prática duplica o `val.py`. |
-| P9 | `interface/canva/interface.html:793` | Tem um script injetado do Cloudflare (`/cdn-cgi/challenge-platform`), sobra da exportação, que deve ser removido. |
-| P10 | `scripts/model_2.py` | Os atalhos de teclado só funcionam no Windows (`msvcrt`). |
-| P11 | `.gitignore` | Falta `*.cache`, `__pycache__/` e `.venv/`. |
+| P7 | `legado/yolo_models/yolo11.py:3` | O caminho `./yolo/yolo11n.pt` não existe. O arquivo está em `legado/yolo_models/yolo11n.pt`. |
+| P8 | `legado/scripts/test-yolo-format.py` | Imprime "base 1" fixo. Na prática duplica o `val.py`. |
+| P9 | `legado/interface/canva/interface.html:793` | Tem um script injetado do Cloudflare (`/cdn-cgi/challenge-platform`), sobra da exportação, que deve ser removido. |
+| P10 | `legado/scripts/model_2.py` | Os atalhos de teclado só funcionam no Windows (`msvcrt`). |
+| P11 | `.gitignore` | Falta `*.cache` e `.venv/` (o `.gitignore` da raiz já cobre `__pycache__/` e `venv`). |
 
 ---
 
@@ -146,6 +150,7 @@ Referências no formato `CapN:linha` dos arquivos em `tcc2025/`. Não foi possí
 - Também faltam os pesos do YOLOv8s com fine-tuning e o firmware do servo/motor.
 - A Figura `fig:esteira_funcionando` mostra metal, plástico e papel sendo separados. Com o mapeamento por substring deste repo (E2), metal (`Drink can`) e papel nunca seriam reconhecidos, o que confirma que a demo usou outro código.
 - ❓ Onde está esse código? Para a banca e para reprodutibilidade, vale versioná-lo e citar o repositório no texto.
+- ✅ **Resolvido pela versão final:** frontend, backend, firmware e pesos estão na raiz deste repositório. Resta uma divergência: o backend (`backend/ecovision_local_modf.py`) é um arquivo de funções, e só `SystemState` é classe. `YOLOPipeline` e `SerialController` existem apenas no diagrama de `docs/diagrams/` e no texto.
 
 ### 🔴 T2. A avaliação do fine-tuning provavelmente tem vazamento de dados
 
@@ -167,7 +172,7 @@ Referências no formato `CapN:linha` dos arquivos em `tcc2025/`. Não foi possí
 - Cap4:89 diz que a velocidade é mantida constante, e Cap5:120,127 fala em regular a velocidade pela ponte H. O código só tem `MOTOR ON` e `MOTOR OFF`, e o `model_2.py` **para** a esteira a cada detecção.
 - A limitação "separação descompassada" (Cap5:307) só faz sentido com a esteira em movimento contínuo.
 - As limitações "múltiplas detecções" e "separação descompassada" (Cap5:305-309) são exatamente M2 e M3. Os trabalhos futuros (Cap6) falam só de dataset e hardware. Vale citar as soluções de software: tracking com IDs e contagem por cruzamento de linha, e compensação de atraso por distância/velocidade.
-- ❓ Qual lógica a versão final usa: para a esteira ou movimento contínuo?
+- ✅ **Resolvido pela versão final:** a esteira se move continuamente. O backend não para o motor na detecção, e o firmware usa PWM fixo (255), sem regulação de velocidade. Isso é coerente com Cap4:89 e Cap5:307, mas não com Cap5:120,127.
 
 ### 🟡 T5. Os critérios de aceitação citados não existem mais, e falta resultado quantitativo do sistema
 
@@ -192,15 +197,15 @@ Referências no formato `CapN:linha` dos arquivos em `tcc2025/`. Não foi possí
 
 ## Dúvidas em aberto
 
-1. **Código final:** onde estão o frontend React, o backend (`YOLOPipeline`, `SerialController`), o firmware de servo/motor e os pesos do fine-tuning? (T1)
-2. **Lógica de controle:** a esteira para a cada detecção ou se move continuamente? (T4)
-3. **Geometria:** qual é a distância entre a câmera e o servo, e qual a velocidade da esteira? (M3, T4)
-4. **Fine-tuning:** o split foi aleatório por imagem? Usou `freeze`? Treinou com as 6 classes TACO ou com 4 materiais? (T2, T8)
-5. **Capítulo de Método:** a remoção foi intencional? (T12)
-6. **M1:** confirmar com `print(metrics.box.ap_class_index)`.
-7. **Citação Evreka:** ela aparece corretamente no PDF? (T9)
+1. **Geometria:** qual é a distância entre a câmera e o servo, e qual a velocidade da esteira? (M3, T4)
+2. **Fine-tuning:** o split foi aleatório por imagem? Usou `freeze`? (T2, T8)
+3. **Capítulo de Método:** a remoção foi intencional? (T12)
+4. **M1:** confirmar com `print(metrics.box.ap_class_index)`.
+5. **Citação Evreka:** ela aparece corretamente no PDF? (T9)
 
 Respondidas pela monografia: hardware real (E1), CF/SF = **com/sem flash**, fine-tuning realizado (E3), anotação no Roboflow (M7).
+
+Respondidas pela versão final: o código final está na raiz deste repositório (T1); a esteira se move continuamente (T4); o fine-tuning usou as classes TACO (61 = 60 + `Background`), não 4 materiais (veja [`yolo_models/README.md`](yolo_models/README.md)).
 
 ## Prioridade sugerida
 
@@ -209,7 +214,6 @@ Respondidas pela monografia: hardware real (E1), CF/SF = **com/sem flash**, fine
 1. **T2:** o principal resultado quantitativo pode estar inflado.
 2. **T5:** falta resultado do sistema completo, o que a banca tende a cobrar.
 3. **T3:** trocar ou complementar a métrica. A conclusão se mantém.
-4. **T1:** versionar o código final.
-5. **T6–T12:** correções rápidas de texto.
+4. **T6–T12:** correções rápidas de texto.
 
-**Código (se este repo continuar em uso):** E2, M2 e M1.
+**Código de `legado/`:** M1, se a planilha for reaproveitada. Os demais itens (E2, M2...) já não importam, porque o desenvolvimento segue na versão final da raiz. Os problemas dela estão no [`README.md`](README.md#limitações-conhecidas).

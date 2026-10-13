@@ -17,5 +17,5 @@ Os modelos com fine-tuning têm 61 classes: as 60 do TACO mais `Background`, com
 
 ## Ressalvas
 
-- O mAP50 de 0,995 do `best.pt` é otimista. As fotos do projeto mostram as mesmas cenas em 4 condições de captura, então treino e validação quase certamente compartilham cenas. Além disso, o `best.pt` continuou o treino sobre o mesmo split. Detalhes em [`legado/PROBLEMAS.md`](../legado/PROBLEMAS.md) (item T2).
+- O mAP50 de 0,995 do `best.pt` é otimista. As fotos do projeto mostram as mesmas cenas em 4 condições de captura, então treino e validação quase certamente compartilham cenas. Além disso, o `best.pt` continuou o treino sobre o mesmo split. Detalhes em [`PROBLEMAS.md`](../PROBLEMAS.md) (item T2).
 - O script de treino, o `data.yaml` e a divisão treino/validação usados no fine-tuning não estão no repositório.
