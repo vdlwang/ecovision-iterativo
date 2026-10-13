@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-EcoVision (a.k.a. CyberReciclagem): the 2025 undergraduate thesis (TCC, Engenharia de Computação, Poli-USP) of Vitor Santos and Nathan Santos, a recycling conveyor belt. A YOLO model detects waste on the belt from a webcam, and an ESP32 drives one servo (MG996R) and the belt motors (L298N + 4 DC motors) to sort it into 4 materials: plastic, metal, glass, paper. The authors have graduated; this repo is maintained by Victor Wang for fixes and improvements. Code, comments and identifiers are in Portuguese. Match that when editing.
+EcoVision (a.k.a. CyberReciclagem): the 2025 undergraduate thesis (TCC, Engenharia de Computação, Poli-USP) of Vitor Santos and Nathan Santos, a recycling conveyor belt. A YOLO model detects waste on the belt from a webcam, and an ESP32 drives one servo (MG996R) and the belt motors (L298N + 4 DC motors) to sort it into 4 materials: plastic, metal, glass, paper. The authors have graduated. This repo, maintained by Victor Wang, continues the project: new fixes and features go here, on top of the thesis's final version. Code, comments and identifiers are in Portuguese. Match that when editing.
 
-The repo merges two histories: the final system (`vitor-scosta/Ecovision`) at the root, and the earlier iterative version (`vitor-scosta/tcc-testes`) under `legado/`. Both upstreams are frozen. `origin` is `vdlwang/ecovision-iterativo`, a standalone repo (not a fork). `vdlwang/ecovision-fork` is the retired old fork, kept for reference. Never push to or open PRs against `vitor-scosta/tcc-testes`: it happened once by mistake (PR #3, reverted in #4).
+The repo merges two histories from the thesis: its final version (`vitor-scosta/Ecovision`), which is the root and the base for all new work, and its preliminary version (`vitor-scosta/tcc-testes`) under `legado/`, kept only as reference. "Iterativo" in the repo name refers to the current work iterating on the thesis, not to `legado/`. Both upstreams are frozen. `origin` is `vdlwang/ecovision-iterativo`, a standalone repo (not a fork). `vdlwang/ecovision-fork` is the retired old fork, kept for reference. Never push to or open PRs against `vitor-scosta/tcc-testes`: it happened once by mistake (PR #3, reverted in #4).
 
 There is no test suite, linter or TypeScript type-check (no `tsconfig.json`; Vite only transpiles). The available checks are:
 
@@ -64,7 +64,7 @@ The root `README.md` stays short (overview, install, run, limitations) and links
 
 ## legado/
 
-The iterative version, with its own README and `PROBLEMAS.md` (issue list from 2026-10-08, including notes on the thesis text). Highlights:
+The thesis's preliminary version, kept as reference (don't develop here), with its own README and `PROBLEMAS.md` (issue list from 2026-10-08, including notes on the thesis text). Highlights:
 
 - `legado/scripts/` (run from inside that dir; relative `../yolo_models` paths): `model_2.py` (webcam → YOLO → serial, stops the belt on each detection), `val.py` (benchmarks yolov8 n/s/m on the 4 scenarios), `infer.py`, `testes_serial.py`. Same serial protocol as the current firmware, but substring class mapping that misses cans and paper.
 - `legado/interface/reciclagem_middleware_v1/`: obsolete Tk middleware + `esp32_cancela.ino` speaking an incompatible `PULSE:<gate>,<ms>` protocol.

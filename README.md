@@ -1,6 +1,6 @@
 # EcoVision - Sistema Inteligente de Reciclagem
 
-> **Origem:** TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**. Este repositório une a versão final (`vitor-scosta/Ecovision@d6f5181`, na raiz) e a versão iterativa (`vitor-scosta/tcc-testes`, em [`legado/`](legado/)), com o histórico de ambas preservado.
+> **Origem:** este repositório dá continuidade ao EcoVision, TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**, com correções e melhorias. O ponto de partida é a versão final do TCC (`vitor-scosta/Ecovision@d6f5181`), que está na raiz. A versão preliminar (`vitor-scosta/tcc-testes`) fica em [`legado/`](legado/). O histórico de ambas foi preservado.
 
 Sistema de controle para esteira rolante de centro de reciclagem. Uma webcam filma a esteira, um modelo YOLOv8 identifica o material (plástico, metal, vidro ou papel) e um ESP32 move um único servo para desviar o objeto para a saída correta.
 
@@ -28,7 +28,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Firmware (ESP32, PlatformIO) | `firmware/` | [`firmware/README.md`](firmware/README.md) |
 | Pesos do YOLO | `yolo_models/taco/` | [`yolo_models/README.md`](yolo_models/README.md) |
 | Diagramas (PlantUML) | `docs/diagrams/` | |
-| Versão iterativa do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md), [`legado/PROBLEMAS.md`](legado/PROBLEMAS.md) |
+| Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md), [`legado/PROBLEMAS.md`](legado/PROBLEMAS.md) |
 
 ## Requisitos
 
