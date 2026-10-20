@@ -324,7 +324,9 @@ def run_yolo_stream(model, ser):
     print(f"Abrindo câmera: {config['camera_index']}")
     
     frame_count = 0
-    start_time = time.time()
+    # FPS medido em janelas de 1 s (a média desde o início escondia quedas)
+    fps_frames = 0
+    fps_start = time.time()
     
     for result in results_gen:
         frame_count += 1
@@ -332,9 +334,12 @@ def run_yolo_stream(model, ser):
             print("Stream YOLO iniciado!")
         
         # Calcula FPS
-        elapsed = time.time() - start_time
-        if elapsed > 0:
-            state.fps = int(frame_count / elapsed)
+        fps_frames += 1
+        elapsed = time.time() - fps_start
+        if elapsed >= 1.0:
+            state.fps = round(fps_frames / elapsed)
+            fps_frames = 0
+            fps_start = time.time()
         
         # Extrai frame original
         frame = result.orig_img
