@@ -29,7 +29,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Pesos do YOLO | `yolo_models/taco/` | [`yolo_models/README.md`](yolo_models/README.md) |
 | Diagramas (PlantUML) | `docs/diagrams/` | |
 | Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md) |
-| Problemas da versão preliminar e observações sobre a monografia | | [`PROBLEMAS.md`](PROBLEMAS.md) |
+| Problemas fora do código (modelo, dados, montagem, repositório) | | [`PROBLEMAS.md`](PROBLEMAS.md) |
 
 ## Requisitos
 
