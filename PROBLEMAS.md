@@ -46,11 +46,6 @@ Problemas que continuam valendo e que não são bugs do backend, do frontend ou 
 - Os pesos `.pt` estão no git sem LFS: cerca de 206 MB em `yolo_models/taco/` e 83 MB em `legado/yolo_models/`.
 - Encolher o histórico exige reescrevê-lo (`git lfs migrate` ou `git filter-repo`), o que muda todos os hashes, inclusive o da tag `tese-final`. **Recomendação:** não reescrever. Daqui em diante, não versionar pesos ou fotos novos direto no git; usar LFS ou armazenamento externo. Redimensionar as fotos para ~1280 px não altera o resultado com `imgsz=640`.
 
-### 🟢 P11. `.gitignore` incompleto
-
-- Falta `*.cache` e `.venv/` (o `.gitignore` já cobre `venv` e `__pycache__/`).
-- `legado/database/tcc-0SF/YOLO_dataset/validation/labels.cache` está versionado e pode sair com `git rm --cached`.
-
 ---
 
 ## Dúvidas em aberto
