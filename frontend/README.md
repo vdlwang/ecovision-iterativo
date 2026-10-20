@@ -23,7 +23,7 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 **Cancelas de Separação:** ângulo do servo para cada material (Plástico, Metal, Vidro, Papel). "Testar" move o servo para o ângulo escolhido, e "Salvar Configuração" grava `class_to_angle` em `backend/config.json`. Os ângulos passam a valer sem reiniciar o backend.
 
-**Configuração do Modelo:** modelo, confiança mínima, porta serial, baud rate e índice da câmera. "Salvar Configuração" grava no `backend/config.json`. Depois é preciso **reiniciar o backend** para valer. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
+**Configuração do Modelo:** modelo, confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. Depois é preciso **reiniciar o backend** para valer. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
 
 ## Problemas conhecidos
 

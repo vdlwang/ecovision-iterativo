@@ -22,7 +22,8 @@ export function ConfigModelPanel() {
   const [modelPath, setModelPath] = useState('');
   const [serialPort, setSerialPort] = useState('COM8');
   const [baudRate, setBaudRate] = useState(115200);
-  const [cameraIndex, setCameraIndex] = useState(0);
+  // Índice da webcam ("0") ou URL de stream; guardado como texto
+  const [cameraIndex, setCameraIndex] = useState('0');
   const [connected, setConnected] = useState(false);
   const { connected: wsConnected, send } = useStableWebSocket('ws://localhost:8765', {
     onMessage: (event) => {
@@ -33,7 +34,7 @@ export function ConfigModelPanel() {
           if (data.model_path) setModelPath(data.model_path);
           if (data.serial_port) setSerialPort(data.serial_port);
           if (data.baud_rate) setBaudRate(data.baud_rate);
-          if (data.camera_index !== undefined) setCameraIndex(data.camera_index);
+          if (data.camera_index !== undefined) setCameraIndex(String(data.camera_index));
         }
       } catch (error) {
         // Silencioso
@@ -60,7 +61,7 @@ export function ConfigModelPanel() {
       model_path: modelPath,
       serial_port: serialPort,
       baud_rate: baudRate,
-      camera_index: cameraIndex,
+      camera_index: /^\d+$/.test(cameraIndex.trim()) ? parseInt(cameraIndex, 10) : cameraIndex.trim(),
     };
 
     if (send(config)) {
@@ -213,17 +214,17 @@ export function ConfigModelPanel() {
             
             <div>
               <Label htmlFor="camera-index" className="text-neutral-300 mb-2 block text-sm md:text-base">
-                Índice da Câmera
+                Câmera (índice ou URL)
               </Label>
               <Input
                 id="camera-index"
-                type="number"
                 value={cameraIndex}
-                onChange={(e) => setCameraIndex(parseInt(e.target.value))}
+                onChange={(e) => setCameraIndex(e.target.value)}
+                placeholder="0 ou http://<ip>:8080/video"
                 className="bg-neutral-800 border-neutral-700 text-white"
               />
               <p className="text-neutral-500 text-xs mt-1">
-                Geralmente 0 (primeira câmera). Tente 1, 2 se não funcionar
+                Webcam: 0 (primeira câmera); tente 1, 2 se não funcionar. Celular: URL do stream de vídeo, não da página do app
               </p>
             </div>
           </Card>
