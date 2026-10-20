@@ -418,7 +418,9 @@ def run_yolo_stream(model, ser):
             'frame': frame_b64,
             'detections': detections,
             'fps': state.fps,
-            'motor_running': state.motor_running
+            'motor_running': state.motor_running,
+            # None em modo demonstração (sem serial ou após falha de escrita)
+            'serial_port': config['serial_port'] if state.serial_port else None
         }
         
         # Envia para WebSocket (asyncio)

@@ -19,7 +19,7 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 **Login:** "Google" e "Modo Demo" são simulados. Ambos só gravam um marcador no `localStorage`.
 
-**Monitor em Tempo Real:** vídeo da câmera com as caixas detectadas, lista de detecções, FPS, botões para ligar e parar a esteira e indicador de conexão com o backend.
+**Monitor em Tempo Real:** vídeo da câmera com as caixas detectadas, lista de detecções, FPS, botões para ligar e parar a esteira, indicador de conexão com o backend e status do sistema: câmera e YOLO ativos quando chegaram frames nos últimos 3 s; ESP32 com a porta serial em uso, ou "Demo" quando o backend roda sem serial.
 
 **Cancelas de Separação:** ângulo do servo para cada material (Plástico, Metal, Vidro, Papel). "Testar" move o servo para o ângulo escolhido, e "Salvar Configuração" grava `class_to_angle` em `backend/config.json`. Os ângulos passam a valer sem reiniciar o backend.
 

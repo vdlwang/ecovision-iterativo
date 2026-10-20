@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -16,12 +16,21 @@ interface FrameData {
   detections: Detection[];
   fps: number;
   motor_running: boolean;
+  serial_port: string | null;
 }
 
 export function MonitorPanel() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [fps, setFps] = useState(0);
   const [motorRunning, setMotorRunning] = useState(true);
+  const [serialPort, setSerialPort] = useState<string | null>(null);
+  // Câmera e YOLO contam como ativos se chegou frame nos últimos 3 s
+  const [ultimoFrame, setUltimoFrame] = useState(0);
+  const [agora, setAgora] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { connected, send } = useStableWebSocket('ws://localhost:8765', {
     onMessage: (event) => {
@@ -65,11 +74,15 @@ export function MonitorPanel() {
         setDetections(data.detections || []);
         setFps(data.fps || 0);
         setMotorRunning(data.motor_running ?? true);
+        setSerialPort(data.serial_port ?? null);
+        if (data.frame) setUltimoFrame(Date.now());
       } catch (error) {
         // Silencioso
       }
     },
   });
+
+  const recebendoFrames = connected && agora - ultimoFrame < 3000;
 
   const sendCommand = (command: string) => {
     send({ command });
@@ -210,22 +223,22 @@ export function MonitorPanel() {
             <div className="space-y-3">
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">Câmera</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'Ativo' : 'Inativo'}
+                <Badge className={recebendoFrames ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {recebendoFrames ? 'Ativo' : 'Inativo'}
                 </Badge>
               </div>
               
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">YOLO</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'Rodando' : 'Parado'}
+                <Badge className={recebendoFrames ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {recebendoFrames ? 'Rodando' : 'Parado'}
                 </Badge>
               </div>
               
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">ESP32</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'COM8' : 'N/A'}
+                <Badge className={connected && serialPort ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {!connected ? 'N/A' : serialPort ?? 'Demo (sem serial)'}
                 </Badge>
               </div>
             </div>

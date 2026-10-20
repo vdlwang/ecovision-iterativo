@@ -47,7 +47,7 @@ Do frontend para o backend:
 
 Do backend para o frontend:
 
-- Um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running"}`.
+- Um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração.
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 
 ## Scripts de teste
