@@ -31,13 +31,13 @@ python backend/testes_serial.py            # interactive REPL to the ESP32
 cd firmware && pio run -t upload           # PlatformIO firmware
 ```
 
-`backend/config.json` holds serial port (default `COM8`, the team developed on Windows; use `/dev/ttyUSB0` on Linux), camera index, `model_path`, confidence, ROI, `class_to_angle`, timings. It is gitignored (local per machine); when missing, `load_config()` writes the defaults, which hold the thesis values. The frontend overwrites it on "Salvar" (including a stray `"type": "save_config"` key). A relative `model_path` is resolved from `backend/`. With no serial port the backend keeps running in demo mode.
+`backend/config.json` holds serial port (default `COM8`, the team developed on Windows; use `/dev/ttyUSB0` on Linux), camera index, `model_path`, confidence, ROI, `class_to_angle`, timings. It is gitignored (local per machine); when missing, `load_config()` writes the defaults, which hold the thesis values. The frontend overwrites it on "Salvar"; the backend drops the `type` key when saving. A relative `model_path` is resolved from `backend/`. With no serial port the backend keeps running in demo mode.
 
 ## Architecture
 
 **Backend.** The official backend is `backend/ecovision_local_modf.py`, which `run.sh`/`run.bat` launch. It is a single file of functions; only `SystemState` is a class, despite the class diagram in `docs/diagrams/` showing `YOLOPipeline`/`SerialController`/`WebSocketHandler`. A thread runs `model(source=camera, stream=True)` and maps each TACO class name to a material via `taco_to_material`. When a box center falls inside the horizontal ROI band (`roi_y_min`..`roi_y_max`), it sends that material's angle at once, then ignores detections for `servo_actuation_seconds`. The minimum gap between triggers is the hardcoded `DETECTION_COOLDOWN = 1.5`; the config's `detection_cooldown` is ignored. The belt is **not** stopped on detection. Every frame is broadcast over WebSocket as base64 JPEG, together with the detections. The previous variant `ecovision_local.py` (queues materials, uses `detection_cooldown`) was removed; see `git show tese-final:backend/ecovision_local.py`.
 
-**WebSocket protocol** (JSON): client → server `{"command": "MOTOR ON"|"MOTOR OFF"|"<angle>"}`, `{"type": "config", "confidence"}`, `{"type": "save_config", ...}`. Server → client `{frame, detections[{class, material, confidence, bbox}], fps, motor_running}`.
+**WebSocket protocol** (JSON): client → server `{"command": "MOTOR ON"|"MOTOR OFF"|"<angle>"}`, `{"type": "config", "confidence"}`, `{"type": "get_config"}`, `{"type": "save_config", ...}`. Server → client `{frame, detections[{class, material, confidence, bbox}], fps, motor_running}` per frame, and `{"type": "config", ...config}` in reply to `get_config` (sent only to the requester).
 
 **Frontend** (`frontend/`): React 18 + Vite, exported from Figma. Components import versioned specifiers (`lucide-react@0.487.0`, `sonner@2.0.3`), resolved by the aliases in `frontend/vite.config.ts`; keep them. `frontend/src/index.css` is precompiled Tailwind. Login is a mock (localStorage flag). Panels: `MonitorPanel`, `ConfigGatesPanel` (angles per material), `ConfigModelPanel`, all sharing one socket through `hooks/useStableWebSocket.ts`.
 
@@ -52,7 +52,6 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 - `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `yolov8s.pt` is the COCO model, `n`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
 - `ConfigGatesPanel` uses key `vidro` while the backend maps glass to `glass`, so glass is never actuated once the config is saved from the UI.
-- The backend does not handle `get_config` (the panels request it), so the UI shows hardcoded defaults.
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
 - Serial is used from both the YOLO thread and the asyncio handler without a lock, and `read_reply` blocks the event loop.
 - In the firmware, any non-numeric command (e.g. `PING`) parses as 0 and moves the servo to 0°.

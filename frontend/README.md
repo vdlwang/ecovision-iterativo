@@ -29,7 +29,6 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 - O painel de cancelas grava a chave `vidro`, mas o backend procura `glass`. Por isso, depois de salvar, vidro deixa de ser separado.
 - O seletor de modelo monta o caminho `../yolo_models/taco/<tipo>.pt`. "Small" aponta para o modelo COCO, "Nano" e "Medium" para os pesos TACO sem fine-tuning, e "Large" e "XLarge" para arquivos inexistentes. O modelo do projeto é o `best.pt` (veja [`yolo_models/README.md`](../yolo_models/README.md)).
-- Os painéis pedem `get_config`, mas o backend não responde a essa mensagem. Por isso mostram valores fixos, não a configuração atual.
 
 ## Troubleshooting
 

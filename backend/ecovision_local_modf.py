@@ -238,9 +238,14 @@ async def websocket_handler(websocket):
                         config['confidence'] = data['confidence']
                         print(f"Confiança atualizada: {config['confidence']}")
                 
+                # Envia a configuração atual (os painéis pedem ao conectar)
+                elif data.get('type') == 'get_config':
+                    await websocket.send(json.dumps({**config, 'type': 'config'}))
+
                 # Salvar configuração
                 elif data.get('type') == 'save_config':
-                    config.update(data)
+                    config.update({k: v for k, v in data.items() if k != 'type'})
+                    config.pop('type', None)  # chave gravada por versões anteriores
                     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                         json.dump(config, f, indent=2)
                     print("Configuração salva em config.json")

@@ -42,9 +42,13 @@ Do frontend para o backend:
 | `{"command": "MOTOR ON"}` / `{"command": "MOTOR OFF"}` | Liga ou desliga a esteira |
 | `{"command": "<ângulo>"}` | Move o servo direto (botão "Testar") |
 | `{"type": "config", "confidence": <n>}` | Atualiza a confiança em memória |
-| `{"type": "save_config", ...}` | Mescla os campos no `config.json` e salva |
+| `{"type": "get_config"}` | Pede a configuração atual (os painéis enviam ao conectar) |
+| `{"type": "save_config", ...}` | Mescla os campos no `config.json` e salva (a chave `type` não é gravada) |
 
-Do backend para o frontend, um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running"}`.
+Do backend para o frontend:
+
+- Um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running"}`.
+- Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 
 ## Scripts de teste
 
