@@ -16,7 +16,7 @@ O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o bac
 
 ## `config.json`
 
-Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão definidos em `load_config()`. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar".
+Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão definidos em `load_config()`. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar". O `config.example.json` traz os mesmos valores padrão, como referência para editar à mão (por exemplo, `cp config.example.json config.json`).
 
 | Campo | Uso |
 |-------|-----|
