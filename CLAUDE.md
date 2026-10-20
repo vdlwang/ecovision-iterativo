@@ -27,7 +27,7 @@ cd frontend && npm run dev                 # Vite on http://localhost:5173
 ./run.sh   (or run.bat)                    # both of the above in separate terminals
 
 python backend/test_connection.py          # checks camera and serial port
-python backend/testes_serial.py            # interactive REPL to the ESP32
+python backend/testes_serial.py            # interactive REPL to the ESP32 (port from config.json)
 cd firmware && pio run -t upload           # PlatformIO firmware
 ```
 

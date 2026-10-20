@@ -54,7 +54,7 @@ Do backend para o frontend:
 
 ```bash
 python test_connection.py    # bibliotecas instaladas, câmera 0, portas seriais disponíveis e porta 8765 livre
-python testes_serial.py      # REPL para mandar comandos ao ESP32 (porta fixa no topo do arquivo: PORT = "COM8")
+python testes_serial.py      # REPL para mandar comandos ao ESP32 (porta e baud do config.json)
 ```
 
 Os comandos aceitos estão em [`firmware/README.md`](../firmware/README.md). Com firmware anterior à continuação (tag `tese-final`), evite `PING`: ele é lido como 0 e move o servo para 0°.
