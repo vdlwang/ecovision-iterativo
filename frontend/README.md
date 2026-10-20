@@ -32,3 +32,5 @@ Veja [Limitações conhecidas](../README.md#limitações-conhecidas) no README p
 ## Troubleshooting
 
 **"Backend Offline":** confira se o backend está rodando e se a porta 8765 está livre (`python backend/test_connection.py`).
+
+**Configurações só com o backend rodando:** os painéis Modelo e Cancelas leem e gravam o `backend/config.json` pelo backend. Offline, mostram os valores padrão e o botão "Salvar" fica desabilitado.

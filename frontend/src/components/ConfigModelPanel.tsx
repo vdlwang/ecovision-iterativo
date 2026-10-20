@@ -34,7 +34,7 @@ const modeloDoCaminho = (caminho: string) => {
 };
 
 export function ConfigModelPanel() {
-  const [confidence, setConfidence] = useState(0.4);
+  const [confidence, setConfidence] = useState(0.35);  // mesmo padrão de load_config() no backend
   const [modelType, setModelType] = useState('best');
   const [modelPath, setModelPath] = useState('../yolo_models/taco/best.pt');
   const [serialPort, setSerialPort] = useState('COM8');
@@ -87,12 +87,7 @@ export function ConfigModelPanel() {
     if (send(config)) {
       toast.success('Configuração salva! Reinicie o backend para aplicar.');
     } else {
-      try {
-        localStorage.setItem('ecovision_config_model', JSON.stringify(config));
-        toast.success('Configuração salva localmente! Inicie o backend para aplicar.');
-      } catch (error) {
-        toast.error('Erro ao salvar');
-      }
+      toast.error('Backend desconectado: a configuração não foi salva.');
     }
   };
 
@@ -252,6 +247,7 @@ export function ConfigModelPanel() {
 
           <Button
             onClick={saveConfiguration}
+            disabled={!connected}
             className="w-full bg-green-600 hover:bg-green-700 text-white"
           >
             <Save className="w-4 h-4 mr-2" />
@@ -259,7 +255,9 @@ export function ConfigModelPanel() {
           </Button>
 
           <p className="text-neutral-500 text-xs text-center">
-            Reinicie o backend após salvar para aplicar as mudanças
+            {connected
+              ? 'Reinicie o backend após salvar para aplicar as mudanças'
+              : 'Backend offline: os valores acima são os padrões, não os do config.json. Inicie o backend para carregar e salvar.'}
           </p>
         </div>
       </div>

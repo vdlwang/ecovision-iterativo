@@ -77,12 +77,7 @@ export function ConfigGatesPanel() {
     if (send(config)) {
       toast.success('Configuração salva! Os ângulos já estão valendo.');
     } else {
-      try {
-        localStorage.setItem('ecovision_config_gates', JSON.stringify(config));
-        toast.success('Configuração salva localmente! Inicie o backend para aplicar.');
-      } catch (error) {
-        toast.error('Erro ao salvar');
-      }
+      toast.error('Backend desconectado: a configuração não foi salva.');
     }
   };
 
@@ -156,6 +151,7 @@ export function ConfigGatesPanel() {
 
           <Button
             onClick={saveConfiguration}
+            disabled={!connected}
             className="w-full bg-green-600 hover:bg-green-700 text-white"
           >
             <Save className="w-4 h-4 mr-2" />
@@ -163,7 +159,9 @@ export function ConfigGatesPanel() {
           </Button>
 
           <p className="text-neutral-500 text-xs text-center">
-            Os ângulos passam a valer assim que a configuração é salva
+            {connected
+              ? 'Os ângulos passam a valer assim que a configuração é salva'
+              : 'Backend offline: os valores acima são os padrões, não os do config.json. Inicie o backend para carregar e salvar.'}
           </p>
         </div>
       </div>
