@@ -377,13 +377,10 @@ def process_yolo_stream():
         
         state.current_detections = detections
         
-        # Finaliza processamento
+        # Finaliza processamento (o motor fica como o usuário deixou)
         if state.processing:
             elapsed_proc = time.time() - state.processing_started_at
             if elapsed_proc >= config['servo_actuation_seconds']:
-                if not state.motor_running:
-                    motor_on(ser)
-                    state.motor_running = True
                 state.processing = False
         
         # Desenha bounding boxes no frame
