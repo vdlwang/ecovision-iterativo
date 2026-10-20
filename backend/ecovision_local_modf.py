@@ -122,8 +122,7 @@ taco_to_material = {
     "disposable food container": PLASTIC,
     "foam food container": PLASTIC,
     "other plastic container": PLASTIC,
-    "plastic glooves": PLASTIC,
-    "plastic gloves": PLASTIC,       # por segurança
+    "plastic gloves": PLASTIC,
     "plastic utensils": PLASTIC,
     "squeezable tube": PLASTIC,
     "plastic straw": PLASTIC,
@@ -135,6 +134,7 @@ taco_to_material = {
     "shoe": OTHER,
     "unlabeled litter": OTHER,
     "cigarette": OTHER,
+    "carded blister pack": OTHER,    # cartão + bolha plástica: material misto
 }
 
 def map_taco_to_material(class_name: str) -> str:
