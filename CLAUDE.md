@@ -31,7 +31,7 @@ python backend/testes_serial.py            # interactive REPL to the ESP32
 cd firmware && pio run -t upload           # PlatformIO firmware
 ```
 
-`backend/config.json` holds serial port (default `COM8`, the team developed on Windows; use `/dev/ttyUSB0` on Linux), camera index, `model_path`, confidence, ROI, `class_to_angle`, timings. It is tracked in git, and the frontend overwrites it on "Salvar" (including a stray `"type": "save_config"` key), so check its diff before committing. A relative `model_path` is resolved from `backend/`. With no serial port the backend keeps running in demo mode.
+`backend/config.json` holds serial port (default `COM8`, the team developed on Windows; use `/dev/ttyUSB0` on Linux), camera index, `model_path`, confidence, ROI, `class_to_angle`, timings. It is gitignored (local per machine); when missing, `load_config()` writes the defaults, which hold the thesis values. The frontend overwrites it on "Salvar" (including a stray `"type": "save_config"` key). A relative `model_path` is resolved from `backend/`. With no serial port the backend keeps running in demo mode.
 
 ## Architecture
 

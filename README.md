@@ -58,7 +58,7 @@ cd firmware && pio run -t upload && cd ..
 
 ## Execução
 
-Ajuste `serial_port` em `backend/config.json` (`COM8` por padrão; no Linux, algo como `/dev/ttyUSB0`). Os demais campos estão em [`backend/README.md`](backend/README.md).
+Ajuste `serial_port` em `backend/config.json` (`COM8` por padrão; no Linux, algo como `/dev/ttyUSB0`). O arquivo não é versionado: é criado com os valores padrão na primeira execução do backend. Os demais campos estão em [`backend/README.md`](backend/README.md).
 
 ```bash
 ./run.sh                                  # Windows: run.bat

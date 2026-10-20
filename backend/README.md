@@ -16,12 +16,12 @@ O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o bac
 
 ## `config.json`
 
-Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão. O frontend também grava neste arquivo ao clicar em "Salvar".
+Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão definidos em `load_config()`. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar".
 
 | Campo | Uso |
 |-------|-----|
 | `serial_port`, `baud_rate` | Porta do ESP32 (`COM8` / `/dev/ttyUSB0`) e velocidade (115200) |
-| `camera_index` | Índice da webcam no OpenCV |
+| `camera_index` | Índice da webcam no OpenCV, ou URL de um stream (ex.: `http://<ip>:8080/video` do app IP Webcam; a página `.html` do app não serve) |
 | `model_path` | Pesos do YOLO. Caminho relativo é resolvido a partir de `backend/`. Padrão: `../yolo_models/taco/best.pt` (veja [`yolo_models/README.md`](../yolo_models/README.md)) |
 | `confidence` | Confiança mínima do YOLO, aplicada só na inicialização |
 | `roi_y_min`, `roi_y_max` | Faixa horizontal do quadro (fração da altura) em que o centro do objeto dispara o servo |

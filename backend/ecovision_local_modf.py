@@ -33,7 +33,7 @@ def load_config():
         "baud_rate": 115200,
         "camera_index": 0,
         "model_path": "../yolo_models/taco/best.pt",
-        "confidence": 0.45,
+        "confidence": 0.35,
         "roi_y_min": 0.45,
         "roi_y_max": 0.55,
         "class_to_angle": {
@@ -42,7 +42,7 @@ def load_config():
             "glass": 130,
             "paper": 110
         },
-        "servo_actuation_seconds": 6.0
+        "servo_actuation_seconds": 5.0
         # detection_cooldown agora é fixo no código (DETECTION_COOLDOWN)
     }
     
