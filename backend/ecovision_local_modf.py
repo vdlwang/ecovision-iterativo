@@ -161,12 +161,10 @@ SERVER_LOOP: asyncio.AbstractEventLoop | None = None
 # ==== Serial (ESP32) ====
 def send_line(ser, msg):
     """Envia comando via serial"""
-    print(f"send_line")
     if ser is None:
         print(f"[DEMO] Serial indisponível; comando ignorado: {msg.strip()}")
         return False
     try:
-        print(msg)
         if not msg.endswith("\n"):
             msg += "\n"
         ser.write(msg.encode("utf-8"))
@@ -192,12 +190,9 @@ def read_reply(ser, timeout=1.5):
 
 def motor_on(ser):
     """Liga o motor da esteira"""
-    print(f"motor_on chamado com ser:{ser}" )
     if send_line(ser, "MOTOR ON"):
-        print("MOTOR ON enviado")
         r = read_reply(ser)
         if r:
-            print("Motor ligado")
             print(f"ESP32: {r}")
 
 def motor_off(ser):
@@ -261,7 +256,6 @@ async def websocket_handler(websocket):
 
 async def broadcast_frame(frame_data):
     """Envia frame para todos os clientes conectados"""
-    print("broadcast")
     if state.websocket_clients:
         message = json.dumps(frame_data)
         await asyncio.gather(
@@ -272,7 +266,6 @@ async def broadcast_frame(frame_data):
 # ==== YOLO Processing ====
 def process_yolo_stream():
     """Thread principal: YOLO + Serial + WebSocket broadcast"""
-    print("yolo_stream")
     # Conectar serial
     try:
         ser = serial.Serial(config['serial_port'], config['baud_rate'], timeout=1)
@@ -331,7 +324,6 @@ def process_yolo_stream():
             names = result.names
             boxes = result.boxes
             cls_ids = boxes.cls.cpu().numpy().astype(int)
-            print(f"cls_ids: {cls_ids}")
             confs = boxes.conf.cpu().numpy()
             xyxy = boxes.xyxy.cpu().numpy()
             
@@ -356,7 +348,6 @@ def process_yolo_stream():
                 
                 # Verifica se esse material tem ângulo configurado
                 if material not in config['class_to_angle']:
-                    print("continuou pq nao achou material listado")
                     continue
                 
                 # Calcula centro Y normalizado
@@ -378,10 +369,6 @@ def process_yolo_stream():
                         state.processing = True
                         state.processing_started_at = now
                         state.last_detection_ts = now
-                    print("detecção dentro da ROI")
-                print("detecção fora da ROI")
-        else:
-            print("Nenhuma detecção no frame atual.")
         
         state.current_detections = detections
         
@@ -452,7 +439,6 @@ async def main():
     # Inicia WebSocket server
     async with websockets.serve(websocket_handler, "localhost", 8765):
         print("✓ WebSocket server rodando!")
-        print("\nAtalhos: (o)=Motor ON  (p)=Motor OFF  (q)=Sair\n")
         await asyncio.Future()  # Roda forever
 
 if __name__ == "__main__":
