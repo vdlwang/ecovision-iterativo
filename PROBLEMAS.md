@@ -25,7 +25,7 @@ Os itens com ❓ são dúvidas em aberto (consolidadas no fim).
 - Esse firmware liga e desliga pinos digitais (16/17/18), o que serve para relé ou solenoide, não para servo (servo precisa de PWM).
 - Na prática, rodar `model_2.py` com o `.ino` do repo resulta em `ERR comando` para tudo.
 - ✅ **Resolvido pela monografia:** o hardware real é 1 servo MG996R + ponte H L298N + 4 motores DC, o que corresponde ao protocolo dos `legado/scripts/`. Portanto o middleware e o `esp32_cancela.ino` estão **obsoletos** e poderiam ser removidos ou marcados como tal.
-- ✅ **Resolvido pela versão final:** o firmware de servo/motor está em [`firmware/`](firmware/) e entende `MOTOR ON`, `MOTOR OFF`, `SERVO <n>` e `<n>`. `PING` não é reconhecido e move o servo para 0° (veja [`firmware/README.md`](firmware/README.md)).
+- ✅ **Resolvido pela versão final:** o firmware de servo/motor está em [`firmware/`](firmware/) e entende `MOTOR ON`, `MOTOR OFF`, `SERVO <n>` e `<n>`. `PING` não era reconhecido e movia o servo para 0°; na continuação, responde `PONG` (veja [`firmware/README.md`](firmware/README.md)).
 
 ### E2. O mapeamento de classes por substring não cobre os materiais do projeto
 

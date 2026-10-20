@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
 
-#define LED_PIN   2
+#define LED_PIN   2   // LED da placa: aceso = motor ligado; pisca enquanto o servo segura a posição
 #define PINO_IN1  22
 #define PINO_IN2  23
 #define SERVO_PIN 32
@@ -30,10 +30,25 @@ void motorControl(void *pvParameters) {
   }
 }
 
+// Enfileira o ângulo se o texto for um inteiro de 0 a 180 (sem isso, toInt()
+// devolve 0 para qualquer texto e o servo iria para 0°)
+bool enfileiraAngulo(const String &texto) {
+  if (texto.length() == 0 || texto.length() > 3) return false;
+  for (unsigned int i = 0; i < texto.length(); i++) {
+    if (!isDigit(texto[i])) return false;
+  }
+  int ang = texto.toInt();
+  if (ang > 180) return false;
+  if (xQueueSend(qServoAngles, &ang, 0) != pdTRUE) {
+    Serial.println("ERR: fila do servo cheia.");
+  }
+  return true;
+}
+
 // ======== ÚNICA leitora da Serial ========
 void serialTask(void *pvParameters) {
   String line;
-  Serial.println("Comandos: <angulo 0..180> | SERVO <angulo> | MOTOR ON | MOTOR OFF");
+  Serial.println("Comandos: <angulo 0..180> | SERVO <angulo> | MOTOR ON | MOTOR OFF | PING");
   for (;;) {
     while (Serial.available() > 0) {
       char c = (char)Serial.read();
@@ -45,25 +60,24 @@ void serialTask(void *pvParameters) {
 
           if (up == "MOTOR ON") {
             motors_enabled = true;
+            digitalWrite(LED_PIN, HIGH);
             Serial.println("OK MOTOR ON");
           } else if (up == "MOTOR OFF") {
             motors_enabled = false;
             // garante OFF imediato
             analogWrite(PINO_IN1, 0);
             analogWrite(PINO_IN2, 0);
+            digitalWrite(LED_PIN, LOW);
             Serial.println("OK MOTOR OFF");
+          } else if (up == "PING") {
+            Serial.println("PONG");
           } else if (up.startsWith("SERVO ")) {
-            int sp = up.indexOf(' ');
-            int ang = up.substring(sp + 1).toInt();
-            xQueueSend(qServoAngles, &ang, 0);
-          } else {
-            // tenta como número puro
-            int ang = up.toInt();
-            if (ang >= 0 && ang <= 180) {
-              xQueueSend(qServoAngles, &ang, 0);
-            } else {
-              Serial.println("ERR: comando invalido.");
-            }
+            String arg = up.substring(6);
+            arg.trim();
+            if (!enfileiraAngulo(arg)) Serial.println("ERR: angulo invalido (0..180).");
+          } else if (!enfileiraAngulo(up)) {
+            // número puro é o mesmo que SERVO <n>
+            Serial.println("ERR: comando invalido.");
           }
         }
         line = "";
@@ -84,7 +98,14 @@ void servoControl(void *pvParameters) {
       if (angle > 180) angle = 175;
       motor.write(angle);
       Serial.printf("Servo movido para %d graus\n", angle);
-      delay(5000);        // mantém posição por 5s
+      // mantém posição por 5 s com o LED piscando
+      bool aceso = false;
+      for (int i = 0; i < 25; i++) {
+        aceso = !aceso;
+        digitalWrite(LED_PIN, aceso ? HIGH : LOW);
+        vTaskDelay(pdMS_TO_TICKS(200));
+      }
+      digitalWrite(LED_PIN, motors_enabled ? HIGH : LOW);
       motor.write(175);   // retorna para 175
     }
   }
@@ -101,6 +122,8 @@ void setup() {
   ESP32PWM::allocateTimer(3);
   motor.setPeriodHertz(50);
   motor.attach(SERVO_PIN, 500, 2400);
+  motor.write(175);   // posição de repouso, a mesma para onde o servo volta
+  digitalWrite(LED_PIN, LOW);
 
   Serial.begin(115200);
   Serial.println("ESP32 pronto.");

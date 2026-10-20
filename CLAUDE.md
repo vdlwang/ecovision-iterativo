@@ -41,7 +41,7 @@ cd firmware && pio run -t upload           # PlatformIO firmware
 
 **Frontend** (`frontend/`): React 18 + Vite, exported from Figma. Components import versioned specifiers (`lucide-react@0.487.0`, `sonner@2.0.3`), resolved by the aliases in `frontend/vite.config.ts`; keep them. `frontend/src/index.css` is precompiled Tailwind. Login is a mock (localStorage flag). Panels: `MonitorPanel`, `ConfigGatesPanel` (angles per material), `ConfigModelPanel`, all sharing one socket through `hooks/useStableWebSocket.ts`.
 
-**Firmware** (`firmware/src/main.cpp`, PlatformIO, `ESP32Servo`): servo on GPIO32, L298N IN1=22 / IN2=23, 115200 baud. Commands: `MOTOR ON`, `MOTOR OFF`, `SERVO <n>`, bare `<n>`. Angles go into an 8-slot FreeRTOS queue; each is held 5 s and the servo returns to 175°. Motor is fixed PWM 255 on IN1, starts off.
+**Firmware** (`firmware/src/main.cpp`, PlatformIO, `ESP32Servo`): servo on GPIO32, L298N IN1=22 / IN2=23, 115200 baud. Commands: `MOTOR ON`, `MOTOR OFF`, `SERVO <n>`, bare `<n>`, `PING` (→ `PONG`); anything else, or an angle outside 0..180, gets `ERR: ...` and does not move the servo. Angles go into an 8-slot FreeRTOS queue; each is held 5 s and the servo returns to 175° (also its boot position). Motor is fixed PWM 255 on IN1, starts off. The board LED (GPIO2) is on while the motor runs and blinks during each servo hold.
 
 **Models** (`yolo_models/taco/`): `best.pt` is the default (YOLOv8s fine-tuned from `150ep_best.pt` on the team's photos; 61 classes = 60 TACO + `Background`). `50ep_best`, `97ep_best`, `150ep_best` are earlier fine-tunes. `yolov8n.pt`/`yolov8m.pt` are the original TACO weights renamed; `yolov8s.pt` is the stock **COCO** checkpoint (80 classes), not TACO. The original TACO YOLOv8s lives in `legado/yolo_models/taco/yolov8s_100epochs-best.pt`. Training scripts and the train/val split are not in the repo.
 
@@ -53,7 +53,6 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 - `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `yolov8s.pt` is the COCO model, `n`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
 - Serial is used from both the YOLO thread and the asyncio handler without a lock, and `read_reply` blocks the event loop.
-- In the firmware, any non-numeric command (e.g. `PING`) parses as 0 and moves the servo to 0°.
 - The queue and fixed 5 s hold are not tied to object position on a moving belt, so actuation drifts.
 
 ## Documentation layout

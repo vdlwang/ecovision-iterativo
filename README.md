@@ -81,7 +81,6 @@ Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 - **O slider de confiança não tem efeito** com o backend rodando; a confiança só muda ao reiniciar.
 - **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Objetos que chegam nesse intervalo são ignorados.
 - **A serial não tem trava:** a thread do YOLO e o handler do WebSocket escrevem na mesma porta sem lock, e a leitura da resposta bloqueia o loop do WebSocket.
-- **No firmware, qualquer comando não numérico** (por exemplo, `PING` no `testes_serial.py`) é lido como 0 e move o servo para 0°.
 - **O login é simulado:** não há autenticação real.
 
 ## Licença

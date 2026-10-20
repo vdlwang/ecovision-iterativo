@@ -57,7 +57,7 @@ python test_connection.py    # bibliotecas instaladas, câmera 0, portas seriais
 python testes_serial.py      # REPL para mandar comandos ao ESP32 (porta fixa no topo do arquivo: PORT = "COM8")
 ```
 
-Em `testes_serial.py`, evite `PING`: o firmware atual interpreta qualquer comando não numérico como 0 e move o servo para 0°. Os comandos aceitos estão em [`firmware/README.md`](../firmware/README.md).
+Os comandos aceitos estão em [`firmware/README.md`](../firmware/README.md). Com firmware anterior à continuação (tag `tese-final`), evite `PING`: ele é lido como 0 e move o servo para 0°.
 
 ## Troubleshooting
 
