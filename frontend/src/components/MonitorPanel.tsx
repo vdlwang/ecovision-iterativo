@@ -1,10 +1,8 @@
 import { useRef, useState } from 'react';
 import { Card } from './ui/card';
-import { Label } from './ui/label';
-import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Play, Pause, RotateCw, Menu } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
 
 interface Detection {
@@ -21,7 +19,6 @@ interface FrameData {
 }
 
 export function MonitorPanel() {
-  const [confidence, setConfidence] = useState(0.4);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [fps, setFps] = useState(0);
   const [motorRunning, setMotorRunning] = useState(true);
@@ -76,14 +73,6 @@ export function MonitorPanel() {
 
   const sendCommand = (command: string) => {
     send({ command });
-  };
-
-  const updateConfidence = (value: number) => {
-    setConfidence(value);
-    send({
-      type: 'config',
-      confidence: value
-    });
   };
 
   const materialIcons: Record<string, string> = {

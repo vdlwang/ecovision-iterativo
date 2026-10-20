@@ -1,4 +1,4 @@
-import { Camera, Settings, Recycle, Menu, X, Sliders, LogOut, User } from 'lucide-react';
+import { Camera, Settings, Recycle, Menu, X, Sliders, LogOut } from 'lucide-react';
 import { Button } from './ui/button';
 
 type Panel = 'monitor' | 'gates' | 'model';
