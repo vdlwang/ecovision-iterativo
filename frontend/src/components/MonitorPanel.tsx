@@ -141,7 +141,7 @@ export function MonitorPanel() {
                   <div className="text-center">
                     <div className="text-6xl mb-4">📹</div>
                     <p className="text-neutral-500 mb-2">Aguardando conexão...</p>
-                    <p className="text-neutral-600 text-sm">Execute: python backend/ecovision_local.py</p>
+                    <p className="text-neutral-600 text-sm">Execute: python backend/ecovision_local_modf.py</p>
                   </div>
                 </div>
               )}

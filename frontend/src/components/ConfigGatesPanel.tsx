@@ -60,7 +60,7 @@ export function ConfigGatesPanel() {
     if (send({ command: angle.toString() })) {
       toast.success(`Testando ${materialName}: servo → ${angle}°`);
     } else {
-      toast.error('Backend desconectado. Execute: python backend/ecovision_local.py');
+      toast.error('Backend desconectado. Execute: python backend/ecovision_local_modf.py');
     }
   };
 

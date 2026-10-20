@@ -10,7 +10,7 @@ python ecovision_local_modf.py      # pode ser chamado de qualquer pasta
 ```
 
 - **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). Quando um objeto entra na ROI, envia o ângulo na hora e ignora novas detecções até passar `servo_actuation_seconds`. O intervalo mínimo entre disparos é fixo no código (`DETECTION_COOLDOWN = 1.5` s).
-- `ecovision_local.py` é a variante anterior: enfileira os materiais detectados e os envia um a um, usando `detection_cooldown` do `config.json`.
+- A variante anterior, `ecovision_local.py`, enfileirava os materiais detectados e os enviava um a um, usando `detection_cooldown`. Foi removida; está na tag `tese-final` (`git show tese-final:backend/ecovision_local.py`).
 
 O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o backend segue em modo demonstração: detecta e transmite, mas não aciona o ESP32.
 
@@ -27,7 +27,7 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 | `roi_y_min`, `roi_y_max` | Faixa horizontal do quadro (fração da altura) em que o centro do objeto dispara o servo |
 | `class_to_angle` | Ângulo do servo por material: chaves `plastic`, `metal`, `glass`, `paper` |
 | `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
-| `detection_cooldown` | Usado só por `ecovision_local.py` |
+| `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o intervalo é `DETECTION_COOLDOWN` no código |
 
 `serial_port`, `camera_index`, `model_path` e `confidence` só passam a valer depois de reiniciar o backend. `class_to_angle` e a ROI valem na hora.
 
