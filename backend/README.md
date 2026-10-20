@@ -61,7 +61,7 @@ Os comandos aceitos estão em [`firmware/README.md`](../firmware/README.md). Com
 
 ## Troubleshooting
 
-**"Could not open camera":** tente outro `camera_index` (1, 2...). No Linux, o usuário precisa estar no grupo `video` (`sudo usermod -a -G video $USER`).
+**"Could not open camera" / "Erro no stream da câmera":** o backend continua no ar e tenta reabrir a câmera a cada 5 s (`CAMERA_RETRY_SECONDS`). Tente outro `camera_index` (1, 2...). Com câmera de celular, use a URL do stream de vídeo (ex.: `http://<ip>:8080/video`), não a da página do app. No Linux, o usuário precisa estar no grupo `video` (`sudo usermod -a -G video $USER`).
 
 **Porta serial não abre:**
 - Confira a porta com `python test_connection.py`.

@@ -21,6 +21,9 @@ CONFIG_FILE = BACKEND_DIR / "config.json"
 # Cooldown fixo entre detecções enviadas (em segundos)
 DETECTION_COOLDOWN = 1.5
 
+# Espera antes de reabrir a câmera depois de uma falha (em segundos)
+CAMERA_RETRY_SECONDS = 5
+
 def load_config():
     """Carrega configuração do arquivo JSON"""
     if CONFIG_FILE.exists():
@@ -296,8 +299,20 @@ def process_yolo_stream():
     if not model_path.is_absolute():
         model_path = BACKEND_DIR / model_path
     model = YOLO(str(model_path))
-    
-    # Stream da webcam
+
+    # Se a câmera não abre ou o stream cai (URL errada, Wi-Fi), tenta de novo
+    # em vez de deixar a thread morrer com o servidor no ar e sem vídeo
+    while True:
+        try:
+            run_yolo_stream(model, ser)
+            print(f"Stream da câmera terminou; reabrindo em {CAMERA_RETRY_SECONDS} s")
+        except Exception as e:
+            print(f"Erro no stream da câmera ({config['camera_index']}): {e}")
+            print(f"Nova tentativa em {CAMERA_RETRY_SECONDS} s")
+        time.sleep(CAMERA_RETRY_SECONDS)
+
+def run_yolo_stream(model, ser):
+    """Roda o YOLO sobre a câmera até o stream terminar ou falhar"""
     results_gen = model(
         source=config['camera_index'],
         conf=config['confidence'],
@@ -306,13 +321,15 @@ def process_yolo_stream():
         verbose=False
     )
     
-    print("Stream YOLO iniciado!")
+    print(f"Abrindo câmera: {config['camera_index']}")
     
     frame_count = 0
     start_time = time.time()
     
     for result in results_gen:
         frame_count += 1
+        if frame_count == 1:
+            print("Stream YOLO iniciado!")
         
         # Calcula FPS
         elapsed = time.time() - start_time
@@ -412,12 +429,6 @@ def process_yolo_stream():
             # Ignora erros se não houver clientes ou se o loop ainda não estiver
             # pronto. O pool de conexões do frontend fará nova tentativa.
             pass
-    
-    # Cleanup
-    if ser:
-        motor_off(ser)
-        ser.close()
-    print("Stream YOLO finalizado")
 
 # ==== Main ====
 async def main():
