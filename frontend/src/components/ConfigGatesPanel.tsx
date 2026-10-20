@@ -17,11 +17,12 @@ interface MaterialConfig {
 }
 
 export function ConfigGatesPanel() {
+  // Chaves e ângulos padrão iguais aos de load_config() no backend
   const [materials, setMaterials] = useState<MaterialConfig[]>([
     { name: 'Plástico', key: 'plastic', servoAngle: 50, icon: '🥤', color: 'bg-red-600' },
-    { name: 'Metal', key: 'metal', servoAngle: 90, icon: '🔩', color: 'bg-yellow-600' },
-    { name: 'Vidro', key: 'vidro', servoAngle: 130, icon: '🍷', color: 'bg-blue-600' },
-    { name: 'Papel', key: 'paper', servoAngle: 130, icon: '📄', color: 'bg-blue-600' },
+    { name: 'Metal', key: 'metal', servoAngle: 150, icon: '🔩', color: 'bg-yellow-600' },
+    { name: 'Vidro', key: 'glass', servoAngle: 130, icon: '🍷', color: 'bg-blue-600' },
+    { name: 'Papel', key: 'paper', servoAngle: 110, icon: '📄', color: 'bg-blue-600' },
   ]);
 
   const [connected, setConnected] = useState(false);
@@ -33,7 +34,7 @@ export function ConfigGatesPanel() {
           // Atualizar ângulos com dados do backend
           const newMaterials = materials.map(m => ({
             ...m,
-            servoAngle: data.class_to_angle[m.key] || m.servoAngle
+            servoAngle: data.class_to_angle[m.key] ?? m.servoAngle
           }));
           setMaterials(newMaterials);
         }
@@ -74,7 +75,7 @@ export function ConfigGatesPanel() {
     };
 
     if (send(config)) {
-      toast.success('Configuração salva! Reinicie o backend para aplicar.');
+      toast.success('Configuração salva! Os ângulos já estão valendo.');
     } else {
       try {
         localStorage.setItem('ecovision_config_gates', JSON.stringify(config));
@@ -162,7 +163,7 @@ export function ConfigGatesPanel() {
           </Button>
 
           <p className="text-neutral-500 text-xs text-center">
-            Após salvar, reinicie o backend Python para aplicar as mudanças
+            Os ângulos passam a valer assim que a configuração é salva
           </p>
         </div>
       </div>

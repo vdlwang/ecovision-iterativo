@@ -51,7 +51,6 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 
 - `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `yolov8s.pt` is the COCO model, `n`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
-- `ConfigGatesPanel` uses key `vidro` while the backend maps glass to `glass`, so glass is never actuated once the config is saved from the UI.
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
 - Serial is used from both the YOLO thread and the asyncio handler without a lock, and `read_reply` blocks the event loop.
 - In the firmware, any non-numeric command (e.g. `PING`) parses as 0 and moves the servo to 0°.
