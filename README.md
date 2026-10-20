@@ -77,7 +77,6 @@ Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 
 ## Limitações conhecidas
 
-- **O seletor de modelo da interface carrega pesos errados:** "Small" carrega o `yolov8s.pt`, que é o modelo COCO (não detecta lixo); "Nano" e "Medium" carregam os pesos TACO sem fine-tuning; "Large" e "XLarge" não existem. Para usar o modelo do projeto, mantenha `model_path` em `../yolo_models/taco/best.pt`.
 - **O slider de confiança não tem efeito** com o backend rodando; a confiança só muda ao reiniciar.
 - **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Objetos que chegam nesse intervalo são ignorados.
 - **A serial não tem trava:** a thread do YOLO e o handler do WebSocket escrevem na mesma porta sem lock, e a leitura da resposta bloqueia o loop do WebSocket.

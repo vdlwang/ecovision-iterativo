@@ -16,10 +16,27 @@ import {
   SelectValue,
 } from './ui/select';
 
+// Pesos TACO em yolo_models/taco/ (veja yolo_models/README.md). O yolov8s.pt
+// de lá é o modelo COCO e não detecta lixo, por isso não está na lista.
+const MODELOS = [
+  { value: 'best', label: 'best.pt: YOLOv8s com fine-tuning (padrão)' },
+  { value: '150ep_best', label: '150ep_best.pt: fine-tuning anterior' },
+  { value: '97ep_best', label: '97ep_best.pt: fine-tuning anterior' },
+  { value: '50ep_best', label: '50ep_best.pt: fine-tuning anterior' },
+  { value: 'yolov8n', label: 'yolov8n.pt: TACO, sem fine-tuning' },
+  { value: 'yolov8m', label: 'yolov8m.pt: TACO, sem fine-tuning' },
+];
+
+// Nome do modelo da lista que corresponde ao caminho, ou '' se for outro arquivo
+const modeloDoCaminho = (caminho: string) => {
+  const nome = caminho.split(/[\\/]/).pop()?.replace(/\.pt$/, '') ?? '';
+  return MODELOS.some((m) => m.value === nome) ? nome : '';
+};
+
 export function ConfigModelPanel() {
   const [confidence, setConfidence] = useState(0.4);
-  const [modelType, setModelType] = useState('yolov8s');
-  const [modelPath, setModelPath] = useState('');
+  const [modelType, setModelType] = useState('best');
+  const [modelPath, setModelPath] = useState('../yolo_models/taco/best.pt');
   const [serialPort, setSerialPort] = useState('COM8');
   const [baudRate, setBaudRate] = useState(115200);
   // Índice da webcam ("0") ou URL de stream; guardado como texto
@@ -31,7 +48,10 @@ export function ConfigModelPanel() {
         const data = JSON.parse(event.data);
         if (data.type === 'config') {
           if (data.confidence !== undefined) setConfidence(data.confidence);
-          if (data.model_path) setModelPath(data.model_path);
+          if (data.model_path) {
+            setModelPath(data.model_path);
+            setModelType(modeloDoCaminho(data.model_path));
+          }
           if (data.serial_port) setSerialPort(data.serial_port);
           if (data.baud_rate) setBaudRate(data.baud_rate);
           if (data.camera_index !== undefined) setCameraIndex(String(data.camera_index));
@@ -111,18 +131,16 @@ export function ConfigModelPanel() {
                 </Label>
                 <Select value={modelType} onValueChange={handleModelTypeChange}>
                   <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white">
-                    <SelectValue placeholder="Selecione o modelo" />
+                    <SelectValue placeholder="Outro arquivo (veja o caminho abaixo)" />
                   </SelectTrigger>
                   <SelectContent className="bg-neutral-800 border-neutral-700">
-                    <SelectItem value="yolov8n" className="text-white">YOLOv8 Nano (mais rápido)</SelectItem>
-                    <SelectItem value="yolov8s" className="text-white">YOLOv8 Small (balanceado)</SelectItem>
-                    <SelectItem value="yolov8m" className="text-white">YOLOv8 Medium</SelectItem>
-                    <SelectItem value="yolov8l" className="text-white">YOLOv8 Large</SelectItem>
-                    <SelectItem value="yolov8x" className="text-white">YOLOv8 XLarge (mais preciso)</SelectItem>
+                    {MODELOS.map((m) => (
+                      <SelectItem key={m.value} value={m.value} className="text-white">{m.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-neutral-500 text-xs mt-1">
-                  Modelos maiores são mais precisos mas mais lentos
+                  O best.pt é o modelo do projeto; os demais servem para comparação
                 </p>
               </div>
 
@@ -133,7 +151,10 @@ export function ConfigModelPanel() {
                 <Input
                   id="model-path"
                   value={modelPath}
-                  onChange={(e) => setModelPath(e.target.value)}
+                  onChange={(e) => {
+                    setModelPath(e.target.value);
+                    setModelType(modeloDoCaminho(e.target.value));
+                  }}
                   placeholder="../yolo_models/taco/best.pt"
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />

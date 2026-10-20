@@ -50,7 +50,6 @@ cd firmware && pio run -t upload           # PlatformIO firmware
 These are also listed for users in `README.md` ("Limitações conhecidas") and `frontend/README.md`. Update those when fixing one.
 
 
-- `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `yolov8s.pt` is the COCO model, `n`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
 - Serial is used from both the YOLO thread and the asyncio handler without a lock, and `read_reply` blocks the event loop.
 - The queue and fixed 5 s hold are not tied to object position on a moving belt, so actuation drifts.
