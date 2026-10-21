@@ -6,16 +6,17 @@ type Panel = 'monitor' | 'gates' | 'model';
 interface SidebarProps {
   currentPanel: Panel;
   onPanelChange: (panel: Panel) => void;
+  backendConnected: boolean;
   isOpen: boolean;
   onToggle: () => void;
   onLogout: () => void;
 }
 
-export function Sidebar({ currentPanel, onPanelChange, isOpen, onToggle, onLogout }: SidebarProps) {
+export function Sidebar({ currentPanel, onPanelChange, backendConnected, isOpen, onToggle, onLogout }: SidebarProps) {
   const menuItems = [
-    { id: 'monitor' as Panel, label: 'Monitor', icon: Camera },
-    { id: 'gates' as Panel, label: 'Cancelas de Separação', icon: Settings },
-    { id: 'model' as Panel, label: 'Configuração do Modelo', icon: Sliders },
+    { id: 'monitor' as Panel, label: 'Monitor', icon: Camera, precisaBackend: false },
+    { id: 'gates' as Panel, label: 'Cancelas de Separação', icon: Settings, precisaBackend: true },
+    { id: 'model' as Panel, label: 'Configuração do Modelo', icon: Sliders, precisaBackend: true },
   ];
 
   return (
@@ -65,15 +66,20 @@ export function Sidebar({ currentPanel, onPanelChange, isOpen, onToggle, onLogou
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPanel === item.id;
+              const bloqueado = item.precisaBackend && !backendConnected;
               
               return (
                 <li key={item.id}>
                   <button
                     onClick={() => onPanelChange(item.id)}
+                    disabled={bloqueado}
+                    title={bloqueado ? 'Backend offline' : undefined}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                       isActive
                         ? 'bg-green-600 text-white'
-                        : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+                        : bloqueado
+                          ? 'text-neutral-600'
+                          : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
                     }`}
                   >
                     <Icon className="w-5 h-5 flex-shrink-0" />
