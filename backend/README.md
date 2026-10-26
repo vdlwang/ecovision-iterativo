@@ -23,13 +23,13 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 | `serial_port`, `baud_rate` | Porta do ESP32 (`COM8` / `/dev/ttyUSB0`) e velocidade (115200) |
 | `camera_index` | Índice da webcam no OpenCV, ou URL de um stream (ex.: `http://<ip>:8080/video` do app IP Webcam; a página `.html` do app não serve) |
 | `model_path` | Pesos do YOLO. Caminho relativo é resolvido a partir de `backend/`. Padrão: `../yolo_models/taco/best.pt` (veja [`yolo_models/README.md`](../yolo_models/README.md)) |
-| `confidence` | Confiança mínima do YOLO, aplicada só na inicialização |
+| `confidence` | Confiança mínima das detecções. O YOLO roda com `CONF_MINIMA_MODELO` (0.1) e o filtro é feito a cada quadro, então vale na hora (valores abaixo de 0.1 só depois de reiniciar) |
 | `roi_y_min`, `roi_y_max` | Faixa horizontal do quadro (fração da altura) em que o centro do objeto dispara o servo |
 | `class_to_angle` | Ângulo do servo por material: chaves `plastic`, `metal`, `glass`, `paper` |
 | `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
 | `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o intervalo é `DETECTION_COOLDOWN` no código |
 
-`serial_port`, `camera_index`, `model_path` e `confidence` só passam a valer depois de reiniciar o backend. `class_to_angle` e a ROI valem na hora.
+`serial_port`, `baud_rate`, `camera_index` e `model_path` só passam a valer depois de reiniciar o backend. `confidence`, `class_to_angle` e a ROI valem na hora.
 
 Cada classe TACO detectada é convertida em material pela tabela `taco_to_material` (por exemplo, `drink can` → `metal`, `corrugated carton` → `paper`). Classes fora dos quatro grupos viram `other` e não acionam o servo.
 

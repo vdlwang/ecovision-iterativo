@@ -24,6 +24,10 @@ DETECTION_COOLDOWN = 1.5
 # Espera antes de reabrir a câmera depois de uma falha (em segundos)
 CAMERA_RETRY_SECONDS = 5
 
+# O conf passado ao YOLO fica fixo enquanto o stream roda; por isso o modelo
+# roda com este piso e o filtro por config['confidence'] é feito a cada quadro
+CONF_MINIMA_MODELO = 0.1
+
 def load_config():
     """Carrega configuração do arquivo JSON"""
     if CONFIG_FILE.exists():
@@ -327,7 +331,7 @@ def run_yolo_stream(model):
     """Roda o YOLO sobre a câmera até o stream terminar ou falhar"""
     results_gen = model(
         source=config['camera_index'],
-        conf=config['confidence'],
+        conf=min(CONF_MINIMA_MODELO, config['confidence']),
         show=False,  # Não mostra janela OpenCV
         stream=True,
         verbose=False
@@ -367,11 +371,15 @@ def run_yolo_stream(model):
             xyxy = boxes.xyxy.cpu().numpy()
             
             now = time.time()
+            # Lida a cada quadro: o slider de confiança vale sem reiniciar
+            conf_minima = config['confidence']
             
             for i, cls_id in enumerate(cls_ids):
+                confidence = float(confs[i])
+                if confidence < conf_minima:
+                    continue
                 class_name_raw = names[cls_id]       # nome original
                 class_name = class_name_raw.lower()  # em lowercase
-                confidence = float(confs[i])
                 x1, y1, x2, y2 = xyxy[i]
                 
                 # Descobre o material genérico a partir da classe TACO

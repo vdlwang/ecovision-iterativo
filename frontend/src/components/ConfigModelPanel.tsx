@@ -85,7 +85,7 @@ export function ConfigModelPanel() {
     };
 
     if (send(config)) {
-      toast.success('Configuração salva! Reinicie o backend para aplicar.');
+      toast.success('Configuração salva! A confiança já vale; os demais campos, após reiniciar o backend.');
     } else {
       toast.error('Backend desconectado: a configuração não foi salva.');
     }
@@ -256,7 +256,7 @@ export function ConfigModelPanel() {
 
           <p className="text-neutral-500 text-xs text-center">
             {connected
-              ? 'Reinicie o backend após salvar para aplicar as mudanças'
+              ? 'A confiança vale ao salvar; modelo, câmera e serial só após reiniciar o backend'
               : 'Backend offline: os valores acima são os padrões, não os do config.json. Inicie o backend para carregar e salvar.'}
           </p>
         </div>

@@ -23,11 +23,11 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 **Cancelas de Separação:** ângulo do servo para cada material (Plástico, Metal, Vidro, Papel). "Testar" move o servo para o ângulo escolhido, e "Salvar Configuração" grava `class_to_angle` em `backend/config.json`. Os ângulos passam a valer sem reiniciar o backend.
 
-**Configuração do Modelo:** modelo (os pesos TACO de `yolo_models/taco/`, com o `best.pt` como padrão; veja [`yolo_models/README.md`](../yolo_models/README.md)), confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. Depois é preciso **reiniciar o backend** para valer. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
+**Configuração do Modelo:** modelo (os pesos TACO de `yolo_models/taco/`, com o `best.pt` como padrão; veja [`yolo_models/README.md`](../yolo_models/README.md)), confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. A confiança passa a valer na hora; modelo, câmera, porta serial e baud rate só depois de **reiniciar o backend**. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
 
 ## Problemas conhecidos
 
-Veja [Limitações conhecidas](../README.md#limitações-conhecidas) no README principal. Na interface, o slider de confiança ainda não tem efeito com o backend rodando.
+Veja [Limitações conhecidas](../README.md#limitações-conhecidas) no README principal.
 
 ## Troubleshooting
 
