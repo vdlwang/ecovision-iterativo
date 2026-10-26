@@ -265,16 +265,23 @@ async def websocket_handler(websocket):
         pass
     finally:
         state.websocket_clients.discard(websocket)
+        envios_pendentes.pop(websocket, None)
         print(f"Cliente WebSocket desconectado. Total: {len(state.websocket_clients)}")
 
-async def broadcast_frame(frame_data):
-    """Envia frame para todos os clientes conectados"""
-    if state.websocket_clients:
-        message = json.dumps(frame_data)
-        await asyncio.gather(
-            *[client.send(message) for client in state.websocket_clients],
-            return_exceptions=True
-        )
+# Envio em andamento por cliente. Um cliente lento perde quadros em vez de
+# acumular envios no loop, e não atrasa os outros.
+envios_pendentes = {}
+
+def broadcast_frame(message):
+    """Envia o quadro a cada cliente que já recebeu o anterior (roda no loop do WebSocket)"""
+    for client in state.websocket_clients:
+        envio = envios_pendentes.get(client)
+        if envio is not None and not envio.done():
+            continue
+        envio = asyncio.ensure_future(client.send(message))
+        # Conexão fechada no meio do envio: a saída do cliente é tratada no handler
+        envio.add_done_callback(lambda t: t.cancelled() or t.exception())
+        envios_pendentes[client] = envio
 
 # ==== YOLO Processing ====
 def process_yolo_stream():
@@ -410,6 +417,10 @@ def run_yolo_stream(model):
             if elapsed_proc >= config['servo_actuation_seconds']:
                 state.processing = False
         
+        # Sem clientes, não há por que desenhar e codificar o quadro
+        if not (SERVER_LOOP and SERVER_LOOP.is_running() and state.websocket_clients):
+            continue
+        
         # Desenha bounding boxes no frame
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
@@ -435,11 +446,9 @@ def run_yolo_stream(model):
         
         # Envia para WebSocket (asyncio)
         try:
-            if SERVER_LOOP and SERVER_LOOP.is_running():
-                asyncio.run_coroutine_threadsafe(broadcast_frame(frame_data), SERVER_LOOP)
-        except Exception:
-            # Ignora erros se não houver clientes ou se o loop ainda não estiver
-            # pronto. O pool de conexões do frontend fará nova tentativa.
+            SERVER_LOOP.call_soon_threadsafe(broadcast_frame, json.dumps(frame_data))
+        except RuntimeError:
+            # Loop encerrando. O pool de conexões do frontend fará nova tentativa.
             pass
 
 # ==== Main ====
