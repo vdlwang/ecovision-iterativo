@@ -14,12 +14,11 @@ import websockets
 from pathlib import Path
 from threading import Thread, Lock
 
+from deteccao import deteccoes_do_quadro, angulo_a_disparar
+
 # ==== Configuração ====
 BACKEND_DIR = Path(__file__).parent
 CONFIG_FILE = BACKEND_DIR / "config.json"
-
-# Cooldown fixo entre detecções enviadas (em segundos)
-DETECTION_COOLDOWN = 1.5
 
 # Espera antes de reabrir a câmera depois de uma falha (em segundos)
 CAMERA_RETRY_SECONDS = 5
@@ -60,94 +59,6 @@ def load_config():
     return default_config
 
 config = load_config()
-
-# ==== Mapeamento TACO -> material genérico ====
-PLASTIC = "plastic"
-METAL   = "metal"
-GLASS   = "glass"
-PAPER   = "paper"
-OTHER   = "other"  # opcional
-
-# Dicionário: nome da classe TACO (lowercase) -> grupo de material
-taco_to_material = {
-    # --- Metal ---
-    "aluminium foil": METAL,
-    "battery": METAL,
-    "aluminium blister pack": METAL,
-    "metal bottle cap": METAL,
-    "food can": METAL,
-    "aerosol": METAL,
-    "drink can": METAL,
-    "metal lid": METAL,
-    "scrap metal": METAL,
-    "pop tab": METAL,
-
-    # --- Glass ---
-    "glass bottle": GLASS,
-    "broken glass": GLASS,
-    "glass cup": GLASS,
-    "glass jar": GLASS,
-
-    # --- Paper / papel ---
-    "toilet tube": PAPER,
-    "other carton": PAPER,
-    "egg carton": PAPER,
-    "drink carton": PAPER,          # Tetrapak: aqui tratado como papel
-    "corrugated carton": PAPER,
-    "meal carton": PAPER,
-    "pizza box": PAPER,
-    "paper cup": PAPER,
-    "magazine paper": PAPER,
-    "tissues": PAPER,
-    "wrapping paper": PAPER,
-    "normal paper": PAPER,
-    "paper bag": PAPER,
-    "plastified paper bag": PAPER,
-    "paper straw": PAPER,
-
-    # --- Plastic / plástico ---
-    "other plastic bottle": PLASTIC,
-    "clear plastic bottle": PLASTIC,
-    "plastic bottle cap": PLASTIC,
-    "disposable plastic cup": PLASTIC,
-    "foam cup": PLASTIC,             # isopor
-    "other plastic cup": PLASTIC,
-    "plastic lid": PLASTIC,
-    "other plastic": PLASTIC,
-    "plastic film": PLASTIC,
-    "six pack rings": PLASTIC,
-    "garbage bag": PLASTIC,
-    "other plastic wrapper": PLASTIC,
-    "single-use carrier bag": PLASTIC,
-    "polypropylene bag": PLASTIC,
-    "crisp packet": PLASTIC,         # embalagem metalizada
-    "spread tub": PLASTIC,
-    "tupperware": PLASTIC,
-    "disposable food container": PLASTIC,
-    "foam food container": PLASTIC,
-    "other plastic container": PLASTIC,
-    "plastic gloves": PLASTIC,
-    "plastic utensils": PLASTIC,
-    "squeezable tube": PLASTIC,
-    "plastic straw": PLASTIC,
-    "styrofoam piece": PLASTIC,
-    "rope & strings": PLASTIC,       # assumindo corda sintética
-
-    # --- Outros / não mapeados nos 4 grupos ---
-    "food waste": OTHER,
-    "shoe": OTHER,
-    "unlabeled litter": OTHER,
-    "cigarette": OTHER,
-    "carded blister pack": OTHER,    # cartão + bolha plástica: material misto
-}
-
-def map_taco_to_material(class_name: str) -> str:
-    """
-    Recebe o nome da classe TACO (como vem do YOLO) e
-    devolve 'plastic', 'metal', 'glass', 'paper' ou 'other'.
-    """
-    key = class_name.strip().lower()
-    return taco_to_material.get(key, OTHER)
 
 # ==== Estado Global ====
 class SystemState:
@@ -364,58 +275,29 @@ def run_yolo_stream(model):
         # Processa detecções
         detections = []
         if result.boxes is not None and result.boxes.cls is not None:
-            names = result.names
             boxes = result.boxes
-            cls_ids = boxes.cls.cpu().numpy().astype(int)
-            confs = boxes.conf.cpu().numpy()
-            xyxy = boxes.xyxy.cpu().numpy()
+            # config['confidence'] lida a cada quadro: o slider vale sem reiniciar
+            detections = deteccoes_do_quadro(
+                result.names,
+                boxes.cls.cpu().numpy().astype(int),
+                boxes.conf.cpu().numpy(),
+                boxes.xyxy.cpu().numpy(),
+                config['confidence'],
+            )
+        
+        # Dispara o servo para a primeira detecção que cumpre as condições
+        now = time.time()
+        for det in detections:
+            angle = angulo_a_disparar(det, H, config, state.processing,
+                                      now - state.last_detection_ts)
+            if angle is None:
+                continue
+            print(f"→ Disparando imediatamente: {det['class']} → {det['material']} → {angle}°")
+            send_angle(state.serial_port, angle)
             
-            now = time.time()
-            # Lida a cada quadro: o slider de confiança vale sem reiniciar
-            conf_minima = config['confidence']
-            
-            for i, cls_id in enumerate(cls_ids):
-                confidence = float(confs[i])
-                if confidence < conf_minima:
-                    continue
-                class_name_raw = names[cls_id]       # nome original
-                class_name = class_name_raw.lower()  # em lowercase
-                x1, y1, x2, y2 = xyxy[i]
-                
-                # Descobre o material genérico a partir da classe TACO
-                material = map_taco_to_material(class_name)
-                
-                # Adiciona à lista de detecções (incluindo material)
-                detections.append({
-                    'class': class_name,   # ou class_name_raw se preferir
-                    'material': material,
-                    'confidence': confidence,
-                    'bbox': [float(x1), float(y1), float(x2), float(y2)]
-                })
-                
-                # Verifica se esse material tem ângulo configurado
-                if material not in config['class_to_angle']:
-                    continue
-                
-                # Calcula centro Y normalizado
-                cy = (y1 + y2) / 2.0
-                cy_norm = cy / H
-                
-                # Verifica ROI
-                if config['roi_y_min'] <= cy_norm <= config['roi_y_max']:
-                    # Só dispara se:
-                    # 1) não estamos processando um item agora
-                    # 2) já passou o cooldown desde a última detecção enviada
-                    if (not state.processing) and (now - state.last_detection_ts >= DETECTION_COOLDOWN):
-                        chosen_key = material  # grupo genérico
-                        angle = config['class_to_angle'][chosen_key]
-
-                        print(f"→ Disparando imediatamente: {class_name_raw} → {chosen_key} → {angle}°")
-                        send_angle(state.serial_port, angle)
-
-                        state.processing = True
-                        state.processing_started_at = now
-                        state.last_detection_ts = now
+            state.processing = True
+            state.processing_started_at = now
+            state.last_detection_ts = now
         
         state.current_detections = detections
         
