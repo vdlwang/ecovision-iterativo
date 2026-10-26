@@ -35,7 +35,7 @@ cd firmware && pio run -t upload           # PlatformIO firmware
 
 ## Architecture
 
-**Backend.** The official backend is `backend/ecovision_local_modf.py`, which `run.sh`/`run.bat` launch. It is a single file of functions; only `SystemState` is a class, despite the class diagram in `docs/diagrams/` showing `YOLOPipeline`/`SerialController`/`WebSocketHandler`. A thread runs `model(source=camera, stream=True)` and maps each TACO class name to a material via `taco_to_material`. When a box center falls inside the horizontal ROI band (`roi_y_min`..`roi_y_max`), it sends that material's angle at once, then ignores detections for `servo_actuation_seconds`. The minimum gap between triggers is the hardcoded `DETECTION_COOLDOWN = 1.5`; the config's `detection_cooldown` is ignored. The belt is **not** stopped on detection. Every frame is broadcast over WebSocket as base64 JPEG, together with the detections. The previous variant `ecovision_local.py` (queues materials, uses `detection_cooldown`) was removed; see `git show tese-final:backend/ecovision_local.py`.
+**Backend.** The official backend is `backend/ecovision_local_modf.py`, which `run.sh`/`run.bat` launch. It is a single file of functions; only `SystemState` is a class, despite the class diagram in `docs/diagrams/` showing `YOLOPipeline`/`SerialController`/`WebSocketHandler`. A thread runs `model(source=camera, stream=True)` and maps each TACO class name to a material via `taco_to_material`. When a box center falls inside the horizontal ROI band (`roi_y_min`..`roi_y_max`), it sends that material's angle at once, then ignores detections for `servo_actuation_seconds`. The minimum gap between triggers is the hardcoded `DETECTION_COOLDOWN = 1.5`; the config's `detection_cooldown` is ignored. The belt is **not** stopped on detection. Every frame is broadcast over WebSocket as base64 JPEG, together with the detections. Serial writes go through `serial_lock` in `send_line`; nobody waits for replies, a `read_serial_loop` thread just logs every line from the ESP32 (the firmware answers an angle only when it leaves its queue, so replies can't be matched to commands). The previous variant `ecovision_local.py` (queues materials, uses `detection_cooldown`) was removed; see `git show tese-final:backend/ecovision_local.py`.
 
 **WebSocket protocol** (JSON): client → server `{"command": "MOTOR ON"|"MOTOR OFF"|"<angle>"}`, `{"type": "config", "confidence"}`, `{"type": "get_config"}`, `{"type": "save_config", ...}`. Server → client `{frame, detections[{class, material, confidence, bbox}], fps, motor_running, serial_port}` per frame (`serial_port` is `null` in demo mode), and `{"type": "config", ...config}` in reply to `get_config` (sent only to the requester).
 
@@ -51,7 +51,6 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
-- Serial is used from both the YOLO thread and the asyncio handler without a lock, and `read_reply` blocks the event loop.
 - The queue and fixed 5 s hold are not tied to object position on a moving belt, so actuation drifts.
 
 ## Documentation layout

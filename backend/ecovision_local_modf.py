@@ -12,7 +12,7 @@ import json
 import asyncio
 import websockets
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock
 
 # ==== Configuração ====
 BACKEND_DIR = Path(__file__).parent
@@ -162,6 +162,10 @@ state = SystemState()
 SERVER_LOOP: asyncio.AbstractEventLoop | None = None
 
 # ==== Serial (ESP32) ====
+# A thread do YOLO (ângulos) e o handler do WebSocket (motor, teste de ângulo)
+# escrevem na mesma porta; a trava impede que duas linhas se misturem
+serial_lock = Lock()
+
 def send_line(ser, msg):
     """Envia comando via serial"""
     if ser is None:
@@ -170,8 +174,9 @@ def send_line(ser, msg):
     try:
         if not msg.endswith("\n"):
             msg += "\n"
-        ser.write(msg.encode("utf-8"))
-        ser.flush()
+        with serial_lock:
+            ser.write(msg.encode("utf-8"))
+            ser.flush()
         return True
     except Exception as exc:
         # Quando a serial está ocupada ou inacessível no Windows o pyserial
@@ -182,35 +187,35 @@ def send_line(ser, msg):
         state.serial_port = None
         return False
 
-def read_reply(ser, timeout=1.5):
-    """Lê resposta do ESP32"""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        line = ser.readline().decode("utf-8", errors="ignore").strip()
+def read_serial_loop(ser):
+    """Thread que registra tudo o que o ESP32 envia.
+
+    Ninguém espera resposta depois de mandar um comando: o firmware só
+    responde a um ângulo quando ele sai da fila (até 5 s por item), então a
+    resposta lida logo após um comando podia ser a de outro.
+    """
+    while state.serial_port is ser:
+        try:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+        except Exception as exc:
+            if state.serial_port is ser:
+                print(f"[DEMO] Falha ao ler da serial ({exc}); desativando serial")
+                state.serial_port = None
+            return
         if line:
-            return line
-    return None
+            print(f"ESP32: {line}")
 
 def motor_on(ser):
     """Liga o motor da esteira"""
-    if send_line(ser, "MOTOR ON"):
-        r = read_reply(ser)
-        if r:
-            print(f"ESP32: {r}")
+    send_line(ser, "MOTOR ON")
 
 def motor_off(ser):
     """Desliga o motor da esteira"""
-    if send_line(ser, "MOTOR OFF"):
-        r = read_reply(ser)
-        if r:
-            print(f"ESP32: {r}")
+    send_line(ser, "MOTOR OFF")
 
 def send_angle(ser, angle):
     """Envia ângulo para o servo"""
-    if send_line(ser, str(angle)):
-        r = read_reply(ser)
-        if r:
-            print(f"ESP32: {r}")
+    send_line(ser, str(angle))
 
 # ==== WebSocket Server ====
 async def websocket_handler(websocket):
@@ -282,6 +287,7 @@ def process_yolo_stream():
         ser.reset_output_buffer()
         state.serial_port = ser
         print(f"Serial conectada: {config['serial_port']}")
+        Thread(target=read_serial_loop, args=(ser,), daemon=True).start()
         
         # Liga motor inicial
         motor_on(ser)
@@ -289,7 +295,6 @@ def process_yolo_stream():
     except Exception as e:
         print(f"Erro ao conectar serial: {e}")
         print("Continuando sem serial (modo demonstração)")
-        ser = None
         state.serial_port = None
     
     # Carregar YOLO
@@ -304,14 +309,14 @@ def process_yolo_stream():
     # em vez de deixar a thread morrer com o servidor no ar e sem vídeo
     while True:
         try:
-            run_yolo_stream(model, ser)
+            run_yolo_stream(model)
             print(f"Stream da câmera terminou; reabrindo em {CAMERA_RETRY_SECONDS} s")
         except Exception as e:
             print(f"Erro no stream da câmera ({config['camera_index']}): {e}")
             print(f"Nova tentativa em {CAMERA_RETRY_SECONDS} s")
         time.sleep(CAMERA_RETRY_SECONDS)
 
-def run_yolo_stream(model, ser):
+def run_yolo_stream(model):
     """Roda o YOLO sobre a câmera até o stream terminar ou falhar"""
     results_gen = model(
         source=config['camera_index'],
@@ -391,7 +396,7 @@ def run_yolo_stream(model, ser):
                         angle = config['class_to_angle'][chosen_key]
 
                         print(f"→ Disparando imediatamente: {class_name_raw} → {chosen_key} → {angle}°")
-                        send_angle(ser, angle)
+                        send_angle(state.serial_port, angle)
 
                         state.processing = True
                         state.processing_started_at = now
@@ -466,6 +471,8 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n\nEncerrando EcoVision...")
-        if state.serial_port:
-            motor_off(state.serial_port)
-            state.serial_port.close()
+        ser = state.serial_port
+        if ser:
+            state.serial_port = None  # encerra a thread de leitura
+            motor_off(ser)
+            ser.close()
