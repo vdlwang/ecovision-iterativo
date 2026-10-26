@@ -51,6 +51,15 @@ Do backend para o frontend:
 - Um por quadro: `{"frame": <jpeg base64>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração.
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 
+## Testes automatizados
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests               # de backend/; da raiz: python -m pytest backend/tests
+```
+
+Cobrem só `deteccao.py`: o mapeamento TACO → material (inclusive se toda classe do `best.pt` tem entrada na tabela), o filtro por confiança e a decisão de disparo (ROI, ocupado, cooldown). Não precisam de câmera nem de ESP32. Câmera, serial, WebSocket e frontend continuam sendo testados à mão.
+
 ## Scripts de teste
 
 ```bash
