@@ -1,0 +1,28 @@
+# Classes do anotador automático (nível 2 da taxonomia, monografia 5.3.2).
+# O índice na lista é o id da classe nos .txt; não reordene depois de anotar,
+# só acrescente no fim. Lista inicial: as seis classes TACO que aparecem nas
+# fotos da equipe (legado/database/*/YOLO_dataset).
+#
+#   nome:     nome da classe no data.yaml
+#   prompt:   descrição em inglês enviada ao Grounding DINO
+#   material: classe-pai (nível 1): plastic, metal, glass, paper ou other
+
+classes:
+  - nome: Clear plastic bottle
+    prompt: plastic bottle
+    material: plastic
+  - nome: Plastic bottle cap
+    prompt: plastic bottle cap
+    material: plastic
+  - nome: Drink can
+    prompt: aluminium drink can
+    material: metal
+  - nome: Glass bottle
+    prompt: glass bottle
+    material: glass
+  - nome: Corrugated carton
+    prompt: cardboard box
+    material: paper
+  - nome: Normal paper
+    prompt: sheet of paper
+    material: paper

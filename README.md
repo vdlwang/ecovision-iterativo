@@ -27,6 +27,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Frontend (React + Vite) | `frontend/` | [`frontend/README.md`](frontend/README.md) |
 | Firmware (ESP32, PlatformIO) | `firmware/` | [`firmware/README.md`](firmware/README.md) |
 | Pesos do YOLO | `yolo_models/taco/` | [`yolo_models/README.md`](yolo_models/README.md) |
+| Anotação assistida (Grounding DINO → rótulos YOLO) | `anotacao/` | [`anotacao/README.md`](anotacao/README.md) |
 | Diagramas (PlantUML) | `docs/diagrams/` | |
 | Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md) |
 | Problemas da versão preliminar e observações sobre a monografia | | [`PROBLEMAS.md`](PROBLEMAS.md) |

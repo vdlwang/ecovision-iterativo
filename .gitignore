@@ -10,3 +10,6 @@ legado/scripts/runs
 .claude/worktrees/
 .claude/settings.local.json
 CLAUDE.local.md
+
+# Saída do anotacao/anotar.py (imagens não vão para o repositório)
+anotacoes/
