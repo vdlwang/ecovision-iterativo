@@ -40,7 +40,8 @@ anotacoes/
 ├── data.yaml          # names: {0: Clear plastic bottle, ...}, na ordem de classes.yaml
 ├── images/foto.jpg
 ├── labels/foto.txt    # uma linha por objeto: id cx cy w h, normalizados de 0 a 1
-└── previa/foto.jpg    # só com --previa
+├── previa/foto.jpg    # só com --previa
+└── visualizar.html    # página para conferir as anotações (abaixo)
 ```
 
 Várias execuções podem gravar no mesmo diretório; o script recusa a saída se o `data.yaml` dela tiver outras classes, porque os ids deixariam de bater. Imagem sem nenhum objeto gera `.txt` vazio (fundo, para o YOLO). Se o EXIF da foto pede rotação (fotos de celular), a imagem é gravada já girada, e as caixas valem para ela.
@@ -48,6 +49,18 @@ Várias execuções podem gravar no mesmo diretório; o script recusa a saída s
 O `data.yaml` aponta `train` e `val` para a mesma pasta `images`: a divisão deve ser feita por sessão de captura, nunca por imagem (monografia, seção 5.3.5), e fica para quando houver sessões.
 
 O diretório `anotacoes/` está no `.gitignore`: imagens não vão para o repositório (RNF10).
+
+## Visualização
+
+Ao terminar, o `anotar.py` grava `visualizar.html` no diretório de saída e imprime o endereço. A página abre direto no navegador, sem servidor: lista das imagens com a contagem de objetos à esquerda (em laranja, imagem sem `.txt` ou com linhas inválidas), a imagem com as caixas coloridas por classe e a contagem por classe embaixo. As setas `←`/`→` navegam, as caixas e os nomes podem ser escondidos, e `visualizar.html#3` abre a terceira imagem. A página só mostra; corrigir as anotações fica para a interface de revisão (RF12).
+
+A página lê os `.txt` quando é gerada. Depois de editar algum à mão, ou para ver um diretório anotado por outra ferramenta no mesmo formato, gere de novo:
+
+```bash
+python anotacao/visualizar.py anotacoes
+```
+
+Os `.txt` não guardam a confiança, então ela não aparece na página; para vê-la, use `--previa`.
 
 ## Classes
 

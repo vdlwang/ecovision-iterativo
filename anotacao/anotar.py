@@ -8,6 +8,7 @@ caixas no formato de detecção do YOLO (Ultralytics):
     <saida>/labels/<nome>.txt    uma linha por objeto: id cx cy w h (0..1)
     <saida>/data.yaml            nomes das classes, na ordem de classes.yaml
     <saida>/previa/<nome>.jpg    com --previa: caixas desenhadas, para revisão
+    <saida>/visualizar.html      página para navegar pelas imagens anotadas
 
 As anotações são propostas para um revisor humano, não rótulos finais.
 
@@ -22,6 +23,8 @@ from pathlib import Path
 
 import yaml
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+from visualizar import gerar_pagina
 
 DIR_SCRIPT = Path(__file__).resolve().parent
 MODELO_PADRAO = "IDEA-Research/grounding-dino-tiny"
@@ -286,7 +289,9 @@ def main(argv=None):
         resumo = ", ".join(f"{classes[c]['nome']} {conf:.2f}" for c, conf, _ in deteccoes)
         print(f"{caminho.name}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
 
+    pagina = gerar_pagina(args.saida)
     print(f"Anotações em {args.saida.resolve()}")
+    print(f"Para conferir, abra no navegador: {pagina.resolve().as_uri()}")
 
 
 if __name__ == "__main__":
