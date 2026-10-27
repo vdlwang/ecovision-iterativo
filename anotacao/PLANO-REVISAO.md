@@ -76,14 +76,39 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 
 Marcação "sem pré-anotação" por imagem: o servidor esconde as propostas e o revisor anota do zero. Comparar com as revisadas mede o viés e dá o tempo de anotação manual, que é a linha de base do ganho.
 
+## 6. Escolha do anotador (antes da fase 1)
+
+Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entram também opções que só **reclassificam** as caixas. Custo = esforço para encaixar no `anotar.py` (a classe `Anotador` já isola o modelo).
+
+| Opção | Como entra | Licença | GTX 1650 (4 GB) | Custo | Observações |
+|---|---|---|---|---|---|
+| Grounding DINO tiny/base (atual) | — | Apache 2.0 | Cabe | — | Referência de precisão para rótulos offline |
+| OWLv2 | `transformers`, mesma API; pontuação por texto de classe (dispensa o mapeamento por token) | Apache 2.0 | Cabe | ~½ dia | Concorrente mais direto |
+| YOLO-World / YOLOE | `ultralytics` (`set_classes`) | GPL-3.0 / AGPL-3.0 | Tempo real | ~½ dia | Mais rápidos, menos precisos; o YOLOE treina como YOLO comum e poderia virar o detector da esteira |
+| Grounding DINO + SAM 2 | Caixas do DINO como prompt do SAM | Apache 2.0 | Cabe (SAM 2 pequeno) | ~1 dia | Melhora caixas, não a classe |
+| SAM 3 (texto → máscaras e caixas) | `ultralytics` ≥ 8.3.237 (`SAM3SemanticPredictor`) ou `transformers` | Licença própria da Meta (verificar) | Provavelmente apertado (~850M parâmetros) | ~1–2 dias | Pesos baixados à mão |
+| Florence-2 | `transformers` com `trust_remote_code` | MIT | Cabe | ~1 dia | Sem confiança por caixa: quebra a ordenação por incerteza (RF10) |
+| VLM local (Qwen2.5-VL/Qwen3-VL 3B–7B) | Caixas em JSON na resposta | Apache 2.0 (maioria) | 3B quantizado cabe; 7B não | ~2–3 dias | Lento, sem confiança calibrada; bom para decidir material |
+| APIs (Gemini, DINO-X / Grounding DINO 1.6 Pro) | HTTP | Comercial, por imagem | — | ½–1 dia | Imagens saem da máquina (RNF09/LGPD) |
+| Detector próprio (`best.pt` e retreinos) | `ultralytics` | AGPL-3.0 | Cabe | Baixo | Aprendizado ativo clássico; herda os próprios erros; para os ciclos seguintes |
+
+**Híbrida (hipótese a testar)**: manter as caixas do Grounding DINO e reclassificar cada recorte com SigLIP ou CLIP (`transformers`, Apache 2.0, ~½–1 dia), que compara o recorte com textos como "clear plastic bottle" e "glass bottle". Um VLM pode ser chamado só nos recortes ambíguos.
+
+**Como escolher**: `anotacao/avaliar.py` (~1 dia) calcula o mAP@0,5, por classe e por material, de cada candidato nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
+
+**Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) SAM 2/3 só se as caixas virarem o problema.
+
+Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). Levantamento de 2026-10-27; custos e cabimento na GPU são estimativas, não medidos.
+
 ---
 
 ## Fases
 
-As fases 1–3 já entregam uma ferramenta usável (corrige classe e remove caixas erradas, os erros mais comuns hoje); 4–6 completam os requisitos.
+A fase 0 define o modelo que gera as propostas. As fases 1–3 já entregam uma ferramenta usável (corrige classe e remove caixas erradas, os erros mais comuns hoje); 4–6 completam os requisitos.
 
 | # | Status | Entrega | Verificação |
 |---|---|---|---|
+| 0 | [ ] | Escolha do anotador (seção 6): `avaliar.py`, linha de base com o Grounding DINO, comparação com OWLv2, YOLOE e a híbrida com SigLIP | pytest de `avaliar.py`; tabela de mAP |
 | 1 | [ ] | `anotar.py` grava `propostas/*.json`; `labels/`, `revisadas.txt` e `data.yaml` no formato novo; `visualizar.py` lê as propostas | pytest |
 | 2 | [ ] | `revisar.py`: servidor e API só de leitura; a página atual servida por ele | pytest com o servidor numa thread |
 | 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar | pytest da API; teste manual |
