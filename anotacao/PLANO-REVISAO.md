@@ -1,33 +1,74 @@
-# Plano — plataforma web de revisão das anotações
+# Plano — anotação por voto entre modelos e revisão humana
 
-Branch de origem: `feature/anotacao-assistida` (`3084516`). Requisitos da monografia (`docs/ecovision-iterativo-prelim.pdf`): RF12 (revisar), RF13 (tempo e correções), RF14 (novas classes), RNF08 (usabilidade), seção 5.3.4 (viés de automação).
+Branch de origem: `feature/anotacao-assistida` (`3084516`). Requisitos da monografia (`docs/ecovision-iterativo-prelim.pdf`): RF12 (revisar), RF13 (tempo e correções), RF14 (novas classes), RNF08 (usabilidade), seção 5.3.4 (viés de automação). Fluxo: `docs/diagrams/diagrama_v3.drawio`.
 
 **Status**: `[ ]` pendente · `[x]` feito (com hash) · `[~]` parcial
 
 **Ponto de partida**: o `anotar.py` grava as propostas do Grounding DINO direto em `labels/`, e o `visualizar.py` gera uma página estática (`file://`, só leitura) com as caixas. A ideia é evoluir essa página para uma de revisão, servida por um servidor Python local que lê as propostas e grava as anotações corrigidas.
 
+**Mudança de 2026-10-28**: em vez de um anotador cujas propostas são todas revisadas, três anotadores votam. Se os três concordam (voto 3oo3), a imagem entra no treino sem revisão; se não, vai para a fila de revisão humana. As imagens de teste são sempre revisadas.
+
 ---
 
-## 1. Separar proposta de anotação revisada (decisão prévia)
+## 0. Fluxo (diagrama v3)
+
+```
+esteira → YOLO → banco (imagens + logs) → treino ou teste? (por lote, nunca os dois)
+  treino → 3 anotadores (em lote, no dia seguinte) → voto 3oo3
+             passou     → base de treino (caixas de consenso)
+             não passou → revisão humana → base de treino (caixas corrigidas)
+           base de treino → fine-tuning do YOLO
+  teste  → revisão humana obrigatória → base de teste → avaliação do YOLO (com a base externa)
+```
+
+Diferenças entre o diagrama e este plano:
+
+- O diagrama fala em "3 a 5 modelos" e voto NooN. O plano começa com N = 3 (3oo3); o código aceita N qualquer, mas cada anotador a mais custa uma integração e baixa a taxa de aprovação.
+- No diagrama, o teste vai direto à revisão humana, sem passar pelos anotadores. Pela decisão 5, o teste passa pelos anotadores só para segmentar: o revisor recebe os objetos já delimitados, sem classe, e escolhe a classe de cada um.
+- A base externa e a avaliação do YOLO ficam fora deste plano, que cobre do banco até as duas bases.
+
+## 1. Separar proposta, voto e anotação final (decisão prévia)
 
 Problemas de gravar as propostas em `labels/`:
 
 - O Ultralytics trata imagem sem objetos como fundo: uma imagem não revisada, ou com objetos que o modelo não achou, entraria no treino como negativo falso.
-- Sem guardar a proposta original, não dá para medir a precisão do anotador automático (RF13).
+- Sem guardar a proposta original, não dá para medir a precisão de cada anotador (RF13).
 
 Estrutura proposta:
 
 ```
 anotacoes/
 ├── images/
-├── propostas/<nome>.json   # saída do anotar.py: classe, confiança, caixa (imutável)
-├── labels/<nome>.txt       # só para imagens revisadas, formato YOLO
-├── revisoes/<nome>.json    # registro da revisão: tempos e ação sobre cada caixa
-├── revisadas.txt           # lista de imagens revisadas; data.yaml aponta train para ela
+├── propostas/<anotador>/<nome>.json  # saída de cada anotador: classe, confiança, caixa (imutável)
+├── labels/<nome>.txt                 # caixas finais, formato YOLO: consenso do voto ou revisão
+├── revisoes/<nome>.json              # registro da revisão: tempos e ação sobre cada caixa
+├── imagens.csv                       # nome, lote, conjunto, voto, motivo, status
+├── treino.txt, teste.txt             # gerados de imagens.csv; o data.yaml aponta para eles
 └── data.yaml
 ```
 
-Só entram no treino as imagens de `revisadas.txt`. A confiança passa a ser guardada, e a página pode mostrá-la e ordenar pelas mais incertas.
+`imagens.csv` é a fonte do estado, um arquivo só em vez de várias listas:
+
+- `conjunto`: `treino` ou `teste`, sorteado por lote na entrada e nunca mais alterado.
+- `voto`: `passou`, `falhou` ou vazio (teste, ou ainda não votada); `motivo` diz por que falhou (contagem diferente, classe diferente, IoU baixo, imagem vazia).
+- `status`: `aprovada` (voto, sem humano), `pendente`, `revisada` ou `descartada`.
+
+`treino.txt` recebe as de treino `aprovada` ou `revisada`; `teste.txt`, só as de teste `revisada`. Uma imagem sem `labels/` nunca entra em nenhum dos dois.
+
+## 1a. Voto 3oo3
+
+Cada anotador entrega suas caixas já filtradas pelo próprio limiar e pelo NMS, com as classes do `classes.yaml`. O `votar.py` casa as caixas dos três:
+
+1. Casamento guloso pelo IoU, entre caixas da mesma classe, com IoU ≥ 0,5 (`--iou`).
+2. **Passa** se toda caixa de cada anotador casou com uma caixa de cada um dos outros dois: mesma quantidade de objetos, mesmas classes, posições próximas.
+3. **Imagem vazia** (nenhum anotador achou nada) não passa e vai à revisão: na esteira quase toda imagem tem objeto, e um negativo falso no treino é o erro mais caro (seção 1).
+4. **Caixa de consenso**: a mediana de cada coordenada entre as três; a confiança é a menor das três (serve para ordenar a fila de revisão, RF10).
+
+**Risco: erros correlacionados.** Três modelos que erram igual aprovam o erro. Hoje o Grounding DINO confunde PET com vidro, e um classificador do mesmo tipo tende a confundir também. Mitigações:
+
+- **Anotadores de famílias diferentes** (seção 6). A híbrida Grounding DINO + SigLIP usa as caixas do Grounding DINO; ela e o Grounding DINO puro não contam como dois votos independentes na localização.
+- **Medir antes de adotar**: o `avaliar.py` ganha o modo `--voto`, que dá a taxa de aprovação e a fração das imagens aprovadas que estão corretas por inteiro frente aos rótulos da equipe.
+- **Auditoria**: uma amostra aleatória das aprovadas (ex.: 5%) vai para a fila de revisão sem que o revisor saiba que foi aprovada. Ela estima o erro das aprovadas durante o uso (RF13).
 
 ## 2. Arquitetura
 
@@ -37,8 +78,8 @@ Só entram no treino as imagens de `revisadas.txt`. A confiança passa a ser gua
 
 | Método | Rota | Função |
 |---|---|---|
-| GET | `/api/imagens` | Lista com status (pendente, revisada, descartada) e menor confiança |
-| GET | `/api/imagens/<nome>` | Propostas e revisão atual, se houver |
+| GET | `/api/imagens` | Lista com conjunto, status e menor confiança |
+| GET | `/api/imagens/<nome>` | Caixas a revisar (consenso parcial ou propostas) e revisão atual, se houver |
 | PUT | `/api/imagens/<nome>` | Grava as caixas finais, o registro e o status |
 | GET | `/api/classes` | Classes |
 | POST | `/api/classes` | Acrescenta uma classe no fim (RF14) |
@@ -59,7 +100,9 @@ O RNF08 pede revisão mais rápida que anotação manual: o fluxo comum deve cab
 | Salvar e ir para a próxima | botão | `Enter` |
 | Descartar a imagem (inútil para treino) | botão | `D` |
 
-Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revisor, fica contínua. Lista filtrável por status e ordenável por confiança, para começar pelas incertas (RF10).
+Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revisor, fica contínua. A fila mostra só as `pendente`, com filtro por conjunto e ordem por confiança, para começar pelas incertas (RF10).
+
+**O que o revisor vê numa imagem que não passou no voto**: as caixas em que os três concordaram e, separadas, as que só um ou dois propuseram, marcadas com quem propôs. Assim o revisor começa pelo ponto da discórdia, sem uma caixa duplicada por anotador.
 
 ## 4. Registro da revisão (RF13)
 
@@ -67,16 +110,24 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 
 - **Tempo ativo**: o cronômetro pausa quando a aba perde o foco ou depois de 60 s sem interação.
 - **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `caixa_ajustada` (IoU com a proposta abaixo de um limiar), `removida` ou `adicionada`.
-- **Versões** do modelo e das classes que geraram a proposta.
+- **Versões** dos anotadores e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
 
-`anotacao/metricas.py` lê os registros e calcula: precisão e recall do anotador automático (casamento por IoU ≥ 0,5, com a revisão como referência), tempo médio por imagem e por objeto, taxa de cada tipo de correção.
+`anotacao/metricas.py` lê os registros e `imagens.csv` e calcula: taxa de aprovação pelo voto e motivos de falha; erro das aprovadas, pela auditoria; precisão e recall de cada anotador (casamento por IoU ≥ 0,5, com a revisão como referência); tempo médio por imagem e por objeto; taxa de cada tipo de correção.
 
 ## 5. Viés de automação (seção 5.3.4)
 
 Marcação "sem pré-anotação" por imagem: o servidor esconde as propostas e o revisor anota do zero. Comparar com as revisadas mede o viés e dá o tempo de anotação manual, que é a linha de base do ganho.
 
-## 6. Escolha do anotador (antes da fase 1)
+Pesa mais no teste: se o revisor parte das propostas dos anotadores, o viés vai para a base que mede o YOLO e os próprios anotadores. Por isso o teste chega **segmentado e sem classe** (decisão 5):
+
+- As caixas são a união das caixas dos três anotadores, com as sobrepostas (IoU ≥ 0,5) fundidas numa só. A união favorece o recall: sobra caixa para remover, falta pouca para desenhar.
+- A página não mostra classe, confiança nem quem propôs. O revisor só seleciona cada caixa, dá a classe (`1`–`9`) e ajusta, remove ou acrescenta caixas.
+- Sem classe proposta, a classe do teste não herda o viés. A localização ainda herda um pouco; o registro guarda quantas caixas foram ajustadas, removidas e acrescentadas, o que mede esse resto.
+
+## 6. Escolha dos anotadores (antes da fase 1)
+
+Com o voto, a pergunta deixa de ser qual é o melhor anotador e passa a ser **que trio, quando concorda, quase nunca erra, e concorda com frequência suficiente** para poupar revisão. Um anotador preciso mas muito parecido com outro vale menos que um mais fraco de outra família. Primeiro trio a medir: Grounding DINO, OWLv2 e YOLOE; a híbrida com SigLIP entra no lugar do Grounding DINO puro se corrigir a classe. Na GTX 1650 os três não cabem juntos: o `anotar.py` roda um anotador por vez sobre o lote inteiro.
 
 Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entram também opções que só **reclassificam** as caixas. Custo = esforço para encaixar no `anotar.py` (a classe `Anotador` já isola o modelo).
 
@@ -96,7 +147,9 @@ Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entr
 
 **Como escolher**: `anotacao/avaliar.py` mede cada candidato (acerto de classe e de material com as caixas verdadeiras; precisão e recall por limiar de confiança) nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
 
-**Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) SAM 2/3 só se as caixas virarem o problema.
+**Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) `avaliar.py --voto` com o trio; (5) SAM 2/3 só se as caixas virarem o problema.
+
+**Critério do trio** (a confirmar com os números): ao menos 95% das imagens aprovadas corretas por inteiro. A taxa de aprovação decide se o voto compensa: abaixo de uns 30%, quase tudo vai ao revisor de qualquer jeito.
 
 ### Linha de base (2026-10-27)
 
@@ -168,17 +221,17 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 
 ## Fases
 
-A fase 0 define o modelo que gera as propostas. As fases 1–3 já entregam uma ferramenta usável (corrige classe e remove caixas erradas, os erros mais comuns hoje); 4–6 completam os requisitos.
+A fase 0 define os anotadores e o critério do voto. As fases 1–3 já entregam o fluxo do diagrama com uma ferramenta usável (corrige classe e remove caixas erradas, os erros mais comuns hoje); 4–6 completam os requisitos.
 
 | # | Status | Entrega | Verificação |
 |---|---|---|---|
-| 0 | [~] `avaliar.py` e linha de base | Escolha do anotador (seção 6): `avaliar.py`, linha de base com o Grounding DINO, comparação com OWLv2, YOLOE e a híbrida com SigLIP | pytest de `avaliar.py`; tabelas do `avaliar.py` |
-| 1 | [ ] | `anotar.py` grava `propostas/*.json`; `labels/`, `revisadas.txt` e `data.yaml` no formato novo; `visualizar.py` lê as propostas | pytest |
+| 0 | [~] `avaliar.py` e linha de base | Escolha do trio e do voto (seções 1a e 6): linha de base com o Grounding DINO, OWLv2, YOLOE, híbrida com SigLIP; `avaliar.py --voto` | pytest de `avaliar.py`; tabelas do `avaliar.py` |
+| 1 | [ ] | Entrada por lote com sorteio treino/teste em `imagens.csv`; `anotar.py` roda os anotadores e grava `propostas/<anotador>/`; `votar.py` aplica o 3oo3, grava `labels/` das aprovadas e gera `treino.txt`, `teste.txt` e `data.yaml`; `visualizar.py` lê as propostas | pytest do voto com caixas sintéticas |
 | 2 | [ ] | `revisar.py`: servidor e API só de leitura; a página atual servida por ele | pytest com o servidor numa thread |
 | 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar | pytest da API; teste manual |
 | 4 | [ ] | Desenhar, mover e redimensionar caixas; desfazer | teste manual (Chrome headless para captura) |
-| 5 | [ ] | Registro RF13 e `metricas.py` | pytest com registros sintéticos |
-| 6 | [ ] | Novas classes (RF14) e modo sem pré-anotação | pytest; teste manual |
+| 5 | [ ] | Registro RF13, auditoria das aprovadas e `metricas.py` | pytest com registros sintéticos |
+| 6 | [ ] | Novas classes (RF14); modo segmentado sem classe (padrão no teste) e modo sem pré-anotação | pytest; teste manual |
 
 ## Decisões
 
@@ -187,6 +240,10 @@ A fase 0 define o modelo que gera as propostas. As fases 1–3 já entregam uma 
 | 1 | ~~Ferramenta própria ou Label Studio?~~ | **Decidido (2026-10-28)**: ferramenta própria, a mais simples possível. |
 | 2 | Onde ficam as classes? Hoje há `anotacao/classes.yaml` (anotador) e o `data.yaml` de cada saída; uma classe nova pela página (RF14) precisa ir aos dois. | `classes.yaml` como fonte, `data.yaml` gerado a partir dele. |
 | 3 | ~~Um ou vários revisores?~~ | **Decidido (2026-10-28)**: um revisor, local. Sem trava por imagem nem identificação por enquanto. |
+| 4 | ~~Um anotador ou vários?~~ | **Decidido (2026-10-28)**: três anotadores com voto 3oo3; quem não passa vai à revisão humana (seção 1a). |
+| 5 | ~~O teste chega ao revisor com as propostas dos anotadores ou sem elas?~~ | **Decidido (2026-10-28)**: segmentado e sem classe. Os objetos chegam delimitados para poupar a seleção; a classe é do revisor (seção 5). |
+| 6 | ~~O voto exige a mesma classe ou só o mesmo material?~~ | **Decidido (2026-10-28)**: mesma classe. Por material aprovaria mais, mas a imagem ficaria sem classe definida para o treino. |
+| 7 | ~~Proporção treino/teste e unidade do sorteio~~ | **Decidido (2026-10-28)**: sorteio por lote de captura, 1 lote em cada 5 para o teste. Frames seguidos da esteira são quase iguais; sortear imagem a imagem vazaria cenas entre os conjuntos. |
 
 ## Notas da sessão que gerou o plano
 
