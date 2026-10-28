@@ -94,9 +94,73 @@ Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entr
 
 **Híbrida (hipótese a testar)**: manter as caixas do Grounding DINO e reclassificar cada recorte com SigLIP ou CLIP (`transformers`, Apache 2.0, ~½–1 dia), que compara o recorte com textos como "clear plastic bottle" e "glass bottle". Um VLM pode ser chamado só nos recortes ambíguos.
 
-**Como escolher**: `anotacao/avaliar.py` (~1 dia) calcula o mAP@0,5, por classe e por material, de cada candidato nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
+**Como escolher**: `anotacao/avaliar.py` mede cada candidato (acerto de classe e de material com as caixas verdadeiras; precisão e recall por limiar de confiança) nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
 
 **Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) SAM 2/3 só se as caixas virarem o problema.
+
+### Linha de base (2026-10-27)
+
+`avaliar.py` com o Grounding DINO `tiny` nas 88 fotos de validação (375 caixas):
+
+- **Localização**: toda caixa verdadeira tem uma consulta do modelo com IoU ≥ 0,5.
+- **Classe**: 46% de acerto com a caixa já localizada; material, 50%. `Glass bottle` acerta 7%: vira `Clear plastic bottle` (33) ou `Drink can` (30). `Clear plastic bottle` vira `Glass bottle` em 29 de 58.
+- **Detecção**: no limiar padrão 0,35, precisão 0,39 e recall 0,33.
+- **Hipótese descartada**: pontuar a classe pela média dos tokens do prompt, e não pelo máximo, para que a palavra comum ("bottle") não decida por todas. A classe foi a 47% (de 46%) e o recall em 0,35 caiu para 0,21. A confusão não vem do texto compartilhado: o modelo não separa os materiais.
+
+Conclusão: manter o Grounding DINO para as caixas e trocar quem decide a classe. A híbrida com SigLIP passa à frente de OWLv2 e YOLOE.
+
+### Verificação das classes e do teste (2026-10-27)
+
+- **Rótulo `Glass bottle` não corresponde aos objetos.** Nenhuma das 97 caixas é garrafa de vidro: são copos, taças, potes e tigelas de vidro, e 3 são latas rotuladas errado (tcc-0SF 140322 e outra foto). A equipe usou `Glass bottle` para todo vidro. Os 7% medem a escolha da classe, não o modelo. As outras classes conferem, com mistura: `Plastic bottle cap` inclui tampas de pote, e `Corrugated carton` inclui caixas finas de papel-cartão impresso.
+- **Prompt bem formado.** Cada palavra vira um token inteiro, o mapa token → classe está certo, e o `" . "` é o separador que o modelo usa para codificar cada frase em separado (`generate_masks_with_special_tokens_and_transfer_map`).
+- **Vocabulário amplo** (59 classes TACO e 27 termos genéricos, em 2 blocos): os nomes vencedores conferem com os objetos. Vidro sai como "disposable plastic cup", "glass bowl", "cup", "wine glass" e "drinking glass", nunca "glass bottle". O material dos copos transparentes continua ambíguo. Lata sai como "soda can", tampa como "bottle cap", papel como "crumpled paper". Ressalvas: o teste é qualitativo, porque as pontuações entre frases não são calibradas; frases TACO com substantivo genérico ("squeezable tube", "disposable food container") vencem sem sentido; parte dos termos genéricos foi escolhida depois de ver os recortes.
+- **Prompt que descreve o objeto real.** Só `Glass bottle` → "drinking glass": vidro de 7% para 38%, classe 46% → 55%, material 50% → 60%; detecção em 0,35, precisão 0,39 → 0,56 e recall 0,33 → 0,48. Trocar também tampa, lata e papel pelos vencedores do vocabulário amplo dá 57% e 62%, mas lata e papel pioram. O vencedor do teste qualitativo não é necessariamente o melhor prompt, e diferenças de 2 pontos são ruído: as 4 validações são as mesmas cenas, e os prompts foram ajustados nelas.
+
+Antes do SigLIP:
+1. Decidir a taxonomia do vidro: `Glass cup` e `Glass jar` (TACO) ou uma classe só de vidro.
+2. Permitir mais de um prompt por classe, com a pontuação máxima entre eles: um prompt não cobre copo, pote e tigela.
+3. Registrar as correções dos rótulos da equipe num arquivo em `anotacao/`, sem editar `legado/`.
+4. Refazer a linha de base. O SigLIP herda o mesmo cuidado: as descrições têm de corresponder aos objetos das fotos, não ao nome TACO.
+
+### Plano: SigLIP como classificador no `avaliar.py`
+
+**Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.
+
+**Modelos** (`transformers`, Apache 2.0, todos cabem na GTX 1650 em fp16 e com folga na T4):
+
+| Modelo | Por quê |
+|---|---|
+| `google/siglip2-base-patch16-224` | Ponto de partida: pequeno e rápido |
+| `google/siglip2-so400m-patch14-384` | Maior e com mais resolução; transparência e espessura do material são detalhe fino |
+| `openai/clip-vit-large-patch14` | Controle: diz se a diferença vem do SigLIP ou de qualquer modelo de imagem e texto |
+
+**Código**:
+
+1. `anotacao/classificador.py`, com `Classificador(classes, modelo, dispositivo)` e o método `classificar(imagem, caixas) -> [(classe ou None, confianca)]`. Os recortes de uma imagem vão num lote só. Os embeddings dos textos são calculados uma vez no construtor. O mesmo módulo serve depois ao `anotar.py`.
+2. **Recorte**: a caixa com margem (`--margem`, padrão 10%), porque o contexto ajuda (a tampa está na garrafa), completada até ficar quadrada com cinza. O processador do SigLIP redimensiona para quadrado e achataria garrafas, que são compridas. Funções puras, testáveis sem o modelo.
+3. **Textos por classe**: um campo opcional `descricoes` no `classes.yaml`, uma lista de frases visuais (ex.: `Glass bottle`: "a thick rigid glass bottle", "a green or brown glass bottle"; `Clear plastic bottle`: "a thin crinkled transparent PET plastic bottle"). Sem `descricoes`, o texto usado é o `prompt`. Cada frase passa por modelos como "a photo of {}" e "{} on a conveyor belt", e a classe recebe a média dos embeddings. O `classes.yaml` continua sendo a fonte única (decisão pendente 2).
+4. **Distratores**: uma lista `distratores` no `classes.yaml` ("a glass cup", "a glass jar", "a plastic cup", "an empty conveyor belt"), que entram na comparação e, se vencerem, dão classe `None` (descartar). Na avaliação por caixa verdadeira, `None` conta como erro. Na detecção, é o que pode reduzir os falsos positivos.
+5. **Confiança**: o SigLIP pontua cada par imagem-texto com sigmoide, de forma independente. Para escolher a classe vale o maior logit. A confiança é o softmax dos logits das classes, com a escala do modelo, para que a ordenação por incerteza (RF10) continue possível.
+6. **`avaliar.py`**: opção `--classificador MODELO` (repetível). Cada classificador ganha sua matriz de confusão, ao lado da do Grounding DINO, sobre as mesmas caixas verdadeiras. Na detecção, uma linha "híbrida" por limiar: caixas filtradas pelo Grounding DINO (a confiança dele como objetividade, o NMS já ignora a classe), classe do SigLIP, `None` removida. Mostrar também o tempo por recorte.
+
+**Experimentos**, todos com as mesmas 375 caixas:
+
+| # | Configuração | Pergunta |
+|---|---|---|
+| 1 | SigLIP2 base, só o `prompt` | O recorte sozinho já resolve? |
+| 2 | + `descricoes` | Descrever o material ajuda? |
+| 3 | + distratores | Quanto custa na classe e quanto ganha na detecção? |
+| 4 | so400m e CLIP-L com a melhor configuração | Tamanho e família do modelo |
+| 5 | margem 0, 10 e 25% | Contexto em volta do objeto |
+
+**Risco: ajustar as descrições às fotos de validação.** Não há conjunto independente: `tcc-teste` não tem rótulos, e as quatro validações são as mesmas cenas. Mitigações:
+- poucas iterações de texto, todas registradas aqui com o resultado;
+- ajustar com as fotos de 0° (`tcc-0CF`, `tcc-0SF`) e conferir nas de 45°, sabendo que as cenas se repetem;
+- confirmar nas primeiras fotos da esteira assim que existirem.
+
+**Decisão**: levar o SigLIP ao `anotar.py` (opção `--classificador`) se ele subir bem o acerto de material, por exemplo em 15 pontos ou mais, e tirar `Glass bottle` dos 7%. Se o zero-shot não separar PET de vidro, o passo seguinte reaproveita os mesmos recortes e embeddings: kNN ou regressão logística sobre as caixas da equipe. A validação desse passo precisa ser por cena, não por cenário. Agrupar as fotos dos quatro cenários por cena (horário e conteúdo) é pré-requisito.
+
+**Esforço**: ~½ dia para o `classificador.py` e a integração ao `avaliar.py`, ~½ dia para os experimentos.
 
 Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). Levantamento de 2026-10-27; custos e cabimento na GPU são estimativas, não medidos.
 
@@ -108,7 +172,7 @@ A fase 0 define o modelo que gera as propostas. As fases 1–3 já entregam uma 
 
 | # | Status | Entrega | Verificação |
 |---|---|---|---|
-| 0 | [ ] | Escolha do anotador (seção 6): `avaliar.py`, linha de base com o Grounding DINO, comparação com OWLv2, YOLOE e a híbrida com SigLIP | pytest de `avaliar.py`; tabela de mAP |
+| 0 | [~] `avaliar.py` e linha de base | Escolha do anotador (seção 6): `avaliar.py`, linha de base com o Grounding DINO, comparação com OWLv2, YOLOE e a híbrida com SigLIP | pytest de `avaliar.py`; tabelas do `avaliar.py` |
 | 1 | [ ] | `anotar.py` grava `propostas/*.json`; `labels/`, `revisadas.txt` e `data.yaml` no formato novo; `visualizar.py` lê as propostas | pytest |
 | 2 | [ ] | `revisar.py`: servidor e API só de leitura; a página atual servida por ele | pytest com o servidor numa thread |
 | 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar | pytest da API; teste manual |
@@ -116,16 +180,16 @@ A fase 0 define o modelo que gera as propostas. As fases 1–3 já entregam uma 
 | 5 | [ ] | Registro RF13 e `metricas.py` | pytest com registros sintéticos |
 | 6 | [ ] | Novas classes (RF14) e modo sem pré-anotação | pytest; teste manual |
 
-## Decisões pendentes
+## Decisões
 
-| # | Questão | Recomendação |
+| # | Questão | Recomendação ou decisão |
 |---|---|---|
-| 1 | Ferramenta própria ou Label Studio? O Label Studio já edita caixas, importa predições com confiança e registra o tempo por anotação; custa um servidor Django com banco, conversões de formato na ida e na volta, e menos controle sobre o registro por caixa e o modo sem pré-anotação. | Própria, porque a interface de revisão e a medição dela são parte do trabalho (RF12, RF13, RNF08). Se o foco for o ciclo e não a interface, o Label Studio economiza as fases 3 e 4. |
+| 1 | ~~Ferramenta própria ou Label Studio?~~ | **Decidido (2026-10-28)**: ferramenta própria, a mais simples possível. |
 | 2 | Onde ficam as classes? Hoje há `anotacao/classes.yaml` (anotador) e o `data.yaml` de cada saída; uma classe nova pela página (RF14) precisa ir aos dois. | `classes.yaml` como fonte, `data.yaml` gerado a partir dele. |
-| 3 | Um ou vários revisores? Vários ao mesmo tempo pedem trava por imagem e identificação. | Um por vez, com o campo `revisor` já gravado no registro. |
+| 3 | ~~Um ou vários revisores?~~ | **Decidido (2026-10-28)**: um revisor, local. Sem trava por imagem nem identificação por enquanto. |
 
 ## Notas da sessão que gerou o plano
 
 - Qualidade observada do Grounding DINO (`tiny` e `base`) em fotos de `legado/database/tcc-0CF`: caixas bem localizadas, classes frequentemente erradas (PET transparente como `Glass bottle`; copos e potes de vidro, fora da lista, como tampa ou garrafa plástica). Reforça que trocar classe precisa ser a ação mais rápida.
-- Testado só em CPU (~10 s por foto de 12 MP no `tiny`); GPU disponível: GTX 1650, não testada.
+- Testado em CPU (~10 s por foto de 12 MP no `tiny`) e, depois, na GTX 1650 (CUDA), onde o `avaliar.py` roda as 88 fotos de validação.
 - Ambiente de teste usado: venv isolado com torch 2.14.1, transformers 5.21.0 (Python 3.14).
