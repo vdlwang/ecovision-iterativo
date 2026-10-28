@@ -13,19 +13,17 @@ Branch de origem: `feature/anotacao-assistida` (`3084516`). Requisitos da monogr
 ## 0. Fluxo (diagrama v3)
 
 ```
-esteira → YOLO → banco (imagens + logs) → treino ou teste? (por lote, nunca os dois)
+esteira → YOLO → banco (imagens + logs) → treino ou teste? (por lote, 1 em cada 5 para o teste)
   treino → 3 anotadores (em lote, no dia seguinte) → voto 3oo3
              passou     → base de treino (caixas de consenso)
              não passou → revisão humana → base de treino (caixas corrigidas)
+             (+ auditoria: 5% das aprovadas também vão à revisão)
            base de treino → fine-tuning do YOLO
-  teste  → revisão humana obrigatória → base de teste → avaliação do YOLO (com a base externa)
+  teste  → segmentação sem classe (união das caixas dos 3 anotadores)
+           → revisão humana obrigatória → base de teste → avaliação do YOLO (com a base externa)
 ```
 
-Diferenças entre o diagrama e este plano:
-
-- O diagrama fala em "3 a 5 modelos" e voto NooN. O plano começa com N = 3 (3oo3); o código aceita N qualquer, mas cada anotador a mais custa uma integração e baixa a taxa de aprovação.
-- No diagrama, o teste vai direto à revisão humana, sem passar pelos anotadores. Pela decisão 5, o teste passa pelos anotadores só para segmentar: o revisor recebe os objetos já delimitados, sem classe, e escolhe a classe de cada um.
-- A base externa e a avaliação do YOLO ficam fora deste plano, que cobre do banco até as duas bases.
+O diagrama foi atualizado com as decisões de 2026-10-28. A base externa e a avaliação do YOLO ficam fora deste plano, que cobre do banco até as duas bases. O código do voto aceita N anotadores, mas cada um a mais custa uma integração e baixa a taxa de aprovação.
 
 ## 1. Separar proposta, voto e anotação final (decisão prévia)
 
