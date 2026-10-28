@@ -31,6 +31,10 @@ python anotacao/anotar.py fotos/*.jpg -o anotacoes --previa
 | `--previa` | — | Grava também `previa/<nome>.jpg` com as caixas desenhadas |
 | `--sobrescrever` | — | Reanota imagens que já estão na saída |
 
+## Google Colab
+
+Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, e a saída fica no Drive (ou é baixada como `.zip`). Imagens que já têm `.txt` na saída são puladas, então, se o Colab desconectar, basta rodar de novo. O campo `RAMO` escolhe o ramo clonado.
+
 ## Saída
 
 Formato de detecção do YOLO, que o Ultralytics treina direto:
@@ -69,6 +73,20 @@ Os `.txt` não guardam a confiança, então ela não aparece na página; para v�
 O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir.
 
 Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por token do texto; a confiança de uma classe é a maior entre os tokens do seu prompt, e vence a classe de maior confiança.
+
+## Avaliação
+
+`avaliar.py` mede o anotador nas fotos rotuladas pela equipe (por padrão, as 88 imagens das quatro validações de `legado/database`, 375 caixas nas classes de `classes.yaml`):
+
+```bash
+python anotacao/avaliar.py                                   # Grounding DINO tiny
+python anotacao/avaliar.py --modelo IDEA-Research/grounding-dino-base
+python anotacao/avaliar.py legado/database/tcc-0CF/YOLO_dataset/validation
+```
+
+São duas medidas. A **classificação** pega, para cada caixa verdadeira, a caixa do modelo que mais se sobrepõe a ela e compara as classes: mostra a matriz de confusão, a taxa de acerto da classe e a do material, sem misturar com erros de localização. A **detecção** roda o `anotar.py` completo em vários limiares de confiança (`--limiares`) e dá precisão e recall, contando como acerto IoU ≥ 0,5 com a mesma classe.
+
+Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `classes.yaml`, casadas pelo nome, e os polígonos viram a caixa que os contém. As quatro validações são as mesmas cenas fotografadas de jeitos diferentes, então somá-las não equivale a quatro vezes mais dados; serve para comparar anotadores, que não treinaram nelas.
 
 ## Testes
 

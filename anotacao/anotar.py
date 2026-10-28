@@ -147,8 +147,12 @@ class Anotador:
         self.input_ids = tokens["input_ids"]
         self.token_classe = classe_de_cada_token(tokens["offset_mapping"], intervalos)
 
-    def anotar(self, imagem):
-        """Devolve [(classe, confianca, (x1, y1, x2, y2) normalizada)] após o NMS."""
+    def pontuar(self, imagem):
+        """
+        Saída bruta do modelo, sem filtro: a pontuação de cada classe em cada
+        consulta, tensor (consultas, classes), e as caixas (x1, y1, x2, y2)
+        normalizadas e recortadas à imagem, lista com uma por consulta.
+        """
         torch = self.torch
         entradas = self.processador(images=imagem, text=self.texto, return_tensors="pt")
         if entradas["input_ids"][0].tolist() != self.input_ids:
@@ -164,22 +168,34 @@ class Anotador:
         for t, c in enumerate(self.token_classe):
             if c is not None:
                 por_classe[:, c] = torch.maximum(por_classe[:, c], logits[:, t])
-        confiancas, classes = por_classe.max(dim=1)
 
         # pred_boxes: (cx, cy, w, h) normalizados pela imagem original
-        caixas = saida.pred_boxes[0].cpu()
+        caixas = [(max(0.0, cx - w / 2), max(0.0, cy - h / 2),
+                   min(1.0, cx + w / 2), min(1.0, cy + h / 2))
+                  for cx, cy, w, h in saida.pred_boxes[0].cpu().tolist()]
+        return por_classe, caixas
+
+    def filtrar(self, por_classe, caixas, confianca=None):
+        """
+        Saída de pontuar() -> [(classe, confianca, (x1, y1, x2, y2))] após os
+        filtros e o NMS. confianca substitui a do construtor (para o avaliar.py).
+        """
+        if confianca is None:
+            confianca = self.confianca
+        confiancas, classes = por_classe.max(dim=1)
         deteccoes = []
-        for conf, classe, (cx, cy, w, h) in zip(confiancas.tolist(), classes.tolist(),
-                                                caixas.tolist()):
-            if conf < self.confianca:
+        for conf, classe, caixa in zip(confiancas.tolist(), classes.tolist(), caixas):
+            if conf < confianca:
                 continue
-            caixa = (max(0.0, cx - w / 2), max(0.0, cy - h / 2),
-                     min(1.0, cx + w / 2), min(1.0, cy + h / 2))
             area = (caixa[2] - caixa[0]) * (caixa[3] - caixa[1])
             # O Grounding DINO costuma propor uma caixa para a esteira inteira
             if caixa[2] > caixa[0] and caixa[3] > caixa[1] and area <= self.area_maxima:
                 deteccoes.append((classe, conf, caixa))
         return nms(deteccoes, self.limiar_iou)
+
+    def anotar(self, imagem):
+        """Devolve [(classe, confianca, (x1, y1, x2, y2) normalizada)] após o NMS."""
+        return self.filtrar(*self.pontuar(imagem))
 
 
 def preparar_saida(saida, classes):
