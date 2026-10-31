@@ -67,7 +67,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 | 20 | [x] `822aceb` | Bounding boxes desenhadas duas vezes (cv2 no backend + canvas no frontend); label com largura fixa de 200 px. | Manter só uma delas (preferência: frontend). |
 | 21 | — | Identificadores misturam inglês e português. | Política: **não** renomear em massa; português no código novo. |
 | 22 | [x] `53d7b51`, `7e54bfc` | Sem testes. | `backend/deteccao.py` (mapeamento, `deteccoes_do_quadro`, `angulo_a_disparar`) e 25 testes pytest em `backend/tests/`; `pytest` em `requirements-dev.txt`. |
-| 31 | [x] | `requirements.txt` só tem limites inferiores (`>=`); o ambiente atual usa Python 3.14. | Fixar versões testadas. Fazer antes de qualquer retreinamento (RNF07, reprodutibilidade). |
+| 31 | [x] `3acfb23` | `requirements.txt` só tem limites inferiores (`>=`); o ambiente atual usa Python 3.14. | Fixar versões testadas. Fazer antes de qualquer retreinamento (RNF07, reprodutibilidade). |
 | 33 | [x] `b5246b4` | `vite` em `dependencies` e em `devDependencies` (6.3.5); `package.json` com a indentação torta do Figma. **Decisão: mover para `devDependencies`.** | Remover de `dependencies` e normalizar a indentação; verificar com `npm run build`. |
 
 ## D — Documentação
@@ -77,7 +77,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 | 23 | [x] `b5246b4` | `backend/config.example.json` desatualizado: chave `corrugated carton` em vez de `glass`, campos não lidos (`websocket_port`, `frame_*`, `fps_target`), `confidence` 0.45. Atualizar ou apagar. |
 | 24 | [x] `5198a85`, `1b7cfbd` | Mensagens que mandavam rodar `ecovision_local.py` e o "Reinicie o backend" após salvar ângulos. |
 | 25 | [ ] | `docs/diagrams/` descreve classes inexistentes (`YOLOPipeline` etc.), login Google e `detection_queue`. Marcar como "arquitetura proposta (tese)" ou refazer. **Decisão: adiar; a arquitetura muda com os módulos novos (rastreamento, registro, anotação), então os diagramas são refeitos uma vez só, para o capítulo 6.** |
-| 26 | [x] | Sem registro do que mudou desde a tese. Criar `CHANGELOG.md` ou seção no README referenciando `tese-final`. |
+| 26 | [x] `afd8d5e` | Sem registro do que mudou desde a tese. Criar `CHANGELOG.md` ou seção no README referenciando `tese-final`. |
 | 27 | — | Regra contínua: atualizar "Limitações conhecidas" e `CLAUDE.md` a cada fix. `PROBLEMAS.md` reorganizado (`39b7b70`): só itens fora do código; P11 resolvido em `3f4f909`. |
 
 ---
