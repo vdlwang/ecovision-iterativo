@@ -307,19 +307,11 @@ def run_yolo_stream(model):
             if elapsed_proc >= config['servo_actuation_seconds']:
                 state.processing = False
         
-        # Sem clientes, não há por que desenhar e codificar o quadro
+        # Sem clientes, não há por que codificar o quadro
         if not (SERVER_LOOP and SERVER_LOOP.is_running() and state.websocket_clients):
             continue
-        
-        # Desenha bounding boxes no frame
-        for det in detections:
-            x1, y1, x2, y2 = det['bbox']
-            label_material = det.get('material', '?')
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (34, 197, 94), 2)
-            label = f"{det['class']} ({label_material}) {det['confidence']*100:.1f}%"
-            cv2.putText(frame, label, (int(x1), int(y1)-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (34, 197, 94), 2)
-        
+
+        # Quadro vai limpo: as caixas são desenhadas pelo frontend a partir de 'detections'
         # Converte frame para base64
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         frame_b64 = base64.b64encode(buffer).decode('utf-8')

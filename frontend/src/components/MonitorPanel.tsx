@@ -51,23 +51,22 @@ export function MonitorPanel() {
               canvas.height = img.height;
               ctx.drawImage(img, 0, 0);
 
-              // Desenhar bounding boxes
+              // Desenhar bounding boxes (o backend envia o quadro sem elas)
               data.detections?.forEach(det => {
                 const [x1, y1, x2, y2] = det.bbox;
                 ctx.strokeStyle = '#22c55e';
                 ctx.lineWidth = 3;
                 ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
-                // Label
-                ctx.fillStyle = '#22c55e';
-                ctx.fillRect(x1, y1 - 25, 200, 25);
-                ctx.fillStyle = '#000';
+                // Label com a largura do texto; dentro da caixa se não couber acima
+                const label = `${det.class} (${det.material}) ${(det.confidence * 100).toFixed(1)}%`;
                 ctx.font = '14px monospace';
-                ctx.fillText(
-                  `${det.class} ${(det.confidence * 100).toFixed(1)}%`,
-                  x1 + 5,
-                  y1 - 8
-                );
+                const larguraLabel = ctx.measureText(label).width + 10;
+                const topoLabel = y1 >= 25 ? y1 - 25 : y1;
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(x1, topoLabel, larguraLabel, 25);
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x1 + 5, topoLabel + 17);
               });
             };
             img.src = `data:image/jpeg;base64,${data.frame}`;
