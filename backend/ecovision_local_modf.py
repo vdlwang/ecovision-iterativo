@@ -27,7 +27,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("ecovision")
-_nivel = os.environ.get("ECOVISION_LOG", "INFO").upper()
+_nivel = os.environ.get("ECOVISION_LOG", "INFO").strip().upper()  # "set X=DEBUG && ..." no cmd deixa um espaço
 log.setLevel(_nivel if isinstance(logging.getLevelName(_nivel), int) else logging.INFO)
 
 # ==== Configuração ====
