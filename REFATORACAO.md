@@ -61,10 +61,10 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 
 | # | Status | Item | Recomendação |
 |---|---|---|---|
-| 14 | [x] | `print` em vez de `logging`. | `logging` com INFO/DEBUG. Serve de base para o registro de latência por etapa (RF09 da monografia). |
+| 14 | [x] `fa797e9` | `print` em vez de `logging`. | `logging` com INFO/DEBUG. Serve de base para o registro de latência por etapa (RF09 da monografia). |
 | 18 | [x] `026269d` | "Salvo localmente" grava no `localStorage` algo que ninguém lê. | Toast de erro. |
-| 19 | [x] | URL `ws://localhost:8765` repetida 3x; badge de status copiado em 3 painéis; lista de materiais duplicada no backend e no frontend; `MonitorPanel` adivinha o ícone por substring da classe em vez de usar `det.material`. | `src/config.ts` com URL e materiais; usar `det.material`. **Decisão: fazer agora só a URL, o badge e o `det.material`; a lista de materiais fica para a taxonomia hierárquica (seção 5.3.2), que vai substituí-la.** |
-| 20 | [x] | Bounding boxes desenhadas duas vezes (cv2 no backend + canvas no frontend); label com largura fixa de 200 px. | Manter só uma delas (preferência: frontend). |
+| 19 | [x] `dd09a68` | URL `ws://localhost:8765` repetida 3x; badge de status copiado em 3 painéis; lista de materiais duplicada no backend e no frontend; `MonitorPanel` adivinha o ícone por substring da classe em vez de usar `det.material`. | `src/config.ts` com URL e materiais; usar `det.material`. **Decisão: fazer agora só a URL, o badge e o `det.material`; a lista de materiais fica para a taxonomia hierárquica (seção 5.3.2), que vai substituí-la.** |
+| 20 | [x] `822aceb` | Bounding boxes desenhadas duas vezes (cv2 no backend + canvas no frontend); label com largura fixa de 200 px. | Manter só uma delas (preferência: frontend). |
 | 21 | — | Identificadores misturam inglês e português. | Política: **não** renomear em massa; português no código novo. |
 | 22 | [x] `53d7b51`, `7e54bfc` | Sem testes. | `backend/deteccao.py` (mapeamento, `deteccoes_do_quadro`, `angulo_a_disparar`) e 25 testes pytest em `backend/tests/`; `pytest` em `requirements-dev.txt`. |
 | 31 | [ ] | `requirements.txt` só tem limites inferiores (`>=`); o ambiente atual usa Python 3.14. | Fixar versões testadas. Fazer antes de qualquer retreinamento (RNF07, reprodutibilidade). |
