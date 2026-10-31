@@ -10,11 +10,25 @@ import cv2
 import base64
 import json
 import asyncio
+import logging
+import os
 import websockets
 from pathlib import Path
 from threading import Thread, Lock
 
 from deteccao import deteccoes_do_quadro, angulo_a_disparar
+
+# ==== Logging ====
+# INFO por padrão; ECOVISION_LOG=DEBUG mostra também cada comando enviado ao
+# ESP32 e as detecções de cada quadro. Bibliotecas (websockets etc.) ficam em WARNING.
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("ecovision")
+_nivel = os.environ.get("ECOVISION_LOG", "INFO").upper()
+log.setLevel(_nivel if isinstance(logging.getLevelName(_nivel), int) else logging.INFO)
 
 # ==== Configuração ====
 BACKEND_DIR = Path(__file__).parent
@@ -84,7 +98,7 @@ serial_lock = Lock()
 def send_line(ser, msg):
     """Envia comando via serial"""
     if ser is None:
-        print(f"[DEMO] Serial indisponível; comando ignorado: {msg.strip()}")
+        log.warning("[DEMO] Serial indisponível; comando ignorado: %s", msg.strip())
         return False
     try:
         if not msg.endswith("\n"):
@@ -92,13 +106,14 @@ def send_line(ser, msg):
         with serial_lock:
             ser.write(msg.encode("utf-8"))
             ser.flush()
+        log.debug("→ ESP32: %s", msg.strip())
         return True
     except Exception as exc:
         # Quando a serial está ocupada ou inacessível no Windows o pyserial
         # levanta PermissionError("WriteFile failed..."). Neste caso
         # desativamos a serial para evitar quedas no WebSocket e seguimos em
         # modo demonstração.
-        print(f"[DEMO] Falha ao enviar para serial ({exc}); desativando serial")
+        log.error("[DEMO] Falha ao enviar para serial (%s); desativando serial", exc)
         state.serial_port = None
         return False
 
@@ -114,11 +129,11 @@ def read_serial_loop(ser):
             line = ser.readline().decode("utf-8", errors="ignore").strip()
         except Exception as exc:
             if state.serial_port is ser:
-                print(f"[DEMO] Falha ao ler da serial ({exc}); desativando serial")
+                log.error("[DEMO] Falha ao ler da serial (%s); desativando serial", exc)
                 state.serial_port = None
             return
         if line:
-            print(f"ESP32: {line}")
+            log.info("ESP32: %s", line)
 
 def motor_on(ser):
     """Liga o motor da esteira"""
@@ -137,7 +152,7 @@ async def websocket_handler(websocket):
     """Gerencia conexões WebSocket (compatível com websockets≥12)."""
     try:
         state.websocket_clients.add(websocket)
-        print(f"Cliente WebSocket conectado. Total: {len(state.websocket_clients)}")
+        log.info("Cliente WebSocket conectado. Total: %d", len(state.websocket_clients))
         async for message in websocket:
             try:
                 data = json.loads(message)
@@ -159,7 +174,7 @@ async def websocket_handler(websocket):
                 elif data.get('type') == 'config':
                     if 'confidence' in data:
                         config['confidence'] = data['confidence']
-                        print(f"Confiança atualizada: {config['confidence']}")
+                        log.info("Confiança atualizada: %s", config['confidence'])
                 
                 # Envia a configuração atual (os painéis pedem ao conectar)
                 elif data.get('type') == 'get_config':
@@ -171,17 +186,17 @@ async def websocket_handler(websocket):
                     config.pop('type', None)  # chave gravada por versões anteriores
                     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                         json.dump(config, f, indent=2)
-                    print("Configuração salva em config.json")
+                    log.info("Configuração salva em config.json")
                 
             except Exception as e:
-                print(f"Erro ao processar mensagem WebSocket: {e}")
+                log.exception("Erro ao processar mensagem WebSocket: %s", e)
     
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         state.websocket_clients.discard(websocket)
         envios_pendentes.pop(websocket, None)
-        print(f"Cliente WebSocket desconectado. Total: {len(state.websocket_clients)}")
+        log.info("Cliente WebSocket desconectado. Total: %d", len(state.websocket_clients))
 
 # Envio em andamento por cliente. Um cliente lento perde quadros em vez de
 # acumular envios no loop, e não atrasa os outros.
@@ -208,19 +223,18 @@ def process_yolo_stream():
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         state.serial_port = ser
-        print(f"Serial conectada: {config['serial_port']}")
-        Thread(target=read_serial_loop, args=(ser,), daemon=True).start()
+        log.info("Serial conectada: %s", config['serial_port'])
+        Thread(target=read_serial_loop, args=(ser,), name="serial", daemon=True).start()
         
         # Liga motor inicial
         motor_on(ser)
         state.motor_running = True
     except Exception as e:
-        print(f"Erro ao conectar serial: {e}")
-        print("Continuando sem serial (modo demonstração)")
+        log.warning("Erro ao conectar serial (%s); continuando sem serial (modo demonstração)", e)
         state.serial_port = None
     
     # Carregar YOLO
-    print(f"Carregando modelo YOLO: {config['model_path']}")
+    log.info("Carregando modelo YOLO: %s", config['model_path'])
     # Caminho relativo é resolvido a partir de backend/, não do diretório atual
     model_path = Path(config['model_path'])
     if not model_path.is_absolute():
@@ -232,10 +246,10 @@ def process_yolo_stream():
     while True:
         try:
             run_yolo_stream(model)
-            print(f"Stream da câmera terminou; reabrindo em {CAMERA_RETRY_SECONDS} s")
+            log.warning("Stream da câmera terminou; reabrindo em %d s", CAMERA_RETRY_SECONDS)
         except Exception as e:
-            print(f"Erro no stream da câmera ({config['camera_index']}): {e}")
-            print(f"Nova tentativa em {CAMERA_RETRY_SECONDS} s")
+            log.error("Erro no stream da câmera (%s): %s. Nova tentativa em %d s",
+                      config['camera_index'], e, CAMERA_RETRY_SECONDS)
         time.sleep(CAMERA_RETRY_SECONDS)
 
 def run_yolo_stream(model):
@@ -248,7 +262,7 @@ def run_yolo_stream(model):
         verbose=False
     )
     
-    print(f"Abrindo câmera: {config['camera_index']}")
+    log.info("Abrindo câmera: %s", config['camera_index'])
     
     frame_count = 0
     # FPS medido em janelas de 1 s (a média desde o início escondia quedas)
@@ -258,7 +272,7 @@ def run_yolo_stream(model):
     for result in results_gen:
         frame_count += 1
         if frame_count == 1:
-            print("Stream YOLO iniciado!")
+            log.info("Stream YOLO iniciado!")
         
         # Calcula FPS
         fps_frames += 1
@@ -284,6 +298,9 @@ def run_yolo_stream(model):
                 boxes.xyxy.cpu().numpy(),
                 config['confidence'],
             )
+        if detections:
+            log.debug("Quadro %d: %s", frame_count, ", ".join(
+                f"{d['class']} ({d['material']}) {d['confidence']:.2f}" for d in detections))
         
         # Dispara o servo para a primeira detecção que cumpre as condições
         now = time.time()
@@ -292,7 +309,7 @@ def run_yolo_stream(model):
                                       now - state.last_detection_ts)
             if angle is None:
                 continue
-            print(f"→ Disparando imediatamente: {det['class']} → {det['material']} → {angle}°")
+            log.info("Disparando: %s → %s → %d°", det['class'], det['material'], angle)
             send_angle(state.serial_port, angle)
             
             state.processing = True
@@ -336,32 +353,29 @@ def run_yolo_stream(model):
 # ==== Main ====
 async def main():
     """Inicia WebSocket server e thread YOLO"""
-    print("=" * 50)
-    print("EcoVision - Sistema de Reciclagem com IA")
-    print("=" * 50)
-    print(f"Configuração: {CONFIG_FILE}")
-    print(f"Porta Serial: {config['serial_port']}")
-    print(f"Modelo YOLO: {config['model_path']}")
-    print(f"WebSocket: ws://localhost:8765")
-    print("=" * 50)
+    log.info("EcoVision - Sistema de Reciclagem com IA")
+    log.info("Configuração: %s", CONFIG_FILE)
+    log.info("Porta Serial: %s", config['serial_port'])
+    log.info("Modelo YOLO: %s", config['model_path'])
+    log.info("WebSocket: ws://localhost:8765")
     
     global SERVER_LOOP
     SERVER_LOOP = asyncio.get_running_loop()
 
     # Inicia thread YOLO
-    yolo_thread = Thread(target=process_yolo_stream, daemon=True)
+    yolo_thread = Thread(target=process_yolo_stream, name="yolo", daemon=True)
     yolo_thread.start()
     
     # Inicia WebSocket server
     async with websockets.serve(websocket_handler, "localhost", 8765):
-        print("✓ WebSocket server rodando!")
+        log.info("WebSocket server rodando!")
         await asyncio.Future()  # Roda forever
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n\nEncerrando EcoVision...")
+        log.info("Encerrando EcoVision...")
         ser = state.serial_port
         if ser:
             state.serial_port = None  # encerra a thread de leitura

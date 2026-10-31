@@ -15,6 +15,17 @@ python ecovision_local_modf.py      # pode ser chamado de qualquer pasta
 
 O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o backend segue em modo demonstração: detecta e transmite, mas não aciona o ESP32.
 
+### Logs
+
+O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo` e `serial`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
+
+```bash
+ECOVISION_LOG=DEBUG python ecovision_local_modf.py          # Linux/macOS
+set ECOVISION_LOG=DEBUG && python ecovision_local_modf.py   # Windows (cmd)
+```
+
+As bibliotecas (websockets etc.) só aparecem a partir de WARNING.
+
 ## `config.json`
 
 Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão definidos em `load_config()`. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar". O `config.example.json` traz os mesmos valores padrão, como referência para editar à mão (por exemplo, `cp config.example.json config.json`).

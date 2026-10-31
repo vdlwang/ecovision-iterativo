@@ -61,7 +61,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 
 | # | Status | Item | Recomendação |
 |---|---|---|---|
-| 14 | [ ] | `print` em vez de `logging`. | `logging` com INFO/DEBUG. Serve de base para o registro de latência por etapa (RF09 da monografia). |
+| 14 | [x] | `print` em vez de `logging`. | `logging` com INFO/DEBUG. Serve de base para o registro de latência por etapa (RF09 da monografia). |
 | 18 | [x] `026269d` | "Salvo localmente" grava no `localStorage` algo que ninguém lê. | Toast de erro. |
 | 19 | [x] | URL `ws://localhost:8765` repetida 3x; badge de status copiado em 3 painéis; lista de materiais duplicada no backend e no frontend; `MonitorPanel` adivinha o ícone por substring da classe em vez de usar `det.material`. | `src/config.ts` com URL e materiais; usar `det.material`. **Decisão: fazer agora só a URL, o badge e o `det.material`; a lista de materiais fica para a taxonomia hierárquica (seção 5.3.2), que vai substituí-la.** |
 | 20 | [x] | Bounding boxes desenhadas duas vezes (cv2 no backend + canvas no frontend); label com largura fixa de 200 px. | Manter só uma delas (preferência: frontend). |
@@ -84,7 +84,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 
 ## Testes de verificação dos FS
 
-**Os blocos A a D serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
+**Os blocos A a E serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
 
 Backup antes dos testes: `cp backend/config.json /tmp/config.bak.json`. Reinicie o backend a cada bloco (o Vite recarrega o frontend sozinho).
 
@@ -165,3 +165,19 @@ Firmware novo gravado. Backend + frontend rodando, esteira ligada. Acompanhar o 
 | 12 | Câmera por URL do celular (Wi-Fi) com o frontend aberto | Vídeo sem atraso crescente: mexer a mão diante da câmera aparece no Monitor com atraso constante |
 | 12 | Fechar todas as abas | O backend segue disparando o servo normalmente (a detecção não depende de cliente conectado) |
 
+### E. Padronização (14, 19, 20)
+
+Sem hardware: as fotos de `legado/database/tcc-0CF/YOLO_dataset/validation/images` como `camera_index` e `serial_port` inexistente (restaurar o `config.json` depois). Já conferido sem a UI: níveis e threads no log, `ECOVISION_LOG=DEBUG` com as detecções por quadro, disparo em modo demo e Ctrl+C. Os passos com ESP32 entram nos blocos B e D.
+
+| # | Passo | Esperado |
+|---|---|---|
+| 19 | Monitor com o backend rodando e depois parado | Badge "Backend Conectado" / "Backend Offline", igual ao de Cancelas e Modelo |
+| 19 | Detecções Ativas com papelão, lata, garrafa e uma classe `other` (ex.: `carded blister pack`) | Ícones 📄, 🔩, ♻️ (ou 🍾 no vidro) e 📦, pelo `material` e não pelo nome |
+| 20 | Vídeo no Monitor com detecções | Uma caixa só por objeto (antes havia a do cv2, mais fina, por baixo da do canvas); o label mostra classe, material e confiança, com fundo do tamanho do texto |
+| 20 | Objeto encostado na borda de cima do quadro | O label fica dentro da caixa, visível |
+| 14 | Subir o backend sem variável | Linhas `hora INFO [thread] ...`; nenhuma linha por quadro; sem logs do websockets |
+| 14 | `ECOVISION_LOG=DEBUG` | Também `Quadro N: classe (material) conf` e, com ESP32, `→ ESP32: <comando>` a cada envio |
+| 14 | `ECOVISION_LOG=xyz` | Sobe normalmente em INFO |
+| 14 | Com ESP32: passar um objeto e clicar Ligar/Parar | `Disparando: ...`, `ESP32: Servo movido ...` e `ESP32: OK MOTOR ...` em INFO, da thread `serial` |
+| 14 | Desconectar o cabo USB | `ERROR ... [DEMO] Falha ao ler da serial ...`, uma vez |
+| 14 | Windows (cmd): `set ECOVISION_LOG=DEBUG && python ecovision_local_modf.py` e `run.bat` | DEBUG funciona; acentos e `→` aparecem legíveis no console (se não, `chcp 65001`) |
