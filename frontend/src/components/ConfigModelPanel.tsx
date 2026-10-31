@@ -4,10 +4,11 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Slider } from './ui/slider';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 import { Save, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
+import { BadgeBackend } from './BadgeBackend';
+import { BACKEND_WS_URL } from '../config';
 import {
   Select,
   SelectContent,
@@ -42,7 +43,7 @@ export function ConfigModelPanel() {
   // Índice da webcam ("0") ou URL de stream; guardado como texto
   const [cameraIndex, setCameraIndex] = useState('0');
   const [connected, setConnected] = useState(false);
-  const { connected: wsConnected, send } = useStableWebSocket('ws://localhost:8765', {
+  const { connected: wsConnected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -109,9 +110,7 @@ export function ConfigModelPanel() {
           <h2 className="text-white text-xl md:text-2xl mb-1 md:mb-2">Configuração do Modelo</h2>
           <p className="text-neutral-400 text-sm md:text-base">Configure modelo YOLO, confiança e hardware</p>
         </div>
-        <Badge variant="outline" className={`${connected ? 'bg-green-600/20 text-green-600 border-green-600/30' : 'bg-red-600/20 text-red-600 border-red-600/30'}`}>
-          {connected ? 'Backend Conectado' : 'Backend Offline'}
-        </Badge>
+        <BadgeBackend connected={connected} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">

@@ -8,6 +8,7 @@ import { MonitorPanel } from './components/MonitorPanel';
 import { ConfigGatesPanel } from './components/ConfigGatesPanel';
 import { ConfigModelPanel } from './components/ConfigModelPanel';
 import { useStableWebSocket } from './hooks/useStableWebSocket';
+import { BACKEND_WS_URL } from './config';
 
 type Panel = 'monitor' | 'gates' | 'model';
 
@@ -15,7 +16,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentPanel, setCurrentPanel] = useState<Panel>('monitor');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { connected } = useStableWebSocket('ws://localhost:8765');
+  const { connected } = useStableWebSocket(BACKEND_WS_URL);
 
   // Painéis de configuração só com o backend conectado: se ele cair, volta para o Monitor
   useEffect(() => {

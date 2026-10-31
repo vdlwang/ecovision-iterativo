@@ -4,9 +4,12 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Play, Pause } from 'lucide-react';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
+import { BadgeBackend } from './BadgeBackend';
+import { BACKEND_WS_URL } from '../config';
 
 interface Detection {
   class: string;
+  material: string;
   confidence: number;
   bbox: [number, number, number, number];
 }
@@ -32,7 +35,7 @@ export function MonitorPanel() {
     return () => clearInterval(id);
   }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { connected, send } = useStableWebSocket('ws://localhost:8765', {
+  const { connected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
         const data: FrameData = JSON.parse(event.data);
@@ -90,21 +93,12 @@ export function MonitorPanel() {
     send({ command });
   };
 
+  // Ícone pelo material que o backend já mapeou (taco_to_material)
   const materialIcons: Record<string, string> = {
     'plastic': '♻️',
     'metal': '🔩',
-    'corrugated carton': '📦',
     'paper': '📄',
-    'cardboard': '📦',
     'glass': '🍾',
-  };
-
-  const getMaterialIcon = (className: string) => {
-    const lower = className.toLowerCase();
-    for (const [key, icon] of Object.entries(materialIcons)) {
-      if (lower.includes(key)) return icon;
-    }
-    return '📦';
   };
 
   return (
@@ -115,9 +109,7 @@ export function MonitorPanel() {
           <p className="text-neutral-400">Detecções YOLO + Controle da Esteira</p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="outline" className={`${connected ? 'bg-green-600/20 text-green-600 border-green-600/30' : 'bg-red-600/20 text-red-600 border-red-600/30'}`}>
-            {connected ? 'Conectado' : 'Desconectado'}
-          </Badge>
+          <BadgeBackend connected={connected} />
           <Badge variant="outline" className="bg-neutral-800 text-white border-neutral-700">
             {fps} FPS
           </Badge>
@@ -161,7 +153,7 @@ export function MonitorPanel() {
                   className="p-3 md:p-4 bg-neutral-800 rounded-lg text-center"
                 >
                   <div className="text-3xl md:text-4xl mb-2">
-                    {getMaterialIcon(detection.class)}
+                    {materialIcons[detection.material] ?? '📦'}
                   </div>
                   <p className="text-white text-xs md:text-sm mb-1 truncate" title={detection.class}>
                     {detection.class}
