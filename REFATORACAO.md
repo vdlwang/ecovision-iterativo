@@ -67,7 +67,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 | 20 | [x] `822aceb` | Bounding boxes desenhadas duas vezes (cv2 no backend + canvas no frontend); label com largura fixa de 200 px. | Manter só uma delas (preferência: frontend). |
 | 21 | — | Identificadores misturam inglês e português. | Política: **não** renomear em massa; português no código novo. |
 | 22 | [x] `53d7b51`, `7e54bfc` | Sem testes. | `backend/deteccao.py` (mapeamento, `deteccoes_do_quadro`, `angulo_a_disparar`) e 25 testes pytest em `backend/tests/`; `pytest` em `requirements-dev.txt`. |
-| 31 | [ ] | `requirements.txt` só tem limites inferiores (`>=`); o ambiente atual usa Python 3.14. | Fixar versões testadas. Fazer antes de qualquer retreinamento (RNF07, reprodutibilidade). |
+| 31 | [x] | `requirements.txt` só tem limites inferiores (`>=`); o ambiente atual usa Python 3.14. | Fixar versões testadas. Fazer antes de qualquer retreinamento (RNF07, reprodutibilidade). |
 | 33 | [x] `b5246b4` | `vite` em `dependencies` e em `devDependencies` (6.3.5); `package.json` com a indentação torta do Figma. **Decisão: mover para `devDependencies`.** | Remover de `dependencies` e normalizar a indentação; verificar com `npm run build`. |
 
 ## D — Documentação
@@ -84,7 +84,7 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 
 ## Testes de verificação dos FS
 
-**Os blocos A a E serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
+**Os blocos A a F serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
 
 Backup antes dos testes: `cp backend/config.json /tmp/config.bak.json`. Reinicie o backend a cada bloco (o Vite recarrega o frontend sozinho).
 
@@ -181,3 +181,15 @@ Sem hardware: as fotos de `legado/database/tcc-0CF/YOLO_dataset/validation/image
 | 14 | Com ESP32: passar um objeto e clicar Ligar/Parar | `Disparando: ...`, `ESP32: Servo movido ...` e `ESP32: OK MOTOR ...` em INFO, da thread `serial` |
 | 14 | Desconectar o cabo USB | `ERROR ... [DEMO] Falha ao ler da serial ...`, uma vez |
 | 14 | Windows (cmd): `set ECOVISION_LOG=DEBUG && python ecovision_local_modf.py` e `run.bat` | DEBUG funciona; acentos e `→` aparecem legíveis no console (se não, `chcp 65001`) |
+
+### F. Versões fixadas (31)
+
+Já conferido: `pytest backend/tests` (35 passam, 10 deles de `test_requirements.py`), `pip check` sem conflitos e `pip install --dry-run --ignore-installed -r backend/requirements-dev.txt` resolvendo as versões fixadas do zero (66 pacotes).
+
+| # | Passo | Esperado |
+|---|---|---|
+| 31 | Venv novo com Python 3.12 (Linux): `pip install -r backend/requirements-dev.txt` e `python -m pytest backend/tests` | Instala sem conflito; testes passam, inclusive a cobertura de classes do `best.pt` (sem skip) |
+| 31 | O mesmo no Windows, e depois `run.bat` | Instala; backend sobe e o vídeo chega ao Monitor |
+| 31 | Venv com Python 3.11 | O pip recusa o `numpy==2.5.4` (esperado: o README pede 3.12+) |
+| 31 | GPU: instalar a build CUDA do `torch==2.14.1` antes dos requirements | O pip mantém a build CUDA (`2.14.1+cuXXX`); `test_requirements.py` passa; `python -c "import torch; print(torch.cuda.is_available())"` → `True` |
+| 31 | Num venv com outra versão de um pacote (ex.: `pip install websockets==16.0`) | `test_requirements.py` falha apontando o pacote; voltar com `pip install -r backend/requirements.txt` |

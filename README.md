@@ -33,7 +33,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 
 ## Requisitos
 
-- **Python 3.10+**
+- **Python 3.12+** (as versões fixadas em `backend/requirements.txt` foram testadas com o 3.14)
 - **Node.js 18+** e npm
 - **PlatformIO** (CLI ou extensão do VS Code), para gravar o firmware
 - **Hardware:** webcam, ESP32 DevKit, servo MG996R, ponte H L298N e os motores DC da esteira

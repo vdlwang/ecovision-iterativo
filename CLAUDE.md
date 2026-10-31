@@ -8,7 +8,7 @@ EcoVision (a.k.a. CyberReciclagem): the 2025 undergraduate thesis (TCC, Engenhar
 
 The repo merges two histories from the thesis: its final version (`vitor-scosta/Ecovision`), which is the root and the base for all new work, and its preliminary version (`vitor-scosta/tcc-testes`) under `legado/`, kept only as reference. "Iterativo" in the repo name refers to the current work iterating on the thesis, not to `legado/`. Both upstreams are frozen. `origin` is `vdlwang/ecovision-iterativo`, a standalone repo (not a fork). `vdlwang/ecovision-fork` is the retired old fork, kept for reference. Never push to or open PRs against `vitor-scosta/tcc-testes`: it happened once by mistake (PR #3, reverted in #4).
 
-There is no linter or TypeScript type-check (no `tsconfig.json`; Vite only transpiles), and the only tests are pytest unit tests for `backend/deteccao.py` (no hardware, camera or frontend tests). The available checks are:
+There is no linter or TypeScript type-check (no `tsconfig.json`; Vite only transpiles), and the only tests are pytest unit tests for `backend/deteccao.py` plus `test_requirements.py`, which checks every backend requirement is pinned with `==` and matches the installed version (no hardware, camera or frontend tests). The available checks are:
 
 ```bash
 cd frontend && npm run build               # bundles the frontend; catches import/syntax errors
@@ -20,7 +20,7 @@ cd firmware && pio run                     # compile only, no upload
 ## Running things
 
 ```bash
-pip install -r backend/requirements.txt   # ultralytics, opencv-python, pyserial, websockets
+pip install -r backend/requirements.txt   # pinned (==), tested on Python 3.14; numpy 2.5 needs 3.12+. Bump all together
 cd frontend && npm install                 # deps pinned + package-lock; unpinned "*" deps broke clean installs before
 
 python backend/ecovision_local_modf.py     # official backend: WebSocket on localhost:8765 + webcam + serial
