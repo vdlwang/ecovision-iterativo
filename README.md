@@ -1,6 +1,6 @@
 # EcoVision - Sistema Inteligente de Reciclagem
 
-> **Origem:** este repositório dá continuidade ao EcoVision, TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**, com correções e melhorias. O ponto de partida é a versão final do TCC (`vitor-scosta/Ecovision@d6f5181`), que está na raiz. A versão preliminar (`vitor-scosta/tcc-testes`) fica em [`legado/`](legado/). O histórico de ambas foi preservado.
+> **Origem:** este repositório dá continuidade ao EcoVision, TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**, com correções e melhorias. O ponto de partida é a versão final do TCC (`vitor-scosta/Ecovision@d6f5181`), que está na raiz. A versão preliminar (`vitor-scosta/tcc-testes`) fica em [`legado/`](legado/). O histórico de ambas foi preservado. O que mudou desde a tese está em [`CHANGELOG.md`](CHANGELOG.md).
 
 Sistema de controle para esteira rolante de centro de reciclagem. Uma webcam filma a esteira, um modelo YOLOv8 identifica o material (plástico, metal, vidro ou papel) e um ESP32 move um único servo para desviar o objeto para a saída correta.
 
@@ -30,6 +30,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Diagramas (PlantUML) | `docs/diagrams/` | |
 | Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md) |
 | Problemas fora do código (modelo, dados, montagem, repositório) | | [`PROBLEMAS.md`](PROBLEMAS.md) |
+| Mudanças desde a tese (tag `tese-final`) | | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## Requisitos
 

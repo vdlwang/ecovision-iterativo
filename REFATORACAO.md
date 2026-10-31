@@ -10,7 +10,7 @@ Branch: `feature/refactoring-original-code`. Base de comparação: tag `tese-fin
 4. **P** — padronização com algumas mudanças: reorganiza ou unifica, com efeito pequeno e visível.
 5. **D** — documentação: junto com cada mudança; os itens próprios ficam para o final.
 
-Regra: commits de comportamento separados dos de limpeza, para `git diff tese-final` mostrar o que mudou de fato. A cada fix, atualizar "Limitações conhecidas" (`README.md`) e `CLAUDE.md` (item 27; o `PROBLEMAS.md` agora só guarda problemas fora do código).
+Regra: commits de comportamento separados dos de limpeza, para `git diff tese-final` mostrar o que mudou de fato. A cada fix, atualizar "Limitações conhecidas" (`README.md`), `CHANGELOG.md` e `CLAUDE.md` (item 27; o `PROBLEMAS.md` agora só guarda problemas fora do código).
 
 **Status**: `[ ]` pendente · `[x]` feito (com hash) · `[~]` parcial · `—` não se aplica
 
@@ -77,14 +77,14 @@ Regra: commits de comportamento separados dos de limpeza, para `git diff tese-fi
 | 23 | [x] `b5246b4` | `backend/config.example.json` desatualizado: chave `corrugated carton` em vez de `glass`, campos não lidos (`websocket_port`, `frame_*`, `fps_target`), `confidence` 0.45. Atualizar ou apagar. |
 | 24 | [x] `5198a85`, `1b7cfbd` | Mensagens que mandavam rodar `ecovision_local.py` e o "Reinicie o backend" após salvar ângulos. |
 | 25 | [ ] | `docs/diagrams/` descreve classes inexistentes (`YOLOPipeline` etc.), login Google e `detection_queue`. Marcar como "arquitetura proposta (tese)" ou refazer. **Decisão: adiar; a arquitetura muda com os módulos novos (rastreamento, registro, anotação), então os diagramas são refeitos uma vez só, para o capítulo 6.** |
-| 26 | [ ] | Sem registro do que mudou desde a tese. Criar `CHANGELOG.md` ou seção no README referenciando `tese-final`. |
+| 26 | [x] | Sem registro do que mudou desde a tese. Criar `CHANGELOG.md` ou seção no README referenciando `tese-final`. |
 | 27 | — | Regra contínua: atualizar "Limitações conhecidas" e `CLAUDE.md` a cada fix. `PROBLEMAS.md` reorganizado (`39b7b70`): só itens fora do código; P11 resolvido em `3f4f909`. |
 
 ---
 
 ## Testes de verificação dos FS
 
-**Os blocos A a F serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
+**Os blocos A a G serão executados de uma vez, antes do merge da branch na `main`.** Até lá, os itens FS e FC ficam sem confirmação em hardware.
 
 Backup antes dos testes: `cp backend/config.json /tmp/config.bak.json`. Reinicie o backend a cada bloco (o Vite recarrega o frontend sozinho).
 
@@ -193,3 +193,23 @@ Já conferido: `pytest backend/tests` (35 passam, 10 deles de `test_requirements
 | 31 | Venv com Python 3.11 | O pip recusa o `numpy==2.5.4` (esperado: o README pede 3.12+) |
 | 31 | GPU: instalar a build CUDA do `torch==2.14.1` antes dos requirements | O pip mantém a build CUDA (`2.14.1+cuXXX`); `test_requirements.py` passa; `python -c "import torch; print(torch.cuda.is_available())"` → `True` |
 | 31 | Num venv com outra versão de um pacote (ex.: `pip install websockets==16.0`) | `test_requirements.py` falha apontando o pacote; voltar com `pip install -r backend/requirements.txt` |
+
+### G. Changelog (26)
+
+Já conferido com os comandos abaixo: os 37 hashes citados existem; desde `e9f470b`, só ficam de fora commits de documentação (`31d4702`, `55ac556`, `c80c38d`).
+
+```bash
+# 1. Todo hash citado existe (nenhuma linha "FALTA")
+for h in $(grep -oE '\b[0-9a-f]{7}\b' CHANGELOG.md | sort -u); do
+  git cat-file -e "$h^{commit}" 2>/dev/null || echo "FALTA $h"; done
+# 2. Commits não citados (devem ser só de documentação)
+git log --no-merges --format=%h e9f470b..HEAD | while read h; do
+  grep -q "$h" CHANGELOG.md || git log -1 --format='%h %s' "$h"; done
+```
+
+| # | Passo | Esperado |
+|---|---|---|
+| 26 | Comando 1 | Nenhum `FALTA` |
+| 26 | Comando 2 | Só commits `docs:`/`doc:` |
+| 26 | Abrir `CHANGELOG.md` e o `README.md` no GitHub | Os links do README para o changelog funcionam; listas renderizam |
+| 26 | Depois dos blocos A a F | Tirar o parágrafo "Estado" do changelog, ou registrar o que falhou. Se o merge reescrever os commits (squash/rebase), atualizar os hashes citados |

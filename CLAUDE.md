@@ -56,7 +56,7 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 ## Documentation layout
 
-The root `README.md` stays short (overview, install, run, limitations) and links to `PROBLEMAS.md` (non-code issues) and to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints). Put details in the matching one.
+The root `README.md` stays short (overview, install, run, limitations) and links to `PROBLEMAS.md` (non-code issues), `CHANGELOG.md` (changes since tag `tese-final`, grouped by kind, citing commits; add an entry with each fix or behavior change) and to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints). Put details in the matching one.
 
 ## legado/
 
