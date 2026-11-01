@@ -31,6 +31,7 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Diagramas (PlantUML) | `docs/diagrams/` | |
 | Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md) |
 | Problemas da versão preliminar e observações sobre a monografia | | [`PROBLEMAS.md`](PROBLEMAS.md) |
+| Objetivo do sistema completo e tarefas (anotação por voto, revisão, retreino) | | [`OBJETIVO.md`](OBJETIVO.md) |
 
 ## Requisitos
 
