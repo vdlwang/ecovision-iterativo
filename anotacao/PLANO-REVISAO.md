@@ -7,8 +7,8 @@ Escopo atual do projeto (tarefa T1 do [`OBJETIVO.md`](../OBJETIVO.md), que descr
 **Status**: `[ ]` pendente · `[x]` feito (com hash) · `[~]` parcial
 
 **Ponto de partida**:
-- `anotar.py` (`e502a35`): o Grounding DINO propõe caixas e as grava direto em `labels/`, no formato YOLO.
-- `visualizar.py` (`3084516`): página estática (`file://`, só leitura) com as caixas de `labels/`.
+- `anotar.py` (`e502a35`): o Grounding DINO propõe caixas e as grava direto em `labels/`, no formato YOLO. Desde a fase 1 (`8a0253d`), grava propostas em `propostas/<anotador>/` e o status em `imagens.csv`.
+- `visualizar.py` (`3084516`): página estática (`file://`, só leitura) com as caixas de `labels/`; desde a fase 1, também as propostas.
 - `avaliar.py` (`b70ac8a`): mede um anotador contra os rótulos da equipe em `legado/database`.
 
 A ideia é separar o que o anotador propõe do que o revisor aprova, e evoluir a página para uma de revisão, servida por um servidor Python local.
@@ -88,7 +88,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 
 | # | Status | Entrega | Verificação |
 |---|---|---|---|
-| 1 | [ ] | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
+| 1 | [x] `8a0253d` | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
 | 2 | [ ] | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar; registro da revisão; `revisadas.txt` e `data.yaml` | pytest da API; teste manual |
 | 4 | [ ] | Desenhar, mover e redimensionar caixas; desfazer | teste manual (Chrome headless para captura) |
