@@ -79,10 +79,15 @@ def test_pagina(servidor):
     assert b"/api/imagens" in corpo
 
 
-def test_classes_com_material(servidor):
+def test_classes_com_material_e_atalho(servidor, saida):
+    # Fundo está no data.yaml mas não no classes.yaml; o atalho segue a ordem
+    # do classes.yaml, não o id
+    (saida / "data.yaml").write_text(
+        yaml.safe_dump({"names": {0: "Fundo", 1: "Lata", 2: "Garrafa"}}), encoding="utf-8")
     assert pedir_json(servidor + "/api/classes") == (200, [
-        {"id": 0, "nome": "Garrafa", "material": "plastic"},
-        {"id": 1, "nome": "Lata", "material": "metal"}])
+        {"id": 0, "nome": "Fundo", "material": None, "atalho": None},
+        {"id": 1, "nome": "Lata", "material": "metal", "atalho": 2},
+        {"id": 2, "nome": "Garrafa", "material": "plastic", "atalho": 1}])
 
 
 def test_fila_pendentes_mais_incertas_antes(servidor):

@@ -6,7 +6,7 @@ Lê o disco a cada requisição, então mudanças feitas à mão aparecem sem
 reiniciar. Escuta só em 127.0.0.1.
 
     GET /                          a página
-    GET /api/classes               [{id, nome, material}]
+    GET /api/classes               [{id, nome, material, atalho}]
     GET /api/imagens?status=&ordem= fila, anotadores e contagem por status
     GET /api/imagens/<nome>        propostas, anotação final, status e revisão
     PUT /api/imagens/<nome>        salva ou descarta uma pendente (saida.revisar)
@@ -44,9 +44,14 @@ class ErroHTTP(Exception):
 
 
 def listar_classes(saida, classes):
-    """Classes do data.yaml, com o material do classes.yaml quando o nome bate."""
-    materiais = {c["nome"]: c["material"] for c in classes}
-    return [{"id": i, "nome": n, "material": materiais.get(n)}
+    """
+    Classes do data.yaml. As que o anotador procura (classes.yaml) trazem o
+    material e o atalho, a posição delas na lista (1..), que a página usa nas
+    teclas 1-9 e no topo da busca; as outras, None.
+    """
+    do_anotador = {c["nome"]: (k, c["material"]) for k, c in enumerate(classes, 1)}
+    return [{"id": i, "nome": n, "material": do_anotador.get(n, (None, None))[1],
+             "atalho": do_anotador.get(n, (None, None))[0]}
             for i, n in sorted(formato.nomes_classes(saida).items())]
 
 

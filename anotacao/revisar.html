@@ -41,9 +41,10 @@
   .barra label { color: var(--suave); display: flex; gap: 6px; align-items: center; }
   #titulo { font-weight: 600; margin-right: auto; }
   .area { flex: 1; display: flex; align-items: center; justify-content: center;
-          padding: 14px; min-height: 0; }
+          padding: 14px; min-height: 0; overflow: hidden; }
   .quadro { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
-  .quadro img { display: block; max-width: 100%; max-height: calc(100vh - 170px); }
+  /* max-height vem do espaço livre da .area (ajustarImagem) */
+  .quadro img { display: block; max-width: 100%; }
   .caixa { position: absolute; border: 2px solid; }
   .caixa.proposta { border-style: dashed; }
   .editando .caixa { cursor: pointer; }
@@ -55,10 +56,24 @@
   .rodape { border-top: 1px solid var(--borda); padding: 8px 14px; display: grid; gap: 6px; }
   .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--suave); min-height: 21px; }
   .legenda i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
-  .paleta { display: flex; flex-wrap: wrap; gap: 6px; }
-  .paleta button { display: flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 13px; }
-  .paleta kbd { font: 11px ui-monospace, monospace; color: var(--suave); }
-  .paleta i { display: inline-block; width: 10px; height: 10px; }
+  .acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .acoes kbd, #opcoes kbd { font: 11px ui-monospace, monospace; color: var(--suave); }
+  .busca { position: relative; flex: 1 1 260px; max-width: 440px; }
+  .busca input { width: 100%; background: var(--fundo); color: var(--texto); font: inherit;
+                 border: 1px solid var(--borda); border-radius: 6px; padding: 4px 8px; }
+  .busca input:focus { outline: none; border-color: var(--destaque); }
+  .busca input:disabled { opacity: .45; }
+  #opcoes { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 10;
+            list-style: none; margin: 0; padding: 4px; max-height: 60vh; overflow-y: auto;
+            background: var(--painel); border: 1px solid var(--borda); border-radius: 6px;
+            box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  #opcoes li { display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+               border-radius: 4px; cursor: pointer; }
+  #opcoes li.ativa { background: #263445; }
+  #opcoes li.vazia { color: var(--suave); cursor: default; }
+  #opcoes i { flex: none; display: inline-block; width: 10px; height: 10px; }
+  #opcoes b { color: var(--destaque); font-weight: 600; }
+  #opcoes .material { margin-left: auto; color: var(--suave); font-size: 12px; }
   .dica { color: var(--suave); font-size: 12px; }
   .erro { color: var(--perigo); }
   @media (max-width: 700px) {
@@ -105,13 +120,17 @@
   <div class="area" id="area"><div class="quadro" id="quadro"><img id="imagem" alt=""></div></div>
   <div class="rodape">
     <div class="legenda" id="legenda"></div>
-    <div class="paleta" id="paleta" hidden></div>
-    <div class="paleta" id="acoes" hidden>
+    <div class="acoes" id="acoes" hidden>
+      <div class="busca">
+        <input id="busca" autocomplete="off" spellcheck="false" aria-label="classe da caixa">
+        <ul id="opcoes" hidden></ul>
+      </div>
       <button class="salvar" id="salvar" title="Enter">Salvar e próxima <kbd>Enter</kbd></button>
       <button class="descartar" id="descartar" title="D">Descartar imagem <kbd>D</kbd></button>
       <button id="remover" title="Del" disabled>Remover caixa <kbd>Del</kbd></button>
-      <span class="dica">Clique ou <kbd>Tab</kbd> seleciona; <kbd>1</kbd>–<kbd>9</kbd> trocam a
-        classe; <kbd>Esc</kbd> desfaz a seleção.</span>
+      <span class="dica">Clique numa caixa e escreva a classe (<kbd>/</kbd> abre a busca,
+        <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem); <kbd>Tab</kbd> troca de caixa;
+        <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador; <kbd>Esc</kbd> desfaz a seleção.</span>
     </div>
   </div>
 </main>
@@ -127,6 +146,7 @@ let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
 let edicao = null;    // {base, caixas: [{id, caixa, proposta, tocada}], sel, sujo} se editável
 let pedido = 0;       // descarta respostas de pedidos já superados
+let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
 const nomeClasse = id => classes.find(c => c.id === id)?.nome;
 
 async function api(rota, opcoes) {
@@ -264,7 +284,7 @@ function desenhar() {
   const quadro = $("quadro"), legenda = $("legenda");
   quadro.querySelectorAll(".caixa").forEach(c => c.remove());
   quadro.classList.toggle("editando", !!editando());
-  $("paleta").hidden = $("acoes").hidden = !editando();
+  $("acoes").hidden = !editando();
   if (!detalhe) {
     $("titulo").textContent = "";
     $("imagem").removeAttribute("src");
@@ -321,7 +341,8 @@ function desenharEdicao() {
     const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
                          c.caixa, !c.tocada);
     div.classList.toggle("selecionada", edicao.sel === k);
-    div.onmousedown = e => { e.stopPropagation(); selecionar(k); };
+    // preventDefault: o clique não tira o foco da busca, que abre em seguida
+    div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); selecionar(k); abrirBusca(); };
     quadro.append(div);
   }
   atualizarVisibilidade();
@@ -337,26 +358,22 @@ function desenharEdicao() {
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
       textContent: " Há caixa com classe fora do data.yaml: troque a classe ou remova." }));
   $("remover").disabled = edicao.sel === null;
-  $("paleta").querySelectorAll("button").forEach(b =>
-    b.disabled = edicao.sel === null);
+  const campo = $("busca");
+  campo.disabled = edicao.sel === null;
+  campo.placeholder = edicao.sel === null ? "selecione uma caixa para trocar a classe"
+    : `classe da caixa ${ordemLeitura(edicao.caixas).indexOf(edicao.sel) + 1} de `
+      + `${edicao.caixas.length}: escreva o nome (/)`;
+  if (campo.disabled) fecharBusca();
 }
 
 const area = ([x1, y1, x2, y2]) => (x2 - x1) * (y2 - y1);
 
-function montarPaleta() {
-  const paleta = $("paleta");
-  paleta.replaceChildren();
-  classes.forEach((c, i) => {
-    const botao = document.createElement("button");
-    const amostra = document.createElement("i");
-    amostra.style.background = cor(c.id);
-    botao.append(...(i < 9 ? [Object.assign(document.createElement("kbd"),
-      { textContent: i + 1 })] : []), amostra, c.nome);
-    botao.title = `trocar a classe da caixa selecionada (${c.material ?? "?"})`;
-    botao.onclick = () => trocarClasse(c.id);
-    paleta.append(botao);
-  });
+// A imagem ocupa o espaço livre da .area, qualquer que seja a altura do rodapé
+function ajustarImagem() {
+  const estreita = matchMedia("(max-width: 700px)").matches;
+  $("imagem").style.maxHeight = estreita ? "" : `${Math.max(100, $("area").clientHeight - 28)}px`;
 }
+new ResizeObserver(ajustarImagem).observe($("area"));
 
 function atualizarVisibilidade() {
   const caixas = $("mostrar-caixas").checked;
@@ -376,7 +393,133 @@ function trocarClasse(id) {
   if (!editando() || edicao.sel === null) return;
   const c = edicao.caixas[edicao.sel];
   if (c.id !== id) { c.id = id; c.tocada = true; edicao.sujo = true; }
+  recentes = [id, ...recentes.filter(r => r !== id)].slice(0, 20);
   desenhar();
+}
+
+// Ordem de leitura pelos centros das caixas: linhas de cima para baixo e, em
+// cada linha, da esquerda para a direita. Uma caixa entra na linha atual se o
+// centro dela cai na faixa vertical da primeira caixa da linha (a mais alta).
+function ordemLeitura(caixas) {
+  const cx = k => (caixas[k].caixa[0] + caixas[k].caixa[2]) / 2;
+  const cy = k => (caixas[k].caixa[1] + caixas[k].caixa[3]) / 2;
+  const linhas = [];
+  for (const k of caixas.map((_, k) => k).sort((a, b) => cy(a) - cy(b))) {
+    const linha = linhas.at(-1);
+    if (linha && cy(k) <= caixas[linha[0]].caixa[3]) linha.push(k);
+    else linhas.push([k]);
+  }
+  return linhas.flatMap(linha => linha.sort((a, b) => cx(a) - cx(b)));
+}
+
+function selecionarVizinha(passo) {
+  const ordem = ordemLeitura(edicao.caixas), n = ordem.length;
+  if (!n) return;
+  const i = ordem.indexOf(edicao.sel);
+  selecionar(i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]);
+}
+
+// --- busca da classe ----------------------------------------------------------
+// Casa sem diferenciar maiúsculas nem acentos: início do nome, início de uma
+// palavra, iniciais ("cpb" -> Clear plastic bottle), trecho qualquer e, por
+// último, o material (em português ou inglês). Empates: as usadas há pouco,
+// depois as do anotador, depois o id.
+
+const MAX_OPCOES = 9;
+const MATERIAIS = { plastic: ["plastico", "plastic"], metal: ["metal"], glass: ["vidro", "glass"],
+                    paper: ["papel", "paper"], other: ["outro", "other"] };
+const normalizar = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const busca = { opcoes: [], ativa: 0 };
+
+// [nível, início, fim do trecho casado] ou null; início null: sem destaque
+function casarClasse(consulta, c) {
+  const nome = normalizar(c.nome);
+  if (nome.startsWith(consulta)) return [0, 0, consulta.length];
+  const palavras = [...nome.matchAll(/[a-z0-9]+/g)];
+  const palavra = palavras.find(p => p[0].startsWith(consulta));
+  if (palavra) return [1, palavra.index, palavra.index + consulta.length];
+  if (consulta.length > 1 && palavras.map(p => p[0][0]).join("").startsWith(consulta))
+    return [2, null, null];
+  const i = nome.indexOf(consulta);
+  if (i >= 0) return [3, i, i + consulta.length];
+  if ((MATERIAIS[c.material] ?? []).some(m => m.startsWith(consulta))) return [4, null, null];
+  return null;
+}
+
+function opcoesPara(texto) {
+  const consulta = normalizar(texto.trim());
+  const lista = consulta
+    ? classes.map(c => [c, casarClasse(consulta, c)]).filter(([, m]) => m)
+        .map(([c, [nivel, inicio, fim]]) => ({ c, nivel, inicio, fim }))
+    : classes.filter(c => c.atalho !== null || recentes.includes(c.id))
+        .map(c => ({ c, nivel: 0, inicio: null }));
+  const chave = o => {
+    const r = recentes.indexOf(o.c.id);
+    return [o.nivel, r < 0 ? Infinity : r, o.c.atalho ?? Infinity, o.c.id];
+  };
+  const comparar = (a, b) => {
+    const [ka, kb] = [chave(a), chave(b)];
+    const i = ka.findIndex((v, j) => v !== kb[j]);
+    return i < 0 ? 0 : ka[i] < kb[i] ? -1 : 1;
+  };
+  return lista.sort(comparar).slice(0, MAX_OPCOES);
+}
+
+function abrirBusca() {
+  if (!editando() || edicao.sel === null) return;
+  $("busca").focus();
+  $("busca").select();
+  mostrarOpcoes();
+}
+
+function fecharBusca() {
+  $("busca").value = "";
+  $("opcoes").hidden = true;
+  if (document.activeElement === $("busca")) $("busca").blur();
+}
+
+function mostrarOpcoes() {
+  const lista = $("opcoes");
+  if (document.activeElement !== $("busca") || !editando() || edicao.sel === null) {
+    lista.hidden = true;
+    return;
+  }
+  busca.opcoes = opcoesPara($("busca").value);
+  busca.ativa = Math.min(busca.ativa, Math.max(busca.opcoes.length - 1, 0));
+  lista.replaceChildren();
+  if (!busca.opcoes.length) lista.append(Object.assign(document.createElement("li"),
+    { className: "vazia", textContent: "Nenhuma classe com esse nome." }));
+  busca.opcoes.forEach(({ c, inicio, fim }, k) => {
+    const li = document.createElement("li");
+    li.classList.toggle("ativa", k === busca.ativa);
+    const amostra = document.createElement("i");
+    amostra.style.background = cor(c.id);
+    const nome = document.createElement("span");
+    // Destaque só se normalizar não mudou o tamanho do nome (sem acentos)
+    if (inicio !== null && normalizar(c.nome).length === c.nome.length)
+      nome.append(c.nome.slice(0, inicio),
+                  Object.assign(document.createElement("b"), { textContent: c.nome.slice(inicio, fim) }),
+                  c.nome.slice(fim));
+    else nome.textContent = c.nome;
+    const material = Object.assign(document.createElement("span"),
+      { className: "material", textContent: c.material ?? "" });
+    li.append(amostra, nome, material);
+    if (c.atalho !== null && c.atalho <= 9)
+      li.append(Object.assign(document.createElement("kbd"), { textContent: c.atalho }));
+    li.title = `id ${c.id}`;
+    // mousedown com preventDefault: escolhe antes de a busca perder o foco
+    li.onmousedown = e => { e.preventDefault(); escolherOpcao(k); };
+    lista.append(li);
+  });
+  lista.hidden = false;
+  lista.querySelector(".ativa")?.scrollIntoView({ block: "nearest" });
+}
+
+function escolherOpcao(k) {
+  const opcao = busca.opcoes[k];
+  if (!opcao) return;
+  fecharBusca();
+  trocarClasse(opcao.c.id);
 }
 
 function remover() {
@@ -420,6 +563,27 @@ $("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
 $("salvar").onclick = () => enviar("salvar");
 $("descartar").onclick = () => enviar("descartar");
 $("remover").onclick = remover;
+$("busca").oninput = () => { busca.ativa = 0; mostrarOpcoes(); };
+$("busca").onfocus = mostrarOpcoes;
+$("busca").onblur = () => { $("opcoes").hidden = true; };
+$("busca").onkeydown = e => {
+  const n = busca.opcoes.length;
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
+    e.preventDefault();
+    busca.ativa = (busca.ativa + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
+    mostrarOpcoes();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    escolherOpcao(busca.ativa);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    fecharBusca();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    fecharBusca();
+    selecionarVizinha(e.shiftKey ? -1 : 1);
+  }
+};
 $("area").onmousedown = () => { if (editando() && edicao.sel !== null) selecionar(null); };
 
 document.addEventListener("keydown", e => {
@@ -427,13 +591,14 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") { if (podeSair()) mostrar(atual - 1); return; }
   if (e.key === "ArrowRight") { if (podeSair()) mostrar(atual + 1); return; }
   if (!editando()) return;
-  const n = edicao.caixas.length;
-  if (e.key === "Tab" && n) {
+  if (e.key === "Tab" && edicao.caixas.length) {
     e.preventDefault();
-    const passo = e.shiftKey ? -1 : 1;
-    selecionar(edicao.sel === null ? (passo > 0 ? 0 : n - 1) : (edicao.sel + passo + n) % n);
-  } else if (/^[1-9]$/.test(e.key) && classes[Number(e.key) - 1]) {
-    trocarClasse(classes[Number(e.key) - 1].id);
+    selecionarVizinha(e.shiftKey ? -1 : 1);
+  } else if (e.key === "/" && edicao.sel !== null) {
+    e.preventDefault();
+    abrirBusca();
+  } else if (/^[1-9]$/.test(e.key) && classes.some(c => c.atalho === Number(e.key))) {
+    trocarClasse(classes.find(c => c.atalho === Number(e.key)).id);
   } else if (e.key === "Delete" || e.key === "Backspace") {
     e.preventDefault();
     remover();
@@ -451,7 +616,6 @@ document.addEventListener("keydown", e => {
 // pendentes, a fila passa a mostrar todas
 async function iniciar() {
   classes = await api("/api/classes");
-  montarPaleta();
   const pedida = decodeURIComponent(location.hash.slice(1));
   await carregarFila(pedida);
   if (pedida && nomeAtual() !== pedida) {

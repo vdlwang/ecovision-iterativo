@@ -110,12 +110,17 @@ Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas pro
 
 | Ação | Mouse | Teclado |
 |---|---|---|
-| Selecionar caixa | clique | `Tab` / `Shift+Tab` |
-| Trocar a classe | botão da classe, embaixo | `1`–`9` |
+| Selecionar caixa | clique (já abre a busca) | `Tab` / `Shift+Tab`, em ordem de leitura |
+| Trocar a classe | escrever no campo de busca e clicar na opção | `/`, escrever, `↑`/`↓`, `Enter` |
+| Trocar para uma classe do anotador | — | `1`–`9`, na ordem de `classes` no `classes.yaml` |
 | Remover caixa | "Remover caixa" | `Del` |
 | Desfazer a seleção | clique fora das caixas | `Esc` |
 | Salvar e ir para a próxima | "Salvar e próxima" | `Enter` |
 | Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` |
+
+O `Tab` segue a ordem de leitura pelos centros das caixas: linhas de cima para baixo e, em cada linha, da esquerda para a direita. Uma caixa entra na linha atual se o centro dela cai na faixa vertical da primeira caixa da linha, a mais alta. O campo de busca mostra a posição da caixa nessa ordem ("caixa 2 de 7").
+
+A busca oferece qualquer classe do `data.yaml` e mostra até 9 opções. Não diferencia maiúsculas nem acentos e casa, nesta ordem: o início do nome, o início de uma palavra ("can" → `Drink can`), as iniciais ("cpb" → `Clear plastic bottle`), um trecho qualquer e o material, em português ou inglês ("vidro" → as classes de vidro do anotador; só elas têm material). Nos empates, vêm antes as classes usadas há pouco e as do anotador. Com o campo vazio, a lista mostra essas mesmas. Na busca, `Esc` fecha sem trocar e `Tab` passa para a caixa seguinte.
 
 Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava `labels/<nome>.txt` e marca a imagem como `revisada`; descartar apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
 

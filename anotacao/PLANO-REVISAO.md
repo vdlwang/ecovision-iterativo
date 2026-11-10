@@ -61,7 +61,7 @@ O RNF08 pede revisão mais rápida que anotação manual: o fluxo comum deve cab
 | Ação | Mouse | Teclado |
 |---|---|---|
 | Selecionar caixa | clique | `Tab` |
-| Trocar a classe | menu na caixa | `1`–`9` |
+| Trocar a classe | clique na caixa abre a busca por nome (feito, 2026-11-10) | `/` e escrever; `1`–`9` para as classes do anotador |
 | Remover caixa | botão | `Del` |
 | Desenhar caixa nova | arrastar numa área vazia | `N` e depois arrastar |
 | Ajustar ou mover caixa | alças nos cantos | — |
