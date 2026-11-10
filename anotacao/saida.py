@@ -270,3 +270,143 @@ def tamanho_imagem(caminho):
     """(largura, altura) lendo só o cabeçalho."""
     with Image.open(caminho) as imagem:
         return imagem.size
+
+
+# --- revisão (PLANO-REVISAO.md, seção 5) ------------------------------------
+
+ACOES = ("salvar", "descartar")
+TOLERANCIA_CAIXA = 1e-5  # caixa "igual" à da proposta, em coordenadas normalizadas
+
+
+class RevisaoInvalida(ValueError):
+    """Pedido de revisão recusado; status sugere o código HTTP."""
+
+    def __init__(self, mensagem, status=400):
+        super().__init__(mensagem)
+        self.status = status
+
+
+def caminho_revisao(saida, nome):
+    return Path(saida) / "revisoes" / f"{Path(nome).stem}.json"
+
+
+def ler_revisao(saida, nome):
+    caminho = caminho_revisao(saida, nome)
+    if not caminho.exists():
+        return None
+    try:
+        return json.loads(caminho.read_text(encoding="utf-8"))
+    except ValueError as erro:
+        raise ValueError(f"{caminho}: registro inválido ({erro})") from None
+
+
+def validar_caixas(caixas, nomes, propostas):
+    """
+    Confere as caixas finais vindas da página e devolve-as como
+    [(id, (x1, y1, x2, y2), índice da proposta ou None)]. propostas: as caixas
+    normalizadas do anotador de base. Enquanto a página não move caixas (fase
+    4), uma caixa que vem de uma proposta tem de ter as coordenadas dela.
+    """
+    if not isinstance(caixas, list):
+        raise RevisaoInvalida("'caixas' deve ser uma lista")
+    usadas, resultado = set(), []
+    for i, c in enumerate(caixas):
+        try:
+            id_classe, caixa, proposta = c["id"], c["caixa"], c.get("proposta")
+            caixa = tuple(float(v) for v in caixa)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise RevisaoInvalida(f"caixa {i} inválida: {c!r}") from None
+        if not isinstance(id_classe, int) or isinstance(id_classe, bool) or id_classe not in nomes:
+            raise RevisaoInvalida(f"caixa {i}: classe {id_classe!r} fora do data.yaml")
+        if len(caixa) != 4 or not (0 <= caixa[0] < caixa[2] <= 1 and 0 <= caixa[1] < caixa[3] <= 1):
+            raise RevisaoInvalida(f"caixa {i}: coordenadas fora de [0, 1] ou invertidas: {caixa}")
+        if proposta is not None:
+            if (not isinstance(proposta, int) or isinstance(proposta, bool)
+                    or not 0 <= proposta < len(propostas)):
+                raise RevisaoInvalida(f"caixa {i}: proposta {proposta!r} não existe")
+            if proposta in usadas:
+                raise RevisaoInvalida(f"caixa {i}: proposta {proposta} usada duas vezes")
+            usadas.add(proposta)
+            original = propostas[proposta][2]
+            if any(abs(a - b) > TOLERANCIA_CAIXA for a, b in zip(caixa, original)):
+                raise RevisaoInvalida(f"caixa {i}: coordenadas diferentes das da proposta "
+                                      f"{proposta} (mover caixas é a fase 4)")
+            caixa = original  # sem o arredondamento da página
+        resultado.append((id_classe, caixa, proposta))
+    return resultado
+
+
+def desfechos(caixas, propostas, ids):
+    """
+    Desfecho de cada caixa final frente à proposta de origem: 'aceita',
+    'classe_corrigida' ou 'adicionada' (sem proposta); e os índices das
+    propostas removidas. ids: {nome da classe: id}.
+    """
+    registro = []
+    for id_classe, caixa, proposta in caixas:
+        if proposta is None:
+            desfecho = "adicionada"
+        elif ids.get(propostas[proposta][0]) == id_classe:
+            desfecho = "aceita"
+        else:
+            desfecho = "classe_corrigida"
+        registro.append({"id": id_classe, "caixa": [round(v, 6) for v in caixa],
+                         "proposta": proposta, "desfecho": desfecho})
+    usadas = {p for _, _, p in caixas if p is not None}
+    return registro, [i for i in range(len(propostas)) if i not in usadas]
+
+
+def revisar(saida, nome, pedido, agora):
+    """
+    Aplica a revisão de uma imagem pendente. pedido: {acao, base, caixas,
+    tempo_ativo_s}, como a página envia. Grava labels/, depois revisoes/ e por
+    último o status em imagens.csv: interrompida no meio, a imagem continua
+    pendente. Guarda só a última revisão. Devolve o registro gravado.
+    """
+    saida = Path(saida)
+    colunas, linhas = ler_estado(saida)
+    if nome not in linhas:
+        raise RevisaoInvalida(f"imagem '{nome}' não está no imagens.csv", 404)
+    if linhas[nome]["status"] != "pendente":
+        raise RevisaoInvalida(f"'{nome}' está {linhas[nome]['status']}; só pendentes são "
+                              "editáveis (reabrir é a fase 5)", 409)
+    if not isinstance(pedido, dict) or pedido.get("acao") not in ACOES:
+        raise RevisaoInvalida(f"'acao' deve ser uma de {', '.join(ACOES)}")
+    tempo = pedido.get("tempo_ativo_s", 0)
+    if not isinstance(tempo, (int, float)) or isinstance(tempo, bool) or tempo < 0:
+        raise RevisaoInvalida("'tempo_ativo_s' deve ser um número não negativo")
+
+    nomes = nomes_classes(saida)
+    base = pedido.get("base")
+    proposta, propostas = None, []
+    if base is not None:
+        caminho = caminho_proposta(saida, str(base), nome) if base in anotadores(saida) else None
+        if caminho is None or not caminho.exists():
+            raise RevisaoInvalida(f"'{nome}' não tem proposta de '{base}'")
+        proposta = ler_proposta(caminho)
+        propostas = caixas_normalizadas(proposta)
+
+    rotulo = saida / "labels" / f"{Path(nome).stem}.txt"
+    if pedido["acao"] == "salvar":
+        caixas = validar_caixas(pedido.get("caixas", []), nomes, propostas)
+        registro_caixas, removidas = desfechos(caixas, propostas, {n: i for i, n in nomes.items()})
+        gravar_atomico(rotulo, "".join(linha_yolo(i, c) + "\n" for i, c, _ in caixas))
+        status = "revisada"
+    else:
+        registro_caixas, removidas = [], list(range(len(propostas)))
+        rotulo.unlink(missing_ok=True)
+        status = "descartada"
+
+    registro = {
+        "imagem": nome, "acao": pedido["acao"], "data": agora,
+        "tempo_ativo_s": round(float(tempo), 1), "revisor": None,
+        "base": None if proposta is None else {
+            "anotador": proposta["anotador"], "versao": proposta.get("versao"),
+            "classes": proposta.get("classes")},
+        "caixas": registro_caixas, "removidas": removidas,
+    }
+    gravar_atomico(caminho_revisao(saida, nome),
+                   json.dumps(registro, ensure_ascii=False, indent=1) + "\n")
+    linhas[nome]["status"] = status
+    gravar_estado(saida, colunas, linhas)
+    return registro

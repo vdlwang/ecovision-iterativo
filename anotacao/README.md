@@ -51,6 +51,7 @@ anotacoes/
 ├── images/foto.jpg
 ├── propostas/grounding-dino/foto.json # o que o anotador propôs, com a confiança
 ├── labels/foto.txt                    # rótulos finais (YOLO): só depois da revisão ou de --aceitar
+├── revisoes/foto.json                 # registro da última revisão (tempo, desfecho de cada caixa)
 ├── imagens.csv                        # nome e status de cada imagem: pendente, revisada, descartada
 ├── revisadas.txt                      # imagens revisadas com rótulo; gerado de imagens.csv
 ├── previa/grounding-dino/foto.jpg     # só com --previa
@@ -101,20 +102,50 @@ python anotacao/revisar.py anotacoes --abrir      # http://127.0.0.1:8000/
 python anotacao/revisar.py anotacoes --porta 8001
 ```
 
-A página mostra a fila das imagens `pendente`, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os filtros trocam o status (`revisada`, `descartada`, todas) e a ordem (por nome). A imagem aparece como no `visualizar.html`, com o mesmo seletor "mostrar". As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
+A página mostra a fila das imagens `pendente`, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os filtros trocam o status (`revisada`, `descartada`, todas) e a ordem (por nome). As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
 
-O servidor escuta só em `127.0.0.1` e lê o disco a cada pedido, então mudanças feitas à mão aparecem ao recarregar. **Por enquanto, a página só mostra.** Corrigir, salvar e descartar são a fase 3 do [`PLANO-REVISAO.md`](PLANO-REVISAO.md).
+### Edição
 
-A API, em JSON, é a mesma que a página usa:
+Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas propostas pelo anotador (o primeiro em ordem alfabética, se houver vários) podem ser corrigidas. Proposta intocada aparece tracejada, com a confiança; caixa corrigida, em linha contínua.
+
+| Ação | Mouse | Teclado |
+|---|---|---|
+| Selecionar caixa | clique | `Tab` / `Shift+Tab` |
+| Trocar a classe | botão da classe, embaixo | `1`–`9` |
+| Remover caixa | "Remover caixa" | `Del` |
+| Desfazer a seleção | clique fora das caixas | `Esc` |
+| Salvar e ir para a próxima | "Salvar e próxima" | `Enter` |
+| Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` |
+
+Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava `labels/<nome>.txt` e marca a imagem como `revisada`; descartar apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
+
+Ainda não dá para desenhar, mover ou redimensionar caixas (fase 4), nem reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
+
+Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for revisada de novo:
+
+```json
+{"imagem": "foto.jpg", "acao": "salvar", "data": "2026-11-10T00:13:30-03:00",
+ "tempo_ativo_s": 6.0, "revisor": null,
+ "base": {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny", "classes": "<hash>"},
+ "caixas": [{"id": 2, "caixa": [x1, y1, x2, y2], "proposta": 0, "desfecho": "classe_corrigida"}],
+ "removidas": [1]}
+```
+
+O desfecho de cada caixa (`aceita`, `classe_corrigida`, `adicionada`) é calculado pelo servidor frente à proposta de origem, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+
+### Servidor e API
+
+O servidor escuta só em `127.0.0.1` e lê o disco a cada pedido, então mudanças feitas à mão aparecem ao recarregar. Gravações aceitam só o `Host` local, para que um site aberto no navegador não consiga gravar pela porta (DNS rebinding). A API, em JSON, é a mesma que a página usa:
 
 | Rota | Resposta |
 |---|---|
 | `GET /api/classes` | `[{id, nome, material}]` |
 | `GET /api/imagens?status=pendente&ordem=incerteza` | `{imagens: [{nome, status, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}` |
 | `GET /api/imagens/<nome>` | `{nome, status, largura, altura, final, propostas: {anotador: [...]}, invalidas, revisao}` |
+| `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", base, tempo_ativo_s, caixas: [{id, caixa, proposta}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado), 409 se a imagem não está pendente |
 | `GET /images/<nome>` | A imagem |
 
-As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. Só imagens que estão no `imagens.csv` são servidas.
+As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. No `PUT`, `proposta` é o índice da caixa de origem nas propostas de `base`, ou `null` para uma caixa nova. Só imagens que estão no `imagens.csv` são servidas. A gravação segue a ordem `labels/`, `revisoes/` e, por último, o status em `imagens.csv`: interrompida no meio, a imagem continua pendente.
 
 ## Novo anotador
 

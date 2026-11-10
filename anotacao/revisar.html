@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Revisão</title>
-<!-- Servida pelo revisar.py; os dados vêm da API em /api. Por enquanto só lê. -->
+<!-- Servida pelo revisar.py; os dados vêm da API em /api. -->
 <style>
   :root { --fundo: #111418; --painel: #1b2027; --borda: #2c333d; --texto: #e6e9ee;
-          --suave: #9aa4b2; --destaque: #22c55e; --alerta: #f59e0b; }
+          --suave: #9aa4b2; --destaque: #22c55e; --alerta: #f59e0b; --perigo: #ef4444; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--fundo);
          color: var(--texto); display: flex; height: 100vh; }
@@ -33,23 +33,34 @@
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .barra { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
            border-bottom: 1px solid var(--borda); flex-wrap: wrap; }
-  .barra button { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
-                  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+           border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.salvar { background: #15532e; border-color: var(--destaque); }
+  button.descartar { border-color: var(--perigo); }
   .barra label { color: var(--suave); display: flex; gap: 6px; align-items: center; }
   #titulo { font-weight: 600; margin-right: auto; }
   .area { flex: 1; display: flex; align-items: center; justify-content: center;
           padding: 14px; min-height: 0; }
   .quadro { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
-  .quadro img { display: block; max-width: 100%; max-height: calc(100vh - 130px); }
+  .quadro img { display: block; max-width: 100%; max-height: calc(100vh - 170px); }
   .caixa { position: absolute; border: 2px solid; }
   .caixa.proposta { border-style: dashed; }
+  .editando .caixa { cursor: pointer; }
+  .caixa.selecionada { border-width: 3px; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,.6); }
   .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
                 color: #000; white-space: nowrap; }
+  .caixa.sem-classe { border-color: var(--perigo) !important; }
   .sem-rotulos .caixa span { display: none; }
-  .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 14px;
-             border-top: 1px solid var(--borda); color: var(--suave); min-height: 37px; }
+  .rodape { border-top: 1px solid var(--borda); padding: 8px 14px; display: grid; gap: 6px; }
+  .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--suave); min-height: 21px; }
   .legenda i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
-  .erro { color: #ef4444; }
+  .paleta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .paleta button { display: flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 13px; }
+  .paleta kbd { font: 11px ui-monospace, monospace; color: var(--suave); }
+  .paleta i { display: inline-block; width: 10px; height: 10px; }
+  .dica { color: var(--suave); font-size: 12px; }
+  .erro { color: var(--perigo); }
   @media (max-width: 700px) {
     body { flex-direction: column; height: auto; min-height: 100vh; }
     aside { width: auto; max-height: 35vh; border-right: 0; border-bottom: 1px solid var(--borda); }
@@ -91,8 +102,18 @@
     <button id="anterior" title="Seta para a esquerda">&larr;</button>
     <button id="proxima" title="Seta para a direita">&rarr;</button>
   </div>
-  <div class="area"><div class="quadro" id="quadro"><img id="imagem" alt=""></div></div>
-  <div class="legenda" id="legenda"></div>
+  <div class="area" id="area"><div class="quadro" id="quadro"><img id="imagem" alt=""></div></div>
+  <div class="rodape">
+    <div class="legenda" id="legenda"></div>
+    <div class="paleta" id="paleta" hidden></div>
+    <div class="paleta" id="acoes" hidden>
+      <button class="salvar" id="salvar" title="Enter">Salvar e próxima <kbd>Enter</kbd></button>
+      <button class="descartar" id="descartar" title="D">Descartar imagem <kbd>D</kbd></button>
+      <button id="remover" title="Del" disabled>Remover caixa <kbd>Del</kbd></button>
+      <span class="dica">Clique ou <kbd>Tab</kbd> seleciona; <kbd>1</kbd>–<kbd>9</kbd> trocam a
+        classe; <kbd>Esc</kbd> desfaz a seleção.</span>
+    </div>
+  </div>
 </main>
 <script>
 const CORES = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6",
@@ -100,13 +121,16 @@ const CORES = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6",
 const cor = id => CORES[(id ?? 0) % CORES.length];
 const $ = id => document.getElementById(id);
 
+let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
+let edicao = null;    // {base, caixas: [{id, caixa, proposta, tocada}], sel, sujo} se editável
 let pedido = 0;       // descarta respostas de pedidos já superados
+const nomeClasse = id => classes.find(c => c.id === id)?.nome;
 
-async function api(rota) {
-  const resposta = await fetch(rota);
+async function api(rota, opcoes) {
+  const resposta = await fetch(rota, opcoes);
   const dados = await resposta.json();
   if (!resposta.ok) throw new Error(dados.erro || resposta.statusText);
   return dados;
@@ -117,6 +141,23 @@ function erro(e) {
     { className: "erro", textContent: `Erro: ${e.message}` }));
 }
 
+// --- tempo ativo (RF13): conta só com a aba visível e em foco, e pausa
+// depois de 60 s sem interação
+const tempo = { ativo: 0, ultima: Date.now() };
+for (const evento of ["keydown", "mousedown", "mousemove", "wheel"])
+  document.addEventListener(evento, () => { tempo.ultima = Date.now(); }, { passive: true });
+setInterval(() => {
+  if (document.visibilityState === "visible" && document.hasFocus()
+      && Date.now() - tempo.ultima < 60000) tempo.ativo += 1;
+}, 1000);
+
+function podeSair() {
+  return !edicao?.sujo || confirm("Há alterações não salvas nesta imagem. Sair mesmo assim?");
+}
+window.addEventListener("beforeunload", e => { if (edicao?.sujo) e.preventDefault(); });
+
+// --- fila -------------------------------------------------------------------
+
 async function carregarFila(manter) {
   const parametros = new URLSearchParams({ status: $("status").value, ordem: $("ordem").value });
   const dados = await api(`/api/imagens?${parametros}`);
@@ -124,7 +165,7 @@ async function carregarFila(manter) {
 
   const seletor = $("camada"), escolhida = seletor.value;
   seletor.replaceChildren();
-  for (const [valor, texto] of [["auto", "automático"], ["final", "anotação final"],
+  for (const [valor, texto] of [["auto", "automático (edição)"], ["final", "anotação final"],
                                 ...dados.anotadores.map(a => [a, `propostas: ${a}`])])
     seletor.add(new Option(texto, valor));
   if ([...seletor.options].some(o => o.value === escolhida)) seletor.value = escolhida;
@@ -153,13 +194,13 @@ async function carregarFila(manter) {
     li.title = im.nome + (im.anotadores.length
       ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
     li.append(nome, info);
-    li.onclick = () => mostrar(i);
+    li.onclick = () => { if (podeSair()) mostrar(i); };
     lista.append(li);
   });
 
   const i = fila.findIndex(im => im.nome === manter);
-  if (fila.length) await mostrar(i >= 0 ? i : 0);
-  else { atual = -1; detalhe = null; desenhar(); }
+  if (fila.length) await mostrar(i >= 0 ? i : Math.min(Math.max(atual, 0), fila.length - 1));
+  else { atual = -1; detalhe = null; edicao = null; desenhar(); }
 }
 
 async function mostrar(i) {
@@ -174,13 +215,28 @@ async function mostrar(i) {
     const dados = await api(`/api/imagens/${encodeURIComponent(nome)}`);
     if (meu !== pedido) return;
     detalhe = dados;
+    edicao = null;
+    if (dados.status === "pendente") {
+      // Base da edição: o primeiro anotador (em ordem alfabética) com proposta;
+      // o seletor de anotador é a fase 5
+      const base = Object.keys(dados.propostas).sort()[0] ?? null;
+      edicao = { base, sel: null, sujo: false,
+        caixas: (base ? dados.propostas[base] : []).map((c, k) =>
+          ({ id: c.id, caixa: c.caixa, proposta: k, tocada: false })) };
+      tempo.ativo = 0;
+      tempo.ultima = Date.now();
+    }
     $("imagem").src = `/images/${encodeURIComponent(nome)}`;
     desenhar();
   } catch (e) { if (meu === pedido) erro(e); }
 }
 
-// "auto": a anotação final se houver .txt, senão a proposta do primeiro
-// anotador que tiver uma
+// --- desenho ----------------------------------------------------------------
+
+const editando = () => edicao && $("camada").value === "auto";
+
+// "auto": a edição se a imagem é pendente; senão a anotação final, ou a
+// proposta do primeiro anotador se não houver .txt
 function camada(im) {
   const escolhida = $("camada").value;
   if (escolhida === "final") return { tipo: "final", caixas: im.final };
@@ -190,9 +246,25 @@ function camada(im) {
   return { tipo: anotadores[0], caixas: im.propostas[anotadores[0]] };
 }
 
+function caixaDiv(id, rotulo, [x1, y1, x2, y2], tracejada) {
+  const div = document.createElement("div");
+  div.className = "caixa" + (tracejada ? " proposta" : "") + (id === null ? " sem-classe" : "");
+  Object.assign(div.style, {
+    left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+    width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id),
+  });
+  const span = document.createElement("span");
+  span.textContent = rotulo;
+  span.style.background = id === null ? "var(--perigo)" : cor(id);
+  div.append(span);
+  return div;
+}
+
 function desenhar() {
   const quadro = $("quadro"), legenda = $("legenda");
   quadro.querySelectorAll(".caixa").forEach(c => c.remove());
+  quadro.classList.toggle("editando", !!editando());
+  $("paleta").hidden = $("acoes").hidden = !editando();
   if (!detalhe) {
     $("titulo").textContent = "";
     $("imagem").removeAttribute("src");
@@ -200,21 +272,15 @@ function desenhar() {
     return;
   }
   const im = detalhe;
-  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · ${im.status}`;
+  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · ${im.status}`
+    + (edicao?.sujo ? " · alterada" : "");
+
+  if (editando()) return desenharEdicao();
+
   const { tipo, caixas } = camada(im);
-  for (const { id, nome, conf, caixa: [x1, y1, x2, y2] } of caixas ?? []) {
-    const div = document.createElement("div");
-    div.className = "caixa" + (conf === null ? "" : " proposta");
-    Object.assign(div.style, {
-      left: `${x1 * 100}%`, top: `${y1 * 100}%`,
-      width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id),
-    });
-    const span = document.createElement("span");
-    span.textContent = conf === null ? nome : `${nome} ${conf.toFixed(2)}`;
-    span.style.background = cor(id);
-    div.append(span);
-    quadro.append(div);
-  }
+  for (const { id, nome, conf, caixa } of caixas ?? [])
+    quadro.append(caixaDiv(id, conf === null ? nome : `${nome} ${conf.toFixed(2)}`, caixa,
+                           conf !== null));
   atualizarVisibilidade();
 
   legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
@@ -236,6 +302,60 @@ function desenhar() {
   else if (!caixas.length) legenda.append("Nenhum objeto.");
   if (tipo === "final" && im.invalidas)
     legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
+  if (im.status !== "pendente")
+    legenda.append(` Só pendentes são editáveis (reabrir: fase 5).`);
+  else if (!editando())
+    legenda.append(" Só visualização; escolha \"automático\" para editar.");
+}
+
+function desenharEdicao() {
+  const quadro = $("quadro");
+  const propostas = edicao.base ? detalhe.propostas[edicao.base] : [];
+  // As maiores primeiro, para as pequenas ficarem por cima e clicáveis
+  const ordem = edicao.caixas.map((c, k) => k).sort((a, b) => area(edicao.caixas[b].caixa)
+                                                       - area(edicao.caixas[a].caixa));
+  for (const k of ordem) {
+    const c = edicao.caixas[k];
+    const conf = c.proposta === null ? null : propostas[c.proposta].conf;
+    const nome = nomeClasse(c.id) ?? `${propostas[c.proposta]?.nome} (fora do data.yaml)`;
+    const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
+                         c.caixa, !c.tocada);
+    div.classList.toggle("selecionada", edicao.sel === k);
+    div.onmousedown = e => { e.stopPropagation(); selecionar(k); };
+    quadro.append(div);
+  }
+  atualizarVisibilidade();
+
+  const legenda = $("legenda");
+  const tocadas = edicao.caixas.filter(c => c.tocada).length;
+  legenda.replaceChildren(edicao.base
+    ? `Editando as propostas de ${edicao.base}: ${edicao.caixas.length} caixa(s), `
+      + `${tocadas} corrigida(s), `
+      + `${propostas.length - edicao.caixas.length} removida(s).`
+    : "Sem propostas: salve para marcar como fundo (sem objetos) ou descarte.");
+  if (edicao.caixas.some(c => c.id === null))
+    legenda.append(Object.assign(document.createElement("span"), { className: "erro",
+      textContent: " Há caixa com classe fora do data.yaml: troque a classe ou remova." }));
+  $("remover").disabled = edicao.sel === null;
+  $("paleta").querySelectorAll("button").forEach(b =>
+    b.disabled = edicao.sel === null);
+}
+
+const area = ([x1, y1, x2, y2]) => (x2 - x1) * (y2 - y1);
+
+function montarPaleta() {
+  const paleta = $("paleta");
+  paleta.replaceChildren();
+  classes.forEach((c, i) => {
+    const botao = document.createElement("button");
+    const amostra = document.createElement("i");
+    amostra.style.background = cor(c.id);
+    botao.append(...(i < 9 ? [Object.assign(document.createElement("kbd"),
+      { textContent: i + 1 })] : []), amostra, c.nome);
+    botao.title = `trocar a classe da caixa selecionada (${c.material ?? "?"})`;
+    botao.onclick = () => trocarClasse(c.id);
+    paleta.append(botao);
+  });
 }
 
 function atualizarVisibilidade() {
@@ -244,23 +364,94 @@ function atualizarVisibilidade() {
   $("quadro").classList.toggle("sem-rotulos", !$("mostrar-rotulos").checked);
 }
 
+// --- edição -----------------------------------------------------------------
+
+function selecionar(k) {
+  if (!editando()) return;
+  edicao.sel = k;
+  desenhar();
+}
+
+function trocarClasse(id) {
+  if (!editando() || edicao.sel === null) return;
+  const c = edicao.caixas[edicao.sel];
+  if (c.id !== id) { c.id = id; c.tocada = true; edicao.sujo = true; }
+  desenhar();
+}
+
+function remover() {
+  if (!editando() || edicao.sel === null) return;
+  edicao.caixas.splice(edicao.sel, 1);
+  edicao.sel = edicao.caixas.length ? Math.min(edicao.sel, edicao.caixas.length - 1) : null;
+  edicao.sujo = true;
+  desenhar();
+}
+
+async function enviar(acao) {
+  if (!editando()) return;
+  if (acao === "salvar" && edicao.caixas.some(c => c.id === null))
+    return alert("Há caixa com classe fora do data.yaml: troque a classe ou remova.");
+  if (acao === "descartar" && !confirm(`Descartar ${detalhe.nome}? Ela não vai para o treino.`))
+    return;
+  const corpo = { acao, base: edicao.base, tempo_ativo_s: tempo.ativo,
+    caixas: edicao.caixas.map(({ id, caixa, proposta }) => ({ id, caixa, proposta })) };
+  $("salvar").disabled = $("descartar").disabled = true;
+  try {
+    await api(`/api/imagens/${encodeURIComponent(detalhe.nome)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpo) });
+    edicao.sujo = false;
+    const proxima = fila[atual + 1]?.nome ?? fila[atual - 1]?.nome;
+    await carregarFila($("status").value === "pendente" ? proxima : detalhe.nome);
+  } catch (e) { erro(e); }
+  finally { $("salvar").disabled = $("descartar").disabled = false; }
+}
+
+// --- eventos ----------------------------------------------------------------
+
 const nomeAtual = () => (atual >= 0 ? fila[atual].nome : null);
-$("status").onchange = () => carregarFila(nomeAtual()).catch(erro);
+$("status").onchange = () => { if (podeSair()) carregarFila(nomeAtual()).catch(erro); };
 $("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
 $("camada").onchange = desenhar;
 $("mostrar-caixas").onchange = atualizarVisibilidade;
 $("mostrar-rotulos").onchange = atualizarVisibilidade;
-$("anterior").onclick = () => mostrar(atual - 1);
-$("proxima").onclick = () => mostrar(atual + 1);
+$("anterior").onclick = () => { if (podeSair()) mostrar(atual - 1); };
+$("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
+$("salvar").onclick = () => enviar("salvar");
+$("descartar").onclick = () => enviar("descartar");
+$("remover").onclick = remover;
+$("area").onmousedown = () => { if (editando() && edicao.sel !== null) selecionar(null); };
+
 document.addEventListener("keydown", e => {
-  if (e.target.tagName === "SELECT") return;
-  if (e.key === "ArrowLeft") mostrar(atual - 1);
-  if (e.key === "ArrowRight") mostrar(atual + 1);
+  if (["SELECT", "INPUT"].includes(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "ArrowLeft") { if (podeSair()) mostrar(atual - 1); return; }
+  if (e.key === "ArrowRight") { if (podeSair()) mostrar(atual + 1); return; }
+  if (!editando()) return;
+  const n = edicao.caixas.length;
+  if (e.key === "Tab" && n) {
+    e.preventDefault();
+    const passo = e.shiftKey ? -1 : 1;
+    selecionar(edicao.sel === null ? (passo > 0 ? 0 : n - 1) : (edicao.sel + passo + n) % n);
+  } else if (/^[1-9]$/.test(e.key) && classes[Number(e.key) - 1]) {
+    trocarClasse(classes[Number(e.key) - 1].id);
+  } else if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    remover();
+  } else if (e.key === "Escape") {
+    selecionar(null);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    enviar("salvar");
+  } else if (e.key === "d" || e.key === "D") {
+    enviar("descartar");
+  }
 });
 
 // #<nome> no endereço abre essa imagem; se ela não estiver entre as
 // pendentes, a fila passa a mostrar todas
 async function iniciar() {
+  classes = await api("/api/classes");
+  montarPaleta();
   const pedida = decodeURIComponent(location.hash.slice(1));
   await carregarFila(pedida);
   if (pedida && nomeAtual() !== pedida) {

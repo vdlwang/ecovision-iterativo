@@ -76,9 +76,16 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 `revisoes/<nome>.json` guarda:
 
 - **Tempo ativo**: o cronômetro pausa quando a aba perde o foco ou depois de 60 s sem interação.
-- **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `caixa_ajustada` (IoU com a proposta abaixo de um limiar), `removida` ou `adicionada`.
-- **Versões** dos anotadores e das classes que geraram as propostas.
+- **Desfecho de cada caixa**: `aceita`, `classe_corrigida` ou `adicionada`; as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
+- **Versões** do anotador de base e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
+- **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão.
+
+O servidor calcula os desfechos comparando cada caixa com a proposta de origem, que a página indica pelo índice. Enquanto as caixas não se movem, ele recusa uma caixa que diz vir de uma proposta mas tem outras coordenadas, para que o registro nunca chame de `aceita` uma caixa alterada.
+
+**Para depois** (anotado em 2026-11-09, não implementado):
+- **Limiar de `caixa_ajustada`** (fase 4): IoU com a proposta abaixo de um limiar (proposta inicial: 0,9). Uma caixa pode ter dois desfechos (`classe_corrigida` e `caixa_ajustada`), então o campo vira lista.
+- **Histórico de sessões**: hoje a revisão de uma imagem reaberta (fase 5) sobrescreve a anterior. Para medir o anotador, vale a primeira; se as métricas (T10) precisarem, o registro vira uma lista de sessões.
 
 O registro é gravado desde a primeira versão da edição, mesmo sem `metricas.py` (tarefa T10 do `OBJETIVO.md`): sem ele, o tempo das primeiras revisões se perde.
 
@@ -90,7 +97,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 |---|---|---|---|
 | 1 | [x] `8a0253d` | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
-| 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar; registro da revisão; `revisadas.txt` e `data.yaml` | pytest da API; teste manual |
+| 3 | [ ] | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
 | 4 | [ ] | Desenhar, mover e redimensionar caixas; desfazer | teste manual (Chrome headless para captura) |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 

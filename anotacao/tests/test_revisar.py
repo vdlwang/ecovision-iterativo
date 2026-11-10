@@ -138,3 +138,109 @@ def test_main_recusa_saida_sem_imagens_csv(tmp_path):
     (tmp_path / "data.yaml").write_text("names: {0: a}\n")
     with pytest.raises(ValueError, match="imagens.csv"):
         revisar.main([str(tmp_path)])
+
+
+# --- PUT: salvar e descartar (fase 3) -----------------------------------------
+
+def enviar(url, corpo, tipo="application/json", host=None):
+    dados = corpo if isinstance(corpo, bytes) else json.dumps(corpo).encode()
+    req = urllib.request.Request(url, data=dados, method="PUT", headers={"Content-Type": tipo})
+    if host:
+        req.add_unredirected_header("Host", host)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as erro:
+        return erro.code, json.loads(erro.read())
+
+
+def caixas_de(saida, nome, *trocas):
+    """As propostas de 'falso' como a página as envia, com (índice, novo id) trocados."""
+    dados = formato.ler_imagem(saida, nome, formato.nomes_classes(saida), ["falso"], None)
+    caixas = [{"id": c["id"], "caixa": c["caixa"], "proposta": k}
+              for k, c in enumerate(dados["propostas"]["falso"])]
+    for k, novo in trocas:
+        caixas[k]["id"] = novo
+    return caixas
+
+
+def test_salvar_grava_rotulo_registro_e_status(servidor, saida):
+    caixas = caixas_de(saida, "a.jpg", (1, 1))  # a 2ª proposta (Garrafa) vira Lata
+    del caixas[0]                                # a 1ª (Lata) é removida
+    status, dados = enviar(servidor + "/api/imagens/a.jpg",
+                           {"acao": "salvar", "base": "falso", "tempo_ativo_s": 7,
+                            "caixas": caixas})
+    assert status == 200, dados
+    assert dados["status"] == "revisada"
+    assert (saida / "labels" / "a.txt").read_text() == "1 0.300000 0.300000 0.400000 0.400000\n"
+    revisao = dados["revisao"]
+    assert revisao["acao"] == "salvar" and revisao["tempo_ativo_s"] == 7
+    assert revisao["base"] == {"anotador": "falso", "versao": "v1", "classes": None}
+    assert revisao["caixas"] == [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 1,
+                                  "desfecho": "classe_corrigida"}]
+    assert revisao["removidas"] == [0]
+    assert "a.jpg" in (saida / "revisadas.txt").read_text()
+    # não está mais na fila de pendentes, e não pode ser editada de novo
+    _, fila = pedir_json(servidor + "/api/imagens")
+    assert "a.jpg" not in [i["nome"] for i in fila["imagens"]]
+    assert enviar(servidor + "/api/imagens/a.jpg", {"acao": "descartar"})[0] == 409
+
+
+def test_aceitar_como_esta_e_fundo(servidor, saida):
+    status, dados = enviar(servidor + "/api/imagens/b%20c.png",
+                           {"acao": "salvar", "base": "falso",
+                            "caixas": caixas_de(saida, "b c.png")})
+    assert status == 200
+    assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["aceita"]
+    # Os mesmos .txt do --aceitar
+    esperado = "".join(formato.linha_yolo(1, c) + "\n" for _, _, c in formato.caixas_normalizadas(
+        formato.ler_proposta(saida / "propostas" / "falso" / "b c.json")))
+    assert (saida / "labels" / "b c.txt").read_text() == esperado
+    # imagem sem caixas: salva como fundo, .txt vazio
+    status, dados = enviar(servidor + "/api/imagens/d.jpg",
+                           {"acao": "salvar", "base": "falso", "caixas": []})
+    assert status == 200 and (saida / "labels" / "d.txt").read_text() == ""
+
+
+def test_descartar_apaga_o_rotulo(saida):
+    (saida / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    registro = formato.revisar(saida, "a.jpg", {"acao": "descartar", "base": "falso"}, "agora")
+    assert not (saida / "labels" / "a.txt").exists()
+    assert registro["removidas"] == [0, 1] and registro["caixas"] == []
+    _, estado = formato.ler_estado(saida)
+    assert estado["a.jpg"]["status"] == "descartada"
+    # Guarda só a última revisão
+    assert formato.ler_revisao(saida, "a.jpg")["acao"] == "descartar"
+
+
+@pytest.mark.parametrize("corpo, trecho", [
+    ({"acao": "apagar"}, "acao"),
+    ({"acao": "salvar", "tempo_ativo_s": -1}, "tempo_ativo_s"),
+    ({"acao": "salvar", "base": "outro"}, "não tem proposta"),
+    ({"acao": "salvar", "base": "..", "caixas": []}, "não tem proposta"),
+    ({"acao": "salvar", "caixas": [{"id": 5, "caixa": [0, 0, 1, 1]}]}, "classe 5"),
+    ({"acao": "salvar", "caixas": [{"id": 0, "caixa": [0.5, 0, 0.2, 1]}]}, "invertidas"),
+    ({"acao": "salvar", "caixas": [{"id": 0, "caixa": [0, 0, 1.2, 1]}]}, "fora de"),
+    ({"acao": "salvar", "base": "falso",
+      "caixas": [{"id": 0, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 7}]}, "não existe"),
+    ({"acao": "salvar", "base": "falso",
+      "caixas": [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.6], "proposta": 0}]}, "fase 4"),
+    ({"acao": "salvar", "base": "falso",
+      "caixas": [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 0},
+                 {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 0}]}, "duas vezes"),
+])
+def test_salvar_recusa_pedido_invalido_sem_gravar(servidor, saida, corpo, trecho):
+    status, dados = enviar(servidor + "/api/imagens/a.jpg", corpo)
+    assert status == 400 and trecho in dados["erro"], dados
+    assert not (saida / "labels" / "a.txt").exists()
+    assert not (saida / "revisoes").exists()
+    assert formato.ler_estado(saida)[1]["a.jpg"]["status"] == "pendente"
+
+
+def test_put_protecoes(servidor):
+    url = servidor + "/api/imagens/a.jpg"
+    assert enviar(url, {"acao": "descartar"}, tipo="text/plain")[0] == 415
+    assert enviar(url, b"nada")[0] == 400
+    assert enviar(url, {"acao": "descartar"}, host="exemplo.com")[0] == 403
+    assert enviar(servidor + "/api/imagens/fora.jpg", {"acao": "descartar"})[0] == 404
+    assert enviar(servidor + "/api/classes", {"acao": "descartar"})[0] == 404

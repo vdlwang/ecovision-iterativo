@@ -3,12 +3,13 @@ Servidor local da página de revisão das anotações (PLANO-REVISAO.md, seção
 
 Serve revisar.html e uma API JSON sobre um diretório gerado pelo anotar.py.
 Lê o disco a cada requisição, então mudanças feitas à mão aparecem sem
-reiniciar. Escuta só em 127.0.0.1. Por enquanto só lê: a edição é a fase 3.
+reiniciar. Escuta só em 127.0.0.1.
 
     GET /                          a página
     GET /api/classes               [{id, nome, material}]
     GET /api/imagens?status=&ordem= fila, anotadores e contagem por status
-    GET /api/imagens/<nome>        propostas, anotação final e status de uma imagem
+    GET /api/imagens/<nome>        propostas, anotação final, status e revisão
+    PUT /api/imagens/<nome>        salva ou descarta uma pendente (saida.revisar)
     GET /images/<arquivo>          a imagem
 
 Uso:
@@ -19,7 +20,9 @@ import argparse
 import json
 import mimetypes
 import sys
+import threading
 import webbrowser
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +34,7 @@ from anotar import DIR_SCRIPT, carregar_classes
 PAGINA = DIR_SCRIPT / "revisar.html"
 FILTROS = (*formato.STATUS, "todas")
 ORDENS = ("incerteza", "nome")
+TAMANHO_MAXIMO_PEDIDO = 1 << 20
 
 
 class ErroHTTP(Exception):
@@ -105,13 +109,14 @@ def detalhar(saida, bruto):
     if not caminho.is_file():
         raise ErroHTTP(HTTPStatus.NOT_FOUND, f"{caminho} não existe")
     dados["largura"], dados["altura"] = formato.tamanho_imagem(caminho)
-    dados["revisao"] = None  # registro da revisão: fase 3
+    dados["revisao"] = formato.ler_revisao(saida, nome)
     return dados
 
 
 def criar_servidor(saida, classes, host="127.0.0.1", porta=8000):
     """Servidor pronto para serve_forever(); porta 0 escolhe uma livre (testes)."""
     saida = Path(saida)
+    trava = threading.Lock()  # uma gravação por vez
 
     class Tratador(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -139,6 +144,37 @@ def criar_servidor(saida, classes, host="127.0.0.1", porta=8000):
             except ErroHTTP as erro:
                 self.enviar_json({"erro": str(erro)}, erro.status)
             except ValueError as erro:  # arquivo da saída inválido
+                self.enviar_json({"erro": str(erro)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        def do_PUT(self):
+            url = urlsplit(self.path)
+            try:
+                # Um site aberto no navegador não deve conseguir gravar aqui
+                # (DNS rebinding): só aceita o próprio endereço local
+                host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+                if host not in ("127.0.0.1", "localhost"):
+                    raise ErroHTTP(HTTPStatus.FORBIDDEN, f"Host {host!r} não aceito")
+                if not url.path.startswith("/api/imagens/"):
+                    raise ErroHTTP(HTTPStatus.NOT_FOUND, f"rota {url.path} não existe")
+                if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+                    raise ErroHTTP(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "envie application/json")
+                tamanho = int(self.headers.get("Content-Length") or 0)
+                if not 0 < tamanho <= TAMANHO_MAXIMO_PEDIDO:
+                    raise ErroHTTP(HTTPStatus.BAD_REQUEST, "corpo vazio ou grande demais")
+                try:
+                    pedido = json.loads(self.rfile.read(tamanho))
+                except ValueError:
+                    raise ErroHTTP(HTTPStatus.BAD_REQUEST, "corpo não é JSON") from None
+                nome, _ = nome_valido(saida, url.path[len("/api/imagens/"):])
+                with trava:
+                    formato.revisar(saida, nome, pedido,
+                                    datetime.now().astimezone().isoformat(timespec="seconds"))
+                self.enviar_json(detalhar(saida, url.path[len("/api/imagens/"):]))
+            except ErroHTTP as erro:
+                self.enviar_json({"erro": str(erro)}, erro.status)
+            except formato.RevisaoInvalida as erro:
+                self.enviar_json({"erro": str(erro)}, erro.status)
+            except ValueError as erro:
                 self.enviar_json({"erro": str(erro)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def enviar(self, corpo, tipo, status=HTTPStatus.OK, cache=False):
