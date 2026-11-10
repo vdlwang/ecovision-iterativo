@@ -25,6 +25,12 @@ from PIL import Image
 
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 STATUS = ("pendente", "revisada", "descartada")
+
+# mkstemp cria o arquivo só para o dono (0600); os gravados aqui recebem o modo
+# de um open() comum. A umask é lida uma vez, na importação, porque lê-la exige
+# trocá-la, o que não é seguro com o servidor em várias threads.
+_UMASK = os.umask(0)
+os.umask(_UMASK)
 COLUNAS = ["nome", "status"]
 
 
@@ -36,6 +42,7 @@ def gravar_atomico(caminho, texto):
     try:
         with os.fdopen(descritor, "w", encoding="utf-8", newline="") as f:
             f.write(texto)
+        os.chmod(temporario, 0o666 & ~_UMASK)
         os.replace(temporario, caminho)
     except BaseException:
         os.unlink(temporario)

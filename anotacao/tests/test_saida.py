@@ -1,6 +1,8 @@
 """Testes do formato do diretório de saída (saida.py)."""
 
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -111,3 +113,10 @@ def test_aceitar_recusa_classe_desconhecida(tmp_path):
     gravar(tmp_path, "falso", "a.jpg", [(1, 0.9, (0.1, 0.2, 0.5, 0.6))])
     with pytest.raises(ValueError, match="Lata"):
         formato.aceitar(tmp_path, "falso", CLASSES[:1])
+
+
+def test_gravar_atomico_usa_o_modo_de_um_open_comum(tmp_path):
+    formato.gravar_atomico(tmp_path / "a.txt", "x")
+    (tmp_path / "b.txt").write_text("x")
+    assert stat.S_IMODE(os.stat(tmp_path / "a.txt").st_mode) == \
+        stat.S_IMODE(os.stat(tmp_path / "b.txt").st_mode)
