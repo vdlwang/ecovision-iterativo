@@ -37,6 +37,25 @@ def test_classe_de_cada_token_ignora_especiais_e_pontos():
         None, 0, 0, None, 1, 1, 1, None, 2, None, None]
 
 
+def test_escolher_classe_com_reserva():
+    # sem reserva: a de maior pontuação, mesmo abaixo do limiar
+    assert anotar.escolher_classe([0.1, 0.3, 0.2], frozenset(), 0.35) == (1, 0.3)
+    # a reserva (2) não tira de uma comum que chega ao limiar...
+    assert anotar.escolher_classe([0.4, 0.1, 0.9], frozenset({2}), 0.35) == (0, 0.4)
+    # ...só vence quando nenhuma comum chega e ela chega
+    assert anotar.escolher_classe([0.2, 0.1, 0.5], frozenset({2}), 0.35) == (2, 0.5)
+    assert anotar.escolher_classe([0.2, 0.1, 0.3], frozenset({2}), 0.35) == (0, 0.2)
+
+
+def test_carregar_classes_valida_reserva(tmp_path):
+    reserva = {"nome": "Lixo", "prompt": "trash", "material": "other", "reserva": True}
+    assert anotar.carregar_classes(escrever_classes(tmp_path, CLASSES + [reserva]))[-1] == reserva
+    with pytest.raises(ValueError, match="ao menos uma"):
+        anotar.carregar_classes(escrever_classes(tmp_path, [reserva]))
+    with pytest.raises(ValueError, match="reserva"):
+        anotar.carregar_classes(escrever_classes(tmp_path, [dict(reserva, reserva="sim")]))
+
+
 def test_iou():
     assert anotar.iou((0, 0, 1, 1), (0, 0, 1, 1)) == 1
     assert anotar.iou((0, 0, 1, 1), (2, 2, 3, 3)) == 0
@@ -73,28 +92,65 @@ def test_carregar_classes_valida(tmp_path):
 
 def test_classes_yaml_do_repositorio_e_valido():
     assert anotar.carregar_classes(anotar.DIR_SCRIPT / "classes.yaml")
+    nomes = anotar.carregar_nomes(anotar.DIR_SCRIPT / "classes.yaml")
+    # TACO + Background, na ordem do legado/database e do best.pt
+    legado = anotar.DIR_SCRIPT.parent / "legado/database/tcc-0CF/YOLO_dataset/data.yaml"
+    assert nomes == yaml.safe_load(legado.read_text(encoding="utf-8"))["names"]
+    assert len(nomes) == 61 and nomes[-1] == "Background"
 
 
-def test_preparar_saida_recusa_outras_classes(tmp_path):
-    anotar.preparar_saida(tmp_path, CLASSES)
+def test_carregar_nomes(tmp_path):
+    # Sem 'nomes', os de 'classes', na ordem delas
+    assert anotar.carregar_nomes(escrever_classes(tmp_path, CLASSES)) == ["Garrafa", "Tampa", "Lata"]
+    caminho = tmp_path / "c.yaml"
+    caminho.write_text(yaml.safe_dump({"nomes": ["Lata", "Fundo", "Garrafa"],
+                                       "classes": CLASSES[::2]}), encoding="utf-8")
+    assert anotar.carregar_nomes(caminho) == ["Lata", "Fundo", "Garrafa"]
+    assert anotar.carregar_classes(caminho) == CLASSES[::2]
+    caminho.write_text(yaml.safe_dump({"nomes": ["Lata"], "classes": CLASSES}), encoding="utf-8")
+    with pytest.raises(ValueError, match="fora de 'nomes': Garrafa, Tampa"):
+        anotar.carregar_classes(caminho)
+    caminho.write_text(yaml.safe_dump({"nomes": ["Lata", "Lata"]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="repetidos: Lata"):
+        anotar.carregar_nomes(caminho)
+
+
+def test_preparar_saida_refaz_ou_recusa_outras_classes(tmp_path):
+    anotar.preparar_saida(tmp_path, ["Garrafa", "Tampa", "Lata"])
     dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
     assert dados["names"] == {0: "Garrafa", 1: "Tampa", 2: "Lata"}
     assert dados["train"] == dados["val"] == "revisadas.txt"
     assert (tmp_path / "imagens.csv").read_text() == "nome,status\n"
-    anotar.preparar_saida(tmp_path, CLASSES)  # mesmas classes: ok
-    with pytest.raises(ValueError, match="outras classes"):
-        anotar.preparar_saida(tmp_path, CLASSES[:2])
+    anotar.preparar_saida(tmp_path, ["Garrafa", "Tampa", "Lata"])  # mesmas classes: ok
+    # Sem rótulos nem revisões, as propostas guardam o nome: o data.yaml é refeito
+    anotar.preparar_saida(tmp_path, ["Lata", "Garrafa"])
+    dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
+    assert dados["names"] == {0: "Lata", 1: "Garrafa"}
+    # Fundo (.txt vazio) e descarte (revisão sem caixas) não guardam ids
+    (tmp_path / "labels" / "a.txt").write_text("")
+    (tmp_path / "revisoes").mkdir()
+    (tmp_path / "revisoes" / "a.json").write_text('{"acao": "descartar", "caixas": []}')
+    anotar.preparar_saida(tmp_path, ["Garrafa", "Lata"])
+    for arquivo, texto in (("labels/a.txt", "1 0.5 0.5 0.1 0.1\n"),
+                           ("revisoes/b.json", '{"caixas": [{"id": 1}]}')):
+        (tmp_path / arquivo).write_text(texto)
+        with pytest.raises(ValueError, match="outras classes"):
+            anotar.preparar_saida(tmp_path, ["Garrafa"])
+        (tmp_path / arquivo).unlink()
+    (tmp_path / "labels" / "a.txt").write_text("")
 
 
 def test_preparar_saida_recusa_formato_antigo(tmp_path):
     (tmp_path / "labels").mkdir()
     (tmp_path / "labels" / "foto.txt").write_text("0 0.5 0.5 0.1 0.1\n")
     with pytest.raises(ValueError, match="formato antigo"):
-        anotar.preparar_saida(tmp_path, CLASSES)
+        anotar.preparar_saida(tmp_path, ["Garrafa"])
 
 
 # --- anotar.py de ponta a ponta, com um anotador sintético no lugar do modelo ---
 
+# Os ids dos rótulos vêm de 'nomes', não da ordem de 'classes'
+NOMES = ["Fundo", "Lata", "Garrafa", "Tampa"]
 DETECCOES = {
     "a": [(2, 0.91, (0.1, 0.2, 0.4, 0.6)), (0, 0.42, (0.5, 0.5, 0.9, 0.8))],
     "b": [],
@@ -134,7 +190,8 @@ def ambiente(tmp_path, monkeypatch):
     for nome in ("a.jpg", "b.png"):
         Image.new("RGB", (200, 100)).save(tmp_path / nome)
         fotos.append(str(tmp_path / nome))
-    classes = escrever_classes(tmp_path, CLASSES)
+    classes = tmp_path / "classes.yaml"
+    classes.write_text(yaml.safe_dump({"nomes": NOMES, "classes": CLASSES}), encoding="utf-8")
     saida = tmp_path / "saida"
     base = ["-o", str(saida), "--anotador", "falso", "--classes", str(classes)]
     return fotos, saida, base
@@ -153,6 +210,7 @@ def test_main_grava_propostas_e_nao_rotulos(ambiente):
     assert (saida / "imagens.csv").read_text() == "nome,status\na.jpg,pendente\nb.png,pendente\n"
     assert not list((saida / "labels").iterdir())
     assert (saida / "revisadas.txt").read_text() == ""
+    assert yaml.safe_load((saida / "data.yaml").read_text())["names"] == dict(enumerate(NOMES))
     assert (saida / "previa" / "falso" / "a.jpg").exists()
     assert (saida / "images" / "b.png").exists() and (saida / "visualizar.html").exists()
 
@@ -166,9 +224,11 @@ def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
     fotos, saida, base = ambiente
     anotar.main(fotos + base)
     anotar.main(base + ["--aceitar"])
-    # Os mesmos .txt que o anotar.py gravava antes, direto das detecções
+    # Os mesmos .txt que o anotar.py gravava antes, direto das detecções, com
+    # o id de cada classe em NOMES
     for stem, deteccoes in DETECCOES.items():
-        esperado = "".join(anotar.linha_yolo(c, caixa) + "\n" for c, _, caixa in deteccoes)
+        esperado = "".join(anotar.linha_yolo(NOMES.index(CLASSES[c]["nome"]), caixa) + "\n"
+                           for c, _, caixa in deteccoes)
         assert (saida / "labels" / f"{stem}.txt").read_text() == esperado
     assert (saida / "imagens.csv").read_text() == "nome,status\na.jpg,revisada\nb.png,revisada\n"
     assert (saida / "revisadas.txt").read_text() == "./images/a.jpg\n./images/b.png\n"

@@ -85,23 +85,29 @@ def gravar(saida, anotador, nome, deteccoes):
         anotador, "v1", {}, CLASSES, nome, (100, 50), deteccoes))
 
 
+def escrever_data_yaml(saida, nomes):
+    (saida / "data.yaml").write_text(json.dumps({"names": dict(enumerate(nomes))}),
+                                     encoding="utf-8")
+
+
 def test_aceitar_so_pendentes_e_escolhidas(tmp_path):
     (tmp_path / "labels").mkdir()
     linhas = {n: {"nome": n, "status": s} for n, s in
               [("a.jpg", "pendente"), ("b.jpg", "pendente"), ("c.jpg", "descartada"),
                ("d.jpg", "pendente")]}
     formato.gravar_estado(tmp_path, ["nome", "status"], linhas)
+    escrever_data_yaml(tmp_path, ["Fundo", "Garrafa", "Lata"])
     for nome in ("a.jpg", "b.jpg", "c.jpg"):  # d.jpg sem proposta
         gravar(tmp_path, "falso", nome, [(1, 0.9, (0.1, 0.2, 0.5, 0.6))])
     gravar(tmp_path, "outro", "d.jpg", [])
 
-    assert formato.aceitar(tmp_path, "falso", CLASSES, {"a.jpg"}) == 1
-    assert formato.aceitar(tmp_path, "falso", CLASSES) == 1  # só b.jpg sobra
+    assert formato.aceitar(tmp_path, "falso", {"a.jpg"}) == 1
+    assert formato.aceitar(tmp_path, "falso") == 1  # só b.jpg sobra
     _, estado = formato.ler_estado(tmp_path)
     assert {n: l["status"] for n, l in estado.items()} == {
         "a.jpg": "revisada", "b.jpg": "revisada", "c.jpg": "descartada", "d.jpg": "pendente"}
     assert (tmp_path / "labels" / "a.txt").read_text() == \
-        "1 0.300000 0.400000 0.400000 0.400000\n"
+        "2 0.300000 0.400000 0.400000 0.400000\n"
     assert not (tmp_path / "labels" / "c.txt").exists()
     assert (tmp_path / "revisadas.txt").read_text() == "./images/a.jpg\n./images/b.jpg\n"
     assert formato.anotadores(tmp_path) == ["falso", "outro"]
@@ -110,9 +116,10 @@ def test_aceitar_so_pendentes_e_escolhidas(tmp_path):
 def test_aceitar_recusa_classe_desconhecida(tmp_path):
     formato.gravar_estado(tmp_path, ["nome", "status"],
                           {"a.jpg": {"nome": "a.jpg", "status": "pendente"}})
+    escrever_data_yaml(tmp_path, ["Garrafa"])
     gravar(tmp_path, "falso", "a.jpg", [(1, 0.9, (0.1, 0.2, 0.5, 0.6))])
     with pytest.raises(ValueError, match="Lata"):
-        formato.aceitar(tmp_path, "falso", CLASSES[:1])
+        formato.aceitar(tmp_path, "falso")
 
 
 def test_gravar_atomico_usa_o_modo_de_um_open_comum(tmp_path):

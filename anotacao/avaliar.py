@@ -231,7 +231,11 @@ def main(argv=None):
 
         for classe, caixa in verdade:
             consulta, iou = consulta_mais_proxima(caixas, caixa)
-            prevista = int(por_classe[consulta].argmax()) if iou >= IOU_ACERTO else None
+            # A classe que o anotar.py daria a essa consulta no limiar padrão;
+            # sem classe de reserva, é a de maior pontuação
+            prevista = anotar.escolher_classe(por_classe[consulta].tolist(), anotador.reservas,
+                                              anotar.CONFIANCA_PADRAO)[0] \
+                if iou >= IOU_ACERTO else None
             matriz[(classe, prevista)] += 1
 
         for limiar in args.limiares:

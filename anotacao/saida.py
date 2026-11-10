@@ -171,13 +171,14 @@ def anotadores(saida):
     return sorted(p.name for p in pasta.iterdir() if p.is_dir()) if pasta.is_dir() else []
 
 
-def aceitar(saida, anotador, classes, nomes=None):
+def aceitar(saida, anotador, nomes=None):
     """
-    Copia as propostas do anotador para labels/ e marca as imagens como
-    revisadas: o comportamento antigo, proposta direto como rótulo. Só mexe nas
-    pendentes (nomes=None: todas); devolve quantas aceitou.
+    Copia as propostas do anotador para labels/, com os ids do data.yaml, e
+    marca as imagens como revisadas: o comportamento antigo, proposta direto
+    como rótulo. Só mexe nas pendentes (nomes=None: todas); devolve quantas
+    aceitou.
     """
-    ids = {c["nome"]: i for i, c in enumerate(classes)}
+    ids = {n: i for i, n in nomes_classes(saida).items()}
     colunas, linhas = ler_estado(saida)
     aceitas = 0
     for nome, linha in linhas.items():
@@ -189,7 +190,7 @@ def aceitar(saida, anotador, classes, nomes=None):
         texto = []
         for classe, _, caixa in caixas_normalizadas(ler_proposta(caminho)):
             if classe not in ids:
-                raise ValueError(f"{caminho}: classe '{classe}' fora do classes.yaml")
+                raise ValueError(f"{caminho}: classe '{classe}' fora do data.yaml")
             texto.append(linha_yolo(ids[classe], caixa) + "\n")
         gravar_atomico(Path(saida) / "labels" / f"{Path(nome).stem}.txt", "".join(texto))
         linha["status"] = "revisada"

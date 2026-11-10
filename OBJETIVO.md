@@ -125,6 +125,27 @@ Antes do SigLIP:
 - **`Glass bottle` virou o ralo do PET**: sem nenhuma caixa verdadeira, recebe 35 previsões, 28 delas de `Clear plastic bottle` (que acerta só 26%). Na esteira haverá garrafas de vidro, então a classe fica. Mas o prompt "glass bottle" atrai garrafas transparentes de qualquer material. É o primeiro caso para o SigLIP, ou para vários prompts por classe.
 - Os números não são comparáveis um a um com os de 2026-10-27: as classes e a verdade mudaram juntas.
 
+### Mais classes no anotador (2026-11-10)
+
+Os rótulos passaram a usar as 60 classes TACO e `Background` (`nomes` no `classes.yaml`, decisão 2 do plano do T1); o anotador continua procurando só as 8 de `classes`. Medido com o `avaliar.py`, mesmas 88 fotos e 375 caixas:
+
+| Classes no anotador | Classe certa | Material | P / R em 0,35 | Caixas na genérica |
+|---|---|---|---|---|
+| 8 (linha de base) | 51% | 58% | 0,48 / 0,42 | — |
+| 60 TACO (nome TACO como prompt nas 52 novas) | 10% | 38% | 0,12 / 0,11 | — |
+| 8 + `Unlabeled litter` concorrendo ("trash object" / "object" / "piece of trash") | 41% / 35% / 36% | 48% / 41% / 42% | 0,44–0,47 / 0,39–0,41 | 60 / 114 / 119 |
+| 8 + `Unlabeled litter` de reserva (mesmos prompts) | 46% / 47% / 45% | 54% / 55% / 54% | 0,45–0,47 / 0,39–0,41 | 18 / 4 / 12 |
+
+- **60 classes**: as novas absorvem os objetos (lata vira `Disposable food container`, pote vira `Disposable plastic cup`, tampa vira `Aerosol`). Confirma o teste qualitativo de 2026-10-27.
+- **Classe genérica**: serviria para dar caixa aos objetos da esteira fora das 8. Concorrendo, rouba previsões. Como reserva (`reserva: true` no `classes.yaml`: só vence se nenhuma comum chega ao limiar) quase não rouba, mas a frase a mais no prompt muda a pontuação das outras e custa 4 a 6 pontos de classe. O ganho não aparece aqui: todo objeto destas fotos está entre as 8.
+- **Pendente**: decidir entre a genérica numa passada separada (as 8 ficam como na linha de base; o dobro do tempo de GPU), a genérica no mesmo prompt (−4 pontos) ou nenhuma até haver fotos da esteira. O campo `reserva` já existe; nenhuma classe o usa.
+
+### Ajustes futuros da avaliação (2026-11-10)
+
+- **Cobertura sem classe no limiar.** O "não localizadas" do `avaliar.py` olha as consultas brutas do modelo, antes do limiar, e deu 100%; o recall da detecção exige a classe certa. Nenhum dos dois diz se todo objeto recebe caixa na proposta. Falta, por limiar: a fração dos objetos verdadeiros com alguma caixa (IoU ≥ 0,5, qualquer classe) e a fração das imagens completas (nenhum objeto sem caixa), a que importa para o treino (seção 2).
+- **Limiar da anotação pela cobertura.** Em `legado/images/20250323_184428.jpg` saiu nenhuma caixa: as latas e tampas pontuam 0,33–0,35, logo abaixo do limiar de 0,35 (com 0,30 saem 4 caixas, com 0,20 saem 10). Na revisão, remover caixa custa uma tecla e desenhar ainda não existe (fase 4 do T1), então o limiar da anotação deve ser mais baixo que o de precisão máxima. Escolher pela métrica acima. Até a fase 4, imagem com objeto sem caixa é descartada, não salva.
+- **`taco_to_material` do backend** não tem `Carded blister pack` (cai em `other`).
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.
@@ -172,9 +193,9 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; faltam vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); faltam a cobertura sem classe no `avaliar.py` e o limiar da anotação escolhido por ela, vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
 | T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio | T2 | pytest com caixas sintéticas; tabelas |
-| T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama) | — | teste com a esteira |
+| T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
 | T5 | [ ] | **Entrada por lote**: importa um lote para `imagens.csv` com `lote` e o sorteio treino/teste (1 lote em 5) | T1, T4 | pytest |
 | T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3), grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml` | T1, T3 | pytest do voto com caixas sintéticas |
 | T7 | [ ] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs | T1, T6 | pytest da API; teste manual |
@@ -184,6 +205,15 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 | T11 | [ ] | **Novas classes pela página** (RF14): acrescenta no fim do `classes.yaml` e regenera o `data.yaml` | T1 | pytest; teste manual |
 | T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07) | T6, T7 | métricas do treino |
 | T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa | T9, T12 | métricas por classe e material |
+
+### Resolução e origem das imagens
+
+Anotado em 2026-11-10, para o T4:
+
+- **Hoje nada está fixado.** O backend passa só o índice da câmera ao Ultralytics: a resolução é a padrão do driver (em webcam USB, em geral 640×480), e o YOLO reduz cada quadro a 640 no lado maior (`imgsz` padrão; o `best.pt` treinou com `imgsz: 640`). Não foi conferido com a câmera da esteira.
+- **O banco não é da esteira.** As fotos de `legado/database` são de celular (4080×3060, ~9,5 MB cada), e as de `legado/images` são recortes de foto de celular (de ~1650×3200 a 4624×2316). O YOLO as reduz a 640 de qualquer jeito, então o que pesa é a origem: nitidez, ruído, compressão, cor, iluminação, ângulo e distância diferem dos quadros da webcam. O mAP do `best.pt` mede fotos de celular, não a operação.
+- **Para o T4**: gravar os quadros como o backend os recebe, na resolução nativa da câmera, sem reduzir (permite testar um `imgsz` maior depois); pôr a largura e a altura da câmera e o `imgsz` no `config.json`, explícitos; registrá-los no log de cada lote.
+- **Fotos de celular** continuam servindo para comparar anotadores no `avaliar.py`; para treino e teste do YOLO, dão lugar aos quadros da esteira. Quando houver quadros, refazer a linha de base dos anotadores com eles: o Grounding DINO viu fotos de 12 MP, reduzidas a até 1333 no lado maior.
 
 ## Decisões do sistema
 

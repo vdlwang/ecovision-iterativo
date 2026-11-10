@@ -1,11 +1,83 @@
-# Classes do anotador automático (nível 2 da taxonomia, monografia 5.3.2).
-# O índice na lista é o id da classe nos .txt; não reordene depois de anotar,
-# só acrescente no fim. Lista inicial: as seis classes TACO que aparecem nas
-# fotos da equipe (legado/database/*/YOLO_dataset).
+# Classes da anotação (nível 2 da taxonomia, monografia 5.3.2).
 #
-#   nome:     nome da classe no data.yaml
+# nomes: o espaço de ids dos rótulos. O índice na lista é o id da classe nos
+#   .txt e no data.yaml de cada saída. São as 60 classes TACO mais Background,
+#   na ordem de legado/database/tcc-*/YOLO_dataset/data.yaml e do
+#   yolo_models/taco/best.pt (conferido em 2026-11-10), para que as anotações
+#   sirvam direto ao fine-tuning dele. Não reordene; só acrescente no fim.
+#
+# classes: o que o anotador automático procura, um subconjunto de nomes. A
+#   ordem aqui não muda os ids. Lista inicial: as seis classes TACO que
+#   aparecem nas fotos da equipe, mais o vidro em três (decisão 8).
+#
+#   nome:     nome da classe, um dos de nomes
 #   prompt:   descrição em inglês enviada ao Grounding DINO
 #   material: classe-pai (nível 1): plastic, metal, glass, paper ou other
+#   reserva:  opcional; true faz a classe só vencer quando nenhuma outra chega
+#             ao limiar (classe genérica; medição no OBJETIVO.md, seção 5)
+
+nomes:
+- Aluminium foil
+- Battery
+- Aluminium blister pack
+- Carded blister pack
+- Other plastic bottle
+- Clear plastic bottle
+- Glass bottle
+- Plastic bottle cap
+- Metal bottle cap
+- Broken glass
+- Food Can
+- Aerosol
+- Drink can
+- Toilet tube
+- Other carton
+- Egg carton
+- Drink carton
+- Corrugated carton
+- Meal carton
+- Pizza box
+- Paper cup
+- Disposable plastic cup
+- Foam cup
+- Glass cup
+- Other plastic cup
+- Food waste
+- Glass jar
+- Plastic lid
+- Metal lid
+- Other plastic
+- Magazine paper
+- Tissues
+- Wrapping paper
+- Normal paper
+- Paper bag
+- Plastified paper bag
+- Plastic film
+- Six pack rings
+- Garbage bag
+- Other plastic wrapper
+- Single-use carrier bag
+- Polypropylene bag
+- Crisp packet
+- Spread tub
+- Tupperware
+- Disposable food container
+- Foam food container
+- Other plastic container
+- Plastic gloves
+- Plastic utensils
+- Pop tab
+- Rope & strings
+- Scrap metal
+- Shoe
+- Squeezable tube
+- Plastic straw
+- Paper straw
+- Styrofoam piece
+- Unlabeled litter
+- Cigarette
+- Background
 
 classes:
   - nome: Clear plastic bottle

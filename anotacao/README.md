@@ -47,7 +47,7 @@ Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb)
 
 ```
 anotacoes/
-├── data.yaml                          # names na ordem de classes.yaml; train e val: revisadas.txt
+├── data.yaml                          # names: os nomes de classes.yaml (TACO + Background); train e val: revisadas.txt
 ├── images/foto.jpg
 ├── propostas/grounding-dino/foto.json # o que o anotador propôs, com a confiança
 ├── labels/foto.txt                    # rótulos finais (YOLO): só depois da revisão ou de --aceitar
@@ -71,7 +71,7 @@ Cada proposta é um JSON:
 
 A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente`, e anotar de novo não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
-Várias execuções podem gravar no mesmo diretório. O script recusa a saída se o `data.yaml` dela tiver outras classes, porque os ids deixariam de bater, e recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos. Se o EXIF da foto pede rotação (fotos de celular), a imagem é gravada já girada, e as caixas valem para ela.
+Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos. Se o EXIF da foto pede rotação (fotos de celular), a imagem é gravada já girada, e as caixas valem para ela.
 
 Ainda não há divisão entre treino e validação: ela deve ser feita por sessão de captura, nunca por imagem (monografia, seção 5.3.5), e fica para quando houver sessões.
 
@@ -160,7 +160,14 @@ O que cada um faz com o `prompt` das classes é dele. `GroundingDino` é o exemp
 
 ## Classes
 
-`classes.yaml` lista as classes (nível 2 da taxonomia), cada uma com o `nome` gravado no `data.yaml`, o `prompt` em inglês enviado ao modelo e o `material` (nível 1). A lista inicial são as seis classes TACO das fotos da equipe, mais `Glass jar` e `Glass cup`: o vidro é dividido em garrafas, potes e copos (decisão 8 do [`OBJETIVO.md`](../OBJETIVO.md)). O índice na lista é o id da classe nos `.txt`: para não invalidar anotações já feitas, só acrescente classes no fim.
+`classes.yaml` tem duas listas (nível 2 da taxonomia):
+
+- `nomes`: as classes dos rótulos. O índice é o id nos `.txt`, e o `data.yaml` de cada saída é gerado dela. São as 60 classes TACO e `Background`, na ordem de `legado/database/tcc-*/YOLO_dataset/data.yaml` e do `yolo_models/taco/best.pt`, para que as anotações sirvam direto ao fine-tuning dele. Para não invalidar anotações já feitas, só acrescente no fim.
+- `classes`: o que o anotador automático procura, um subconjunto de `nomes`, cada uma com o `nome`, o `prompt` em inglês enviado ao modelo e o `material` (nível 1). A ordem dela não muda os ids. A lista inicial são as seis classes TACO das fotos da equipe, mais `Glass jar` e `Glass cup`: o vidro é dividido em garrafas, potes e copos (decisão 8 do [`OBJETIVO.md`](../OBJETIVO.md)).
+
+Na revisão, qualquer classe de `nomes` pode ser escolhida, mesmo as que o anotador não procura.
+
+Uma classe de `classes` com `reserva: true` só vence numa caixa quando nenhuma das outras chega ao limiar de confiança. Serve para uma classe genérica (por exemplo, `Unlabeled litter` com o prompt "object") dar caixa aos objetos que as outras não reconhecem, sem tirar delas os que reconhecem. Nenhuma classe a usa por enquanto: a frase a mais no prompt muda a pontuação das outras (medição na seção 5 do [`OBJETIVO.md`](../OBJETIVO.md)).
 
 O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir.
 

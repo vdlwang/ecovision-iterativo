@@ -33,6 +33,7 @@ from visualizar import gerar_pagina
 
 DIR_SCRIPT = Path(__file__).resolve().parent
 MODELO_PADRAO = "IDEA-Research/grounding-dino-tiny"
+CONFIANCA_PADRAO = 0.35
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
@@ -53,8 +54,51 @@ def carregar_classes(caminho):
                              f"(use {', '.join(sorted(MATERIAIS))})")
         if c["nome"] in nomes:
             raise ValueError(f"{caminho}: classe '{c['nome']}' repetida")
+        if not isinstance(c.get("reserva", False), bool):
+            raise ValueError(f"{caminho}: classe {i} com 'reserva' que não é true nem false")
         nomes.add(c["nome"])
+    if all(c.get("reserva") for c in classes):
+        raise ValueError(f"{caminho}: ao menos uma classe não pode ser de reserva")
+    fora = [c["nome"] for c in classes if c["nome"] not in carregar_nomes(caminho)]
+    if fora:
+        raise ValueError(f"{caminho}: classes fora de 'nomes': {', '.join(fora)}")
     return classes
+
+
+def carregar_nomes(caminho):
+    """
+    Lê 'nomes' do classes.yaml: os nomes das classes dos rótulos, na ordem dos
+    ids. Sem 'nomes', valem os nomes de 'classes', na ordem delas.
+    """
+    with open(caminho, encoding="utf-8") as f:
+        dados = yaml.safe_load(f) or {}
+    nomes = dados.get("nomes")
+    if nomes is None:
+        return [str(c.get("nome")) for c in dados.get("classes") or []]
+    if not isinstance(nomes, list) or not nomes or not all(
+            isinstance(n, str) and n.strip() for n in nomes):
+        raise ValueError(f"{caminho}: 'nomes' deve ser uma lista de nomes não vazios")
+    repetidos = sorted({n for n in nomes if nomes.count(n) > 1})
+    if repetidos:
+        raise ValueError(f"{caminho}: nomes repetidos: {', '.join(repetidos)}")
+    return nomes
+
+
+def escolher_classe(pontuacoes, reservas, limiar):
+    """
+    Classe de uma consulta a partir da pontuação de cada classe: (classe,
+    confiança). Vence a classe comum de maior pontuação; uma classe de reserva
+    (reservas: índices) só vence se nenhuma comum chega ao limiar e ela chega.
+    Assim o prompt genérico dá caixa ao objeto que as outras não reconhecem,
+    sem tirar das comuns os que elas reconhecem.
+    """
+    comuns = [i for i in range(len(pontuacoes)) if i not in reservas]
+    melhor = max(comuns, key=pontuacoes.__getitem__)
+    if pontuacoes[melhor] < limiar and reservas:
+        reserva = max(reservas, key=pontuacoes.__getitem__)
+        if pontuacoes[reserva] >= limiar:
+            return reserva, pontuacoes[reserva]
+    return melhor, pontuacoes[melhor]
 
 
 def montar_prompt(classes):
@@ -134,8 +178,8 @@ class GroundingDino:
         grupo = parser.add_argument_group("grounding-dino")
         grupo.add_argument("--modelo", default=MODELO_PADRAO,
                            help=f"modelo do Hugging Face (padrão: {MODELO_PADRAO})")
-        grupo.add_argument("--confianca", type=float, default=0.35,
-                           help="confiança mínima por caixa (padrão: 0.35)")
+        grupo.add_argument("--confianca", type=float, default=CONFIANCA_PADRAO,
+                           help=f"confiança mínima por caixa (padrão: {CONFIANCA_PADRAO})")
         grupo.add_argument("--iou", type=float, default=0.5,
                            help="IoU acima do qual caixas sobrepostas viram uma (padrão: 0.5)")
         grupo.add_argument("--area-maxima", type=float, default=0.5,
@@ -157,6 +201,7 @@ class GroundingDino:
         self.limiar_iou = limiar_iou
         self.area_maxima = area_maxima
         self.n_classes = len(classes)
+        self.reservas = frozenset(i for i, c in enumerate(classes) if c.get("reserva"))
         self.versao = modelo
         self.parametros = {"confianca": confianca, "iou": limiar_iou,
                            "area_maxima": area_maxima}
@@ -210,9 +255,9 @@ class GroundingDino:
         """
         if confianca is None:
             confianca = self.confianca
-        confiancas, classes = por_classe.max(dim=1)
         deteccoes = []
-        for conf, classe, caixa in zip(confiancas.tolist(), classes.tolist(), caixas):
+        for pontuacoes, caixa in zip(por_classe.tolist(), caixas):
+            classe, conf = escolher_classe(pontuacoes, self.reservas, confianca)
             if conf < confianca:
                 continue
             area = (caixa[2] - caixa[0]) * (caixa[3] - caixa[1])
@@ -230,26 +275,40 @@ class GroundingDino:
 ANOTADORES = {a.nome: a for a in (GroundingDino,)}
 
 
-def preparar_saida(saida, classes):
+def tem_ids_gravados(saida):
+    """Se algum .txt de labels/ ou registro de revisoes/ guarda id de classe."""
+    if any(t.read_text(encoding="utf-8").strip() for t in (saida / "labels").glob("*.txt")):
+        return True
+    return any(formato.ler_revisao(saida, r.name).get("caixas")
+               for r in (saida / "revisoes").glob("*.json"))
+
+
+def preparar_saida(saida, nomes):
     """
-    Cria as pastas, o data.yaml e o imagens.csv. Recusa um data.yaml com outras
-    classes e uma saída do formato antigo (labels/ sem imagens.csv), em que as
-    propostas eram gravadas direto como rótulos.
+    Cria as pastas, o data.yaml (nomes: os de carregar_nomes, na ordem dos ids)
+    e o imagens.csv. Um data.yaml com outras classes é refeito se nenhum rótulo
+    ou revisão guarda ids (as propostas guardam a classe pelo nome; fundo e
+    descarte não têm caixas); senão, é recusado, porque os ids não bateriam. Recusa também uma saída do
+    formato antigo (labels/ sem imagens.csv), em que as propostas eram
+    gravadas direto como rótulos.
     """
     for pasta in ("images", "labels", "propostas"):
         (saida / pasta).mkdir(parents=True, exist_ok=True)
     if not (saida / "imagens.csv").exists() and any((saida / "labels").glob("*.txt")):
         raise ValueError(f"{saida} é do formato antigo (labels/ sem imagens.csv), em que "
                          "as propostas eram gravadas como rótulos. Use outro diretório.")
-    nomes = {i: c["nome"] for i, c in enumerate(classes)}
+    nomes = dict(enumerate(nomes))
     data_yaml = saida / "data.yaml"
+    existentes = None
     if data_yaml.exists():
         with open(data_yaml, encoding="utf-8") as f:
             existentes = (yaml.safe_load(f) or {}).get("names")
-        if existentes != nomes:
-            raise ValueError(f"{data_yaml} tem outras classes; os ids não bateriam. "
-                             "Use outro diretório de saída.")
-    else:
+        if isinstance(existentes, list):
+            existentes = dict(enumerate(existentes))
+    if existentes != nomes:
+        if existentes is not None and tem_ids_gravados(saida):
+            raise ValueError(f"{data_yaml} tem outras classes e já há rótulos ou revisões "
+                             "com caixas; os ids não bateriam. Use outro diretório de saída.")
         # Sem 'path': o Ultralytics usa a pasta do data.yaml. Só as revisadas,
         # e ainda sem divisão treino/validação (por sessão, monografia 5.3.5).
         formato.gravar_atomico(data_yaml, yaml.safe_dump(
@@ -312,6 +371,7 @@ def main(argv=None):
         parser.error("informe as imagens a anotar, ou --aceitar")
 
     classes = carregar_classes(args.classes)
+    nomes_classes = carregar_nomes(args.classes)
 
     for caminho in args.imagens:
         if not caminho.is_file():
@@ -328,7 +388,7 @@ def main(argv=None):
             parser.error(f"já anotadas por {args.anotador} em {args.saida}: "
                          f"{', '.join(existentes)} (use --sobrescrever)")
 
-    preparar_saida(args.saida, classes)
+    preparar_saida(args.saida, nomes_classes)
     colunas, linhas = formato.ler_estado(args.saida)
     for caminho in args.imagens:
         formato.registrar_imagem(dict(linhas), caminho.name)  # só confere colisões
@@ -358,7 +418,7 @@ def main(argv=None):
 
     if args.aceitar:
         escolhidas = {c.name for c in args.imagens} if args.imagens else None
-        aceitas = formato.aceitar(args.saida, args.anotador, classes, escolhidas)
+        aceitas = formato.aceitar(args.saida, args.anotador, escolhidas)
         print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.anotador} copiadas "
               "para labels/")
 
