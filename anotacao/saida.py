@@ -20,6 +20,10 @@ import os
 import tempfile
 from pathlib import Path
 
+import yaml
+from PIL import Image
+
+EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 STATUS = ("pendente", "revisada", "descartada")
 COLUNAS = ["nome", "status"]
 
@@ -185,3 +189,77 @@ def aceitar(saida, anotador, classes, nomes=None):
         aceitas += 1
     gravar_estado(saida, colunas, linhas)
     return aceitas
+
+
+# --- leitura de uma imagem, para as páginas ---------------------------------
+
+def nomes_classes(saida):
+    """Nomes das classes do data.yaml, {id: nome}."""
+    data_yaml = Path(saida) / "data.yaml"
+    if not data_yaml.exists():
+        raise ValueError(f"{data_yaml} não existe; é a saída do anotar.py?")
+    with open(data_yaml, encoding="utf-8") as f:
+        nomes = (yaml.safe_load(f) or {}).get("names") or {}
+    if isinstance(nomes, list):
+        nomes = dict(enumerate(nomes))
+    return {int(i): n for i, n in nomes.items()}
+
+
+def ler_rotulos(caminho):
+    """
+    Linhas 'id cx cy w h' de um .txt -> ([(id, (x1, y1, x2, y2))], quantas
+    linhas foram ignoradas); (None, 0) se o arquivo não existe.
+    """
+    caixas, invalidas = [], 0
+    if not caminho.exists():
+        return None, 0
+    for linha in caminho.read_text(encoding="utf-8").splitlines():
+        partes = linha.split()
+        if not partes:
+            continue
+        try:
+            if len(partes) != 5:
+                raise ValueError
+            cx, cy, w, h = (float(p) for p in partes[1:])
+            caixas.append((int(partes[0]), (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)))
+        except ValueError:
+            invalidas += 1
+    return caixas, invalidas
+
+
+def caixa_json(id_classe, nome, confianca, caixa):
+    """Caixa como as páginas a recebem; id None para classe fora do data.yaml."""
+    return {"id": id_classe, "nome": nome, "conf": confianca,
+            "caixa": [round(v, 6) for v in caixa]}
+
+
+def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado):
+    """
+    O que as páginas mostram de uma imagem: status (None fora do imagens.csv),
+    caixas finais (None sem .txt), linhas inválidas do .txt e as propostas de
+    cada anotador, com as caixas no formato de caixa_json.
+    """
+    saida = Path(saida)
+    ids = {n: i for i, n in nomes.items()}
+    finais, invalidas = ler_rotulos(saida / "labels" / f"{Path(nome).stem}.txt")
+    propostas = {}
+    for anotador in anotadores_saida:
+        caminho = caminho_proposta(saida, anotador, nome)
+        if caminho.exists():
+            propostas[anotador] = [caixa_json(ids.get(classe), classe, conf, caixa)
+                                   for classe, conf, caixa in
+                                   caixas_normalizadas(ler_proposta(caminho))]
+    return {
+        "nome": nome,
+        "status": linha_estado["status"] if linha_estado else None,
+        "final": None if finais is None else [
+            caixa_json(i, nomes.get(i, f"classe {i}"), None, c) for i, c in finais],
+        "invalidas": invalidas,
+        "propostas": propostas,
+    }
+
+
+def tamanho_imagem(caminho):
+    """(largura, altura) lendo só o cabeçalho."""
+    with Image.open(caminho) as imagem:
+        return imagem.size

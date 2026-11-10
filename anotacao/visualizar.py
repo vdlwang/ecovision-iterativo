@@ -23,83 +23,29 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-import yaml
-
 import saida as formato
-
-EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-
-
-def ler_rotulos(caminho):
-    """
-    Linhas 'id cx cy w h' de um .txt -> ([(id, (x1, y1, x2, y2))], quantas
-    linhas foram ignoradas); (None, 0) se o arquivo não existe.
-    """
-    caixas, invalidas = [], 0
-    if not caminho.exists():
-        return None, 0
-    for linha in caminho.read_text(encoding="utf-8").splitlines():
-        partes = linha.split()
-        if not partes:
-            continue
-        try:
-            if len(partes) != 5:
-                raise ValueError
-            cx, cy, w, h = (float(p) for p in partes[1:])
-            caixas.append((int(partes[0]), (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)))
-        except ValueError:
-            invalidas += 1
-    return caixas, invalidas
-
-
-def caixa_json(id_classe, nome, confianca, caixa):
-    return {"id": id_classe, "nome": nome, "conf": confianca,
-            "caixa": [round(v, 6) for v in caixa]}
+from saida import EXTENSOES_IMAGEM  # noqa: F401 (usada pelo notebook do Colab)
 
 
 def coletar(saida):
     """
-    Classes do data.yaml e, para cada imagem, o caminho relativo, o status, as
-    caixas finais (None sem .txt) e as propostas de cada anotador. Caixas como
-    {id, nome, conf, caixa: [x1, y1, x2, y2] normalizada}; id None para uma
-    classe fora do data.yaml.
+    Classes do data.yaml, anotadores com propostas e, para cada imagem de
+    images/, os dados de saida.ler_imagem.
     """
-    data_yaml = saida / "data.yaml"
-    if not data_yaml.exists():
-        raise ValueError(f"{data_yaml} não existe; é a saída do anotar.py?")
-    with open(data_yaml, encoding="utf-8") as f:
-        nomes = (yaml.safe_load(f) or {}).get("names") or {}
-    if isinstance(nomes, list):
-        nomes = dict(enumerate(nomes))
-
-    ids = {n: i for i, n in nomes.items()}
-
+    saida = Path(saida)
+    nomes = formato.nomes_classes(saida)
     if not (saida / "images").is_dir():
         raise ValueError(f"{saida / 'images'} não existe")
     _, estado = formato.ler_estado(saida)
     anotadores = formato.anotadores(saida)
     imagens = []
     for arquivo in sorted((saida / "images").iterdir()):
-        if arquivo.suffix.lower() not in EXTENSOES_IMAGEM:
+        if arquivo.suffix.lower() not in formato.EXTENSOES_IMAGEM:
             continue
-        finais, invalidas = ler_rotulos(saida / "labels" / f"{arquivo.stem}.txt")
-        propostas = {}
-        for anotador in anotadores:
-            caminho = formato.caminho_proposta(saida, anotador, arquivo.name)
-            if caminho.exists():
-                propostas[anotador] = [
-                    caixa_json(ids.get(classe), classe, conf, caixa)
-                    for classe, conf, caixa in formato.caixas_normalizadas(
-                        formato.ler_proposta(caminho))]
-        imagens.append({
-            "nome": arquivo.name,
-            "src": "images/" + quote(arquivo.name),
-            "status": estado[arquivo.name]["status"] if arquivo.name in estado else None,
-            "final": None if finais is None else [
-                caixa_json(i, nomes.get(i, f"classe {i}"), None, c) for i, c in finais],
-            "invalidas": invalidas,
-            "propostas": propostas,
-        })
+        dados = formato.ler_imagem(saida, arquivo.name, nomes, anotadores,
+                                   estado.get(arquivo.name))
+        dados["src"] = "images/" + quote(arquivo.name)
+        imagens.append(dados)
     return {str(i): n for i, n in nomes.items()}, anotadores, imagens
 
 

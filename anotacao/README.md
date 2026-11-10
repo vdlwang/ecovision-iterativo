@@ -92,6 +92,30 @@ A página lê os arquivos quando é gerada. Depois de editar algum à mão, ou p
 python anotacao/visualizar.py anotacoes
 ```
 
+## Revisão
+
+`revisar.py` serve uma página local de revisão sobre um diretório do `anotar.py`, sem dependência além das do script:
+
+```bash
+python anotacao/revisar.py anotacoes --abrir      # http://127.0.0.1:8000/
+python anotacao/revisar.py anotacoes --porta 8001
+```
+
+A página mostra a fila das imagens `pendente`, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os filtros trocam o status (`revisada`, `descartada`, todas) e a ordem (por nome). A imagem aparece como no `visualizar.html`, com o mesmo seletor "mostrar". As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
+
+O servidor escuta só em `127.0.0.1` e lê o disco a cada pedido, então mudanças feitas à mão aparecem ao recarregar. **Por enquanto, a página só mostra.** Corrigir, salvar e descartar são a fase 3 do [`PLANO-REVISAO.md`](PLANO-REVISAO.md).
+
+A API, em JSON, é a mesma que a página usa:
+
+| Rota | Resposta |
+|---|---|
+| `GET /api/classes` | `[{id, nome, material}]` |
+| `GET /api/imagens?status=pendente&ordem=incerteza` | `{imagens: [{nome, status, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}` |
+| `GET /api/imagens/<nome>` | `{nome, status, largura, altura, final, propostas: {anotador: [...]}, invalidas, revisao}` |
+| `GET /images/<nome>` | A imagem |
+
+As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. Só imagens que estão no `imagens.csv` são servidas.
+
 ## Novo anotador
 
 Um anotador é uma classe em `anotar.py`, registrada no dicionário `ANOTADORES`, com:

@@ -104,7 +104,7 @@ Conclusão: manter o Grounding DINO para as caixas e trocar quem decide a classe
 - **Prompt que descreve o objeto real.** Só `Glass bottle` → "drinking glass": vidro de 7% para 38%, classe 46% → 55%, material 50% → 60%; detecção em 0,35, precisão 0,39 → 0,56 e recall 0,33 → 0,48. Trocar também tampa, lata e papel pelos vencedores do vocabulário amplo dá 57% e 62%, mas lata e papel pioram. O vencedor do teste qualitativo não é necessariamente o melhor prompt, e diferenças de 2 pontos são ruído: as 4 validações são as mesmas cenas, e os prompts foram ajustados nelas.
 
 Antes do SigLIP:
-1. Decidir a taxonomia do vidro: `Glass cup` e `Glass jar` (TACO) ou uma classe só de vidro.
+1. ~~Decidir a taxonomia do vidro~~: decidido (decisão 8), três classes. Falta levá-las ao `classes.yaml` junto com as correções do item 3, para o `avaliar.py` não comparar as classes novas com rótulos `Glass bottle`.
 2. Permitir mais de um prompt por classe, com a pontuação máxima entre eles: um prompt não cobre copo, pote e tigela.
 3. Registrar as correções dos rótulos da equipe num arquivo em `anotacao/`, sem editar `legado/`.
 4. Refazer a linha de base. O SigLIP herda o mesmo cuidado: as descrições têm de corresponder aos objetos das fotos, não ao nome TACO.
@@ -179,3 +179,4 @@ As decisões que só valem para o framework (ferramenta própria, fonte das clas
 | 5 | ~~O teste chega ao revisor com as propostas dos anotadores ou sem elas?~~ | **Decidido (2026-10-28)**: segmentado e sem classe. Os objetos chegam delimitados para poupar a seleção; a classe é do revisor (seção 4). |
 | 6 | ~~O voto exige a mesma classe ou só o mesmo material?~~ | **Decidido (2026-10-28)**: mesma classe. Por material aprovaria mais, mas a imagem ficaria sem classe definida para o treino. |
 | 7 | ~~Proporção treino/teste e unidade do sorteio~~ | **Decidido (2026-10-28)**: sorteio por lote de captura, 1 lote em cada 5 para o teste. Frames seguidos da esteira são quase iguais; sortear imagem a imagem vazaria cenas entre os conjuntos. |
+| 8 | ~~Taxonomia do vidro~~ | **Decidido (2026-11-09)**: três classes TACO, `Glass bottle`, `Glass jar` e `Glass cup` (copos, taças e tigelas). `Glass jar` e `Glass cup` entram no fim do `classes.yaml`, para não mudar os ids. |

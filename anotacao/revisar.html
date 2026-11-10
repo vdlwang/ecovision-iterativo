@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisão</title>
+<!-- Servida pelo revisar.py; os dados vêm da API em /api. Por enquanto só lê. -->
+<style>
+  :root { --fundo: #111418; --painel: #1b2027; --borda: #2c333d; --texto: #e6e9ee;
+          --suave: #9aa4b2; --destaque: #22c55e; --alerta: #f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--fundo);
+         color: var(--texto); display: flex; height: 100vh; }
+  aside { width: 280px; flex: none; background: var(--painel); border-right: 1px solid var(--borda);
+          display: flex; flex-direction: column; }
+  aside header { padding: 12px 14px; border-bottom: 1px solid var(--borda); display: grid; gap: 8px; }
+  aside h1 { font-size: 15px; margin: 0; }
+  aside small { color: var(--suave); }
+  .filtros { display: flex; gap: 8px; }
+  .filtros label { flex: 1; display: grid; gap: 2px; color: var(--suave); font-size: 12px; }
+  select { background: var(--fundo); color: var(--texto); border: 1px solid var(--borda);
+           border-radius: 6px; padding: 3px 6px; }
+  #fila { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  #fila li { padding: 8px 14px; cursor: pointer; display: flex; justify-content: space-between;
+             gap: 8px; border-bottom: 1px solid var(--borda); }
+  #fila li:hover { background: #232a33; }
+  #fila li.atual { background: #263445; }
+  #fila .nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fila .info { color: var(--suave); flex: none; font-variant-numeric: tabular-nums; }
+  #fila .vazia { color: var(--suave); cursor: default; }
+  .st-pendente { color: var(--alerta); } .st-revisada { color: var(--destaque); }
+  .st-descartada { color: var(--suave); text-decoration: line-through; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .barra { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+           border-bottom: 1px solid var(--borda); flex-wrap: wrap; }
+  .barra button { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+                  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .barra label { color: var(--suave); display: flex; gap: 6px; align-items: center; }
+  #titulo { font-weight: 600; margin-right: auto; }
+  .area { flex: 1; display: flex; align-items: center; justify-content: center;
+          padding: 14px; min-height: 0; }
+  .quadro { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
+  .quadro img { display: block; max-width: 100%; max-height: calc(100vh - 130px); }
+  .caixa { position: absolute; border: 2px solid; }
+  .caixa.proposta { border-style: dashed; }
+  .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
+                color: #000; white-space: nowrap; }
+  .sem-rotulos .caixa span { display: none; }
+  .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 14px;
+             border-top: 1px solid var(--borda); color: var(--suave); min-height: 37px; }
+  .legenda i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
+  .erro { color: #ef4444; }
+  @media (max-width: 700px) {
+    body { flex-direction: column; height: auto; min-height: 100vh; }
+    aside { width: auto; max-height: 35vh; border-right: 0; border-bottom: 1px solid var(--borda); }
+    .area { padding: 14px 4px; }
+    .quadro img { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>Revisão</h1>
+    <small id="resumo">carregando…</small>
+    <div class="filtros">
+      <label>status
+        <select id="status">
+          <option value="pendente">pendentes</option>
+          <option value="revisada">revisadas</option>
+          <option value="descartada">descartadas</option>
+          <option value="todas">todas</option>
+        </select>
+      </label>
+      <label>ordem
+        <select id="ordem">
+          <option value="incerteza">mais incertas antes</option>
+          <option value="nome">nome</option>
+        </select>
+      </label>
+    </div>
+  </header>
+  <ul id="fila"></ul>
+</aside>
+<main>
+  <div class="barra">
+    <span id="titulo"></span>
+    <label>mostrar <select id="camada"></select></label>
+    <label><input type="checkbox" id="mostrar-rotulos" checked> nomes</label>
+    <label><input type="checkbox" id="mostrar-caixas" checked> caixas</label>
+    <button id="anterior" title="Seta para a esquerda">&larr;</button>
+    <button id="proxima" title="Seta para a direita">&rarr;</button>
+  </div>
+  <div class="area"><div class="quadro" id="quadro"><img id="imagem" alt=""></div></div>
+  <div class="legenda" id="legenda"></div>
+</main>
+<script>
+const CORES = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6",
+               "#ec4899", "#eab308", "#6366f1", "#f97316"];
+const cor = id => CORES[(id ?? 0) % CORES.length];
+const $ = id => document.getElementById(id);
+
+let fila = [];        // linhas de /api/imagens
+let atual = -1;       // índice na fila
+let detalhe = null;   // /api/imagens/<nome> da atual
+let pedido = 0;       // descarta respostas de pedidos já superados
+
+async function api(rota) {
+  const resposta = await fetch(rota);
+  const dados = await resposta.json();
+  if (!resposta.ok) throw new Error(dados.erro || resposta.statusText);
+  return dados;
+}
+
+function erro(e) {
+  $("legenda").replaceChildren(Object.assign(document.createElement("span"),
+    { className: "erro", textContent: `Erro: ${e.message}` }));
+}
+
+async function carregarFila(manter) {
+  const parametros = new URLSearchParams({ status: $("status").value, ordem: $("ordem").value });
+  const dados = await api(`/api/imagens?${parametros}`);
+  fila = dados.imagens;
+
+  const seletor = $("camada"), escolhida = seletor.value;
+  seletor.replaceChildren();
+  for (const [valor, texto] of [["auto", "automático"], ["final", "anotação final"],
+                                ...dados.anotadores.map(a => [a, `propostas: ${a}`])])
+    seletor.add(new Option(texto, valor));
+  if ([...seletor.options].some(o => o.value === escolhida)) seletor.value = escolhida;
+
+  $("resumo").textContent = Object.entries(dados.contagem)
+    .map(([s, n]) => `${n} ${s}${n === 1 ? "" : "s"}`).join(", ");
+
+  const lista = $("fila");
+  lista.replaceChildren();
+  if (!fila.length) {
+    lista.append(Object.assign(document.createElement("li"),
+      { className: "vazia", textContent: "Nenhuma imagem com esse status." }));
+  }
+  fila.forEach((im, i) => {
+    const li = document.createElement("li");
+    const nome = Object.assign(document.createElement("span"),
+      { className: "nome", textContent: im.nome });
+    const info = document.createElement("span");
+    info.className = "info";
+    const total = Object.values(im.n_caixas).reduce((a, b) => a + b, 0);
+    info.textContent = im.anotadores.length
+      ? `${total} cx · ${im.confianca_min === null ? "—" : im.confianca_min.toFixed(2)} `
+      : "sem proposta ";
+    info.append(Object.assign(document.createElement("span"),
+      { className: `st-${im.status}`, textContent: im.status }));
+    li.title = im.nome + (im.anotadores.length
+      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
+    li.append(nome, info);
+    li.onclick = () => mostrar(i);
+    lista.append(li);
+  });
+
+  const i = fila.findIndex(im => im.nome === manter);
+  if (fila.length) await mostrar(i >= 0 ? i : 0);
+  else { atual = -1; detalhe = null; desenhar(); }
+}
+
+async function mostrar(i) {
+  if (!fila.length) return;
+  atual = (i + fila.length) % fila.length;
+  const nome = fila[atual].nome;
+  [...$("fila").children].forEach((li, j) => li.classList.toggle("atual", j === atual));
+  $("fila").children[atual].scrollIntoView({ block: "nearest" });
+  history.replaceState(null, "", `#${encodeURIComponent(nome)}`);
+  const meu = ++pedido;
+  try {
+    const dados = await api(`/api/imagens/${encodeURIComponent(nome)}`);
+    if (meu !== pedido) return;
+    detalhe = dados;
+    $("imagem").src = `/images/${encodeURIComponent(nome)}`;
+    desenhar();
+  } catch (e) { if (meu === pedido) erro(e); }
+}
+
+// "auto": a anotação final se houver .txt, senão a proposta do primeiro
+// anotador que tiver uma
+function camada(im) {
+  const escolhida = $("camada").value;
+  if (escolhida === "final") return { tipo: "final", caixas: im.final };
+  if (escolhida !== "auto") return { tipo: escolhida, caixas: im.propostas[escolhida] ?? null };
+  const anotadores = Object.keys(im.propostas).sort();
+  if (im.final || !anotadores.length) return { tipo: "final", caixas: im.final };
+  return { tipo: anotadores[0], caixas: im.propostas[anotadores[0]] };
+}
+
+function desenhar() {
+  const quadro = $("quadro"), legenda = $("legenda");
+  quadro.querySelectorAll(".caixa").forEach(c => c.remove());
+  if (!detalhe) {
+    $("titulo").textContent = "";
+    $("imagem").removeAttribute("src");
+    legenda.replaceChildren();
+    return;
+  }
+  const im = detalhe;
+  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · ${im.status}`;
+  const { tipo, caixas } = camada(im);
+  for (const { id, nome, conf, caixa: [x1, y1, x2, y2] } of caixas ?? []) {
+    const div = document.createElement("div");
+    div.className = "caixa" + (conf === null ? "" : " proposta");
+    Object.assign(div.style, {
+      left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+      width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id),
+    });
+    const span = document.createElement("span");
+    span.textContent = conf === null ? nome : `${nome} ${conf.toFixed(2)}`;
+    span.style.background = cor(id);
+    div.append(span);
+    quadro.append(div);
+  }
+  atualizarVisibilidade();
+
+  legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
+  const contagem = new Map();
+  for (const { id, nome } of caixas ?? []) {
+    const chave = `${id}\u0000${nome}`;
+    contagem.set(chave, (contagem.get(chave) || 0) + 1);
+  }
+  for (const [chave, n] of contagem) {
+    const [id, nome] = chave.split("\u0000");
+    const item = document.createElement("span");
+    const amostra = document.createElement("i");
+    amostra.style.background = cor(id === "null" ? null : Number(id));
+    item.append(amostra, `${nome}${id === "null" ? " (fora do data.yaml)" : ""}: ${n}`);
+    legenda.append(item);
+  }
+  if (caixas === null) legenda.append(tipo === "final"
+    ? "Sem rótulos em labels/ (não revisada)." : "Sem proposta deste anotador.");
+  else if (!caixas.length) legenda.append("Nenhum objeto.");
+  if (tipo === "final" && im.invalidas)
+    legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
+}
+
+function atualizarVisibilidade() {
+  const caixas = $("mostrar-caixas").checked;
+  $("quadro").querySelectorAll(".caixa").forEach(c => c.style.display = caixas ? "" : "none");
+  $("quadro").classList.toggle("sem-rotulos", !$("mostrar-rotulos").checked);
+}
+
+const nomeAtual = () => (atual >= 0 ? fila[atual].nome : null);
+$("status").onchange = () => carregarFila(nomeAtual()).catch(erro);
+$("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
+$("camada").onchange = desenhar;
+$("mostrar-caixas").onchange = atualizarVisibilidade;
+$("mostrar-rotulos").onchange = atualizarVisibilidade;
+$("anterior").onclick = () => mostrar(atual - 1);
+$("proxima").onclick = () => mostrar(atual + 1);
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowLeft") mostrar(atual - 1);
+  if (e.key === "ArrowRight") mostrar(atual + 1);
+});
+
+// #<nome> no endereço abre essa imagem; se ela não estiver entre as
+// pendentes, a fila passa a mostrar todas
+async function iniciar() {
+  const pedida = decodeURIComponent(location.hash.slice(1));
+  await carregarFila(pedida);
+  if (pedida && nomeAtual() !== pedida) {
+    $("status").value = "todas";
+    await carregarFila(pedida);
+  }
+}
+iniciar().catch(erro);
+</script>
+</body>
+</html>

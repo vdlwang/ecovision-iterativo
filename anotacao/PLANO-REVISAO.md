@@ -101,8 +101,10 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 1 | ~~Ferramenta própria ou Label Studio?~~ | **Decidido (2026-10-28)**: ferramenta própria, a mais simples possível. |
 | 2 | Onde ficam as classes? Hoje há `anotacao/classes.yaml` (anotador) e o `data.yaml` de cada saída; uma classe nova pela página (RF14) precisa ir aos dois. | `classes.yaml` como fonte, `data.yaml` gerado a partir dele. |
 | 3 | ~~Um ou vários revisores?~~ | **Decidido (2026-10-28)**: um revisor, local. Sem trava por imagem nem identificação por enquanto. |
+| 9 | ~~Uma página ou duas?~~ | **Decidido (2026-11-09)**: duas. `visualizar.py` continua gerando a página estática (`file://`, serve no Colab); `revisar.html` é servida pelo `revisar.py` e vira o editor. Aceita-se algum HTML repetido. |
+| 10 | ~~Acesso de outro computador (RNF05)?~~ | **Decidido (2026-11-09)**: por enquanto só `127.0.0.1`; uma opção `--host` quando for preciso. |
 
-As decisões 4 a 7 (voto, teste sem classe, mesma classe no voto, sorteio por lote) são do sistema completo e estão no `OBJETIVO.md`.
+As decisões 4 a 7 (voto, teste sem classe, mesma classe no voto, sorteio por lote) e a 8 (vidro) são do sistema completo e estão no `OBJETIVO.md`.
 
 ## Notas
 
