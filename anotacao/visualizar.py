@@ -1,12 +1,17 @@
 """
 Página HTML para conferir as anotações de um diretório gerado pelo anotar.py.
 
-Lê data.yaml, images/ e labels/ e grava <saida>/visualizar.html, que abre
-direto no navegador (sem servidor): lista das imagens à esquerda, imagem com
-as caixas à direita, setas do teclado para navegar. Só visualiza; não edita.
+Lê data.yaml, images/, labels/ (anotações finais), propostas/<anotador>/ e
+imagens.csv (status), e grava <saida>/visualizar.html, que abre direto no
+navegador (sem servidor): lista das imagens à esquerda, imagem com as caixas
+à direita, setas do teclado para navegar. As propostas aparecem tracejadas e
+com a confiança. Só visualiza; não edita.
+
+Também serve para um diretório no formato YOLO de outra ferramenta (só
+data.yaml, images/ e labels/).
 
 O anotar.py já gera a página ao terminar; rode este script para refazê-la
-depois de mexer nos .txt à mão.
+depois de mexer nos arquivos à mão.
 
 Uso:
     python anotacao/visualizar.py anotacoes
@@ -20,11 +25,16 @@ from urllib.parse import quote
 
 import yaml
 
+import saida as formato
+
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def ler_rotulos(caminho):
-    """Linhas 'id cx cy w h' de um .txt; devolve a lista e quantas linhas foram ignoradas."""
+    """
+    Linhas 'id cx cy w h' de um .txt -> ([(id, (x1, y1, x2, y2))], quantas
+    linhas foram ignoradas); (None, 0) se o arquivo não existe.
+    """
     caixas, invalidas = [], 0
     if not caminho.exists():
         return None, 0
@@ -35,14 +45,25 @@ def ler_rotulos(caminho):
         try:
             if len(partes) != 5:
                 raise ValueError
-            caixas.append([int(partes[0])] + [float(p) for p in partes[1:]])
+            cx, cy, w, h = (float(p) for p in partes[1:])
+            caixas.append((int(partes[0]), (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)))
         except ValueError:
             invalidas += 1
     return caixas, invalidas
 
 
+def caixa_json(id_classe, nome, confianca, caixa):
+    return {"id": id_classe, "nome": nome, "conf": confianca,
+            "caixa": [round(v, 6) for v in caixa]}
+
+
 def coletar(saida):
-    """Classes do data.yaml e, para cada imagem, o caminho relativo e as caixas."""
+    """
+    Classes do data.yaml e, para cada imagem, o caminho relativo, o status, as
+    caixas finais (None sem .txt) e as propostas de cada anotador. Caixas como
+    {id, nome, conf, caixa: [x1, y1, x2, y2] normalizada}; id None para uma
+    classe fora do data.yaml.
+    """
     data_yaml = saida / "data.yaml"
     if not data_yaml.exists():
         raise ValueError(f"{data_yaml} não existe; é a saída do anotar.py?")
@@ -51,28 +72,43 @@ def coletar(saida):
     if isinstance(nomes, list):
         nomes = dict(enumerate(nomes))
 
+    ids = {n: i for i, n in nomes.items()}
+
     if not (saida / "images").is_dir():
         raise ValueError(f"{saida / 'images'} não existe")
+    _, estado = formato.ler_estado(saida)
+    anotadores = formato.anotadores(saida)
     imagens = []
     for arquivo in sorted((saida / "images").iterdir()):
         if arquivo.suffix.lower() not in EXTENSOES_IMAGEM:
             continue
-        caixas, invalidas = ler_rotulos(saida / "labels" / f"{arquivo.stem}.txt")
+        finais, invalidas = ler_rotulos(saida / "labels" / f"{arquivo.stem}.txt")
+        propostas = {}
+        for anotador in anotadores:
+            caminho = formato.caminho_proposta(saida, anotador, arquivo.name)
+            if caminho.exists():
+                propostas[anotador] = [
+                    caixa_json(ids.get(classe), classe, conf, caixa)
+                    for classe, conf, caixa in formato.caixas_normalizadas(
+                        formato.ler_proposta(caminho))]
         imagens.append({
             "nome": arquivo.name,
             "src": "images/" + quote(arquivo.name),
-            "caixas": caixas or [],
-            "sem_rotulo": caixas is None,
+            "status": estado[arquivo.name]["status"] if arquivo.name in estado else None,
+            "final": None if finais is None else [
+                caixa_json(i, nomes.get(i, f"classe {i}"), None, c) for i, c in finais],
             "invalidas": invalidas,
+            "propostas": propostas,
         })
-    return {str(i): n for i, n in nomes.items()}, imagens
+    return {str(i): n for i, n in nomes.items()}, anotadores, imagens
 
 
 def gerar_pagina(saida):
     """Grava <saida>/visualizar.html e devolve o caminho."""
     saida = Path(saida)
-    classes, imagens = coletar(saida)
-    dados = json.dumps({"classes": classes, "imagens": imagens}, ensure_ascii=False)
+    classes, anotadores, imagens = coletar(saida)
+    dados = json.dumps({"classes": classes, "anotadores": anotadores, "imagens": imagens},
+                       ensure_ascii=False)
     # "</" fecharia a tag <script> se aparecesse num nome de arquivo
     html = PAGINA.replace("__DADOS__", dados.replace("</", "<\\/"))
     destino = saida / "visualizar.html"
@@ -105,6 +141,11 @@ PAGINA = """<!doctype html>
   #lista .nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #lista .qtd { color: var(--suave); flex: none; }
   #lista .aviso { color: #f59e0b; }
+  #lista .status { font-size: 11px; margin-left: 6px; }
+  .st-pendente { color: #f59e0b; } .st-revisada { color: var(--destaque); }
+  .st-descartada { color: var(--suave); text-decoration: line-through; }
+  .barra select { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+                  border-radius: 6px; padding: 3px 6px; }
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .barra { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
            border-bottom: 1px solid var(--borda); flex-wrap: wrap; }
@@ -117,6 +158,7 @@ PAGINA = """<!doctype html>
   .quadro { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
   .quadro img { display: block; max-width: 100%; max-height: calc(100vh - 130px); }
   .caixa { position: absolute; border: 2px solid; }
+  .caixa.proposta { border-style: dashed; }
   .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
                 color: #000; white-space: nowrap; }
   .sem-rotulos .caixa span { display: none; }
@@ -139,6 +181,7 @@ PAGINA = """<!doctype html>
 <main>
   <div class="barra">
     <span id="titulo"></span>
+    <label>mostrar <select id="camada"></select></label>
     <label><input type="checkbox" id="mostrar-rotulos" checked> nomes</label>
     <label><input type="checkbox" id="mostrar-caixas" checked> caixas</label>
     <button id="anterior" title="Seta para a esquerda">&larr;</button>
@@ -152,29 +195,55 @@ const DADOS = __DADOS__;
 const CORES = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6",
                "#ec4899", "#eab308", "#6366f1", "#f97316"];
 const cor = id => CORES[id % CORES.length];
-const nomeClasse = id => DADOS.classes[id] ?? `classe ${id}`;
 
 const lista = document.getElementById("lista");
 const quadro = document.getElementById("quadro");
 const imagem = document.getElementById("imagem");
+const seletor = document.getElementById("camada");
 let atual = 0;
 
-const totalCaixas = DADOS.imagens.reduce((s, im) => s + im.caixas.length, 0);
-document.getElementById("resumo").textContent =
-  `${DADOS.imagens.length} imagem(ns), ${totalCaixas} objeto(s)`;
+// Camadas: "auto" (final se houver .txt, senão a proposta do primeiro anotador
+// que tiver uma), "final" ou o nome de um anotador
+const CAMADAS = [["auto", "automático"], ["final", "anotação final"],
+                 ...DADOS.anotadores.map(a => [a, `propostas: ${a}`])];
+for (const [valor, texto] of CAMADAS) seletor.add(new Option(texto, valor));
 
-DADOS.imagens.forEach((im, i) => {
-  const li = document.createElement("li");
-  const nome = document.createElement("span");
-  nome.className = "nome";
-  nome.textContent = im.nome;
-  const qtd = document.createElement("span");
-  qtd.className = "qtd" + (im.sem_rotulo || im.invalidas ? " aviso" : "");
-  qtd.textContent = im.sem_rotulo ? "sem .txt" : im.caixas.length;
-  li.append(nome, qtd);
-  li.onclick = () => mostrar(i);
-  lista.append(li);
-});
+function camada(im) {
+  const escolhida = seletor.value;
+  if (escolhida === "final") return { tipo: "final", caixas: im.final };
+  if (escolhida !== "auto") return { tipo: escolhida, caixas: im.propostas[escolhida] ?? null };
+  if (im.final || !Object.keys(im.propostas).length) return { tipo: "final", caixas: im.final };
+  const a = DADOS.anotadores.find(a => im.propostas[a]);
+  return { tipo: a, caixas: im.propostas[a] };
+}
+
+const porStatus = {};
+DADOS.imagens.forEach(im => { if (im.status) porStatus[im.status] = (porStatus[im.status] || 0) + 1; });
+document.getElementById("resumo").textContent = [`${DADOS.imagens.length} imagem(ns)`,
+  ...Object.entries(porStatus).map(([s, n]) => `${n} ${s}${n > 1 ? "s" : ""}`)].join(", ");
+
+function montarLista() {
+  lista.replaceChildren();
+  DADOS.imagens.forEach((im, i) => {
+    const { caixas } = camada(im);
+    const li = document.createElement("li");
+    const nome = document.createElement("span");
+    nome.className = "nome";
+    nome.textContent = im.nome;
+    const qtd = document.createElement("span");
+    qtd.className = "qtd" + (caixas === null || im.invalidas ? " aviso" : "");
+    qtd.textContent = caixas === null ? "—" : caixas.length;
+    if (im.status) {
+      const st = document.createElement("span");
+      st.className = `status st-${im.status}`;
+      st.textContent = im.status;
+      qtd.append(st);
+    }
+    li.append(nome, qtd);
+    li.onclick = () => mostrar(i);
+    lista.append(li);
+  });
+}
 
 function mostrar(i) {
   if (!DADOS.imagens.length) return;
@@ -183,40 +252,47 @@ function mostrar(i) {
   [...lista.children].forEach((li, j) => li.classList.toggle("atual", j === atual));
   lista.children[atual].scrollIntoView({ block: "nearest" });
   document.getElementById("titulo").textContent =
-    `${atual + 1}/${DADOS.imagens.length} · ${im.nome}`;
+    `${atual + 1}/${DADOS.imagens.length} · ${im.nome}` + (im.status ? ` · ${im.status}` : "");
   imagem.src = im.src;
   history.replaceState(null, "", `#${atual + 1}`);
 
+  const { tipo, caixas } = camada(im);
   quadro.querySelectorAll(".caixa").forEach(c => c.remove());
-  for (const [id, cx, cy, w, h] of im.caixas) {
+  for (const { id, nome, conf, caixa: [x1, y1, x2, y2] } of caixas ?? []) {
     const div = document.createElement("div");
-    div.className = "caixa";
+    div.className = "caixa" + (conf === null ? "" : " proposta");
     Object.assign(div.style, {
-      left: `${(cx - w / 2) * 100}%`, top: `${(cy - h / 2) * 100}%`,
-      width: `${w * 100}%`, height: `${h * 100}%`, borderColor: cor(id),
+      left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+      width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id ?? 0),
     });
     const span = document.createElement("span");
-    span.textContent = nomeClasse(id);
-    span.style.background = cor(id);
+    span.textContent = conf === null ? nome : `${nome} ${conf.toFixed(2)}`;
+    span.style.background = cor(id ?? 0);
     div.append(span);
     quadro.append(div);
   }
   atualizarVisibilidade();
 
   const legenda = document.getElementById("legenda");
-  legenda.replaceChildren();
+  legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
   const contagem = {};
-  im.caixas.forEach(([id]) => contagem[id] = (contagem[id] || 0) + 1);
-  for (const [id, n] of Object.entries(contagem)) {
+  (caixas ?? []).forEach(({ id, nome }) => {
+    const chave = JSON.stringify([id, nome]);
+    contagem[chave] = (contagem[chave] || 0) + 1;
+  });
+  for (const [chave, n] of Object.entries(contagem)) {
+    const [id, nome] = JSON.parse(chave);
     const item = document.createElement("span");
     const amostra = document.createElement("i");
-    amostra.style.background = cor(Number(id));
-    item.append(amostra, `${nomeClasse(id)}: ${n}`);
+    amostra.style.background = cor(id ?? 0);
+    item.append(amostra, `${nome}${id === null ? " (fora do data.yaml)" : ""}: ${n}`);
     legenda.append(item);
   }
-  if (im.sem_rotulo) legenda.append("Sem arquivo de rótulos em labels/.");
-  else if (!im.caixas.length) legenda.append("Nenhum objeto anotado.");
-  if (im.invalidas) legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
+  if (caixas === null) legenda.append(tipo === "final"
+    ? "Sem arquivo de rótulos em labels/ (não revisada)." : "Sem proposta deste anotador.");
+  else if (!caixas.length) legenda.append("Nenhum objeto.");
+  if (tipo === "final" && im.invalidas)
+    legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
 }
 
 function atualizarVisibilidade() {
@@ -225,6 +301,7 @@ function atualizarVisibilidade() {
   quadro.classList.toggle("sem-rotulos", !document.getElementById("mostrar-rotulos").checked);
 }
 
+seletor.onchange = () => { montarLista(); mostrar(atual); };
 document.getElementById("mostrar-caixas").onchange = atualizarVisibilidade;
 document.getElementById("mostrar-rotulos").onchange = atualizarVisibilidade;
 document.getElementById("anterior").onclick = () => mostrar(atual - 1);
@@ -235,6 +312,7 @@ document.addEventListener("keydown", e => {
 });
 
 // #N no endereço abre a N-ésima imagem (e mantém a posição ao recarregar)
+montarLista();
 if (DADOS.imagens.length) mostrar((parseInt(location.hash.slice(1)) || 1) - 1);
 else document.getElementById("titulo").textContent = "Nenhuma imagem em images/";
 </script>

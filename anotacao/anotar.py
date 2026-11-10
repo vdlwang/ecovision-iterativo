@@ -1,19 +1,22 @@
 """
-Anotação automática de imagens com o Grounding DINO (vocabulário aberto).
+Anotação automática de imagens por um anotador intercambiável (hoje, o
+Grounding DINO, de vocabulário aberto).
 
-Recebe uma ou mais imagens e grava, no diretório de saída, a imagem e as
-caixas no formato de detecção do YOLO (Ultralytics):
+Recebe uma ou mais imagens e grava, no diretório de saída (formato em saida.py):
 
     <saida>/images/<nome>.jpg
-    <saida>/labels/<nome>.txt    uma linha por objeto: id cx cy w h (0..1)
-    <saida>/data.yaml            nomes das classes, na ordem de classes.yaml
-    <saida>/previa/<nome>.jpg    com --previa: caixas desenhadas, para revisão
-    <saida>/visualizar.html      página para navegar pelas imagens anotadas
+    <saida>/propostas/<anotador>/<nome>.json   caixas propostas, com a confiança
+    <saida>/imagens.csv                        status de cada imagem (pendente...)
+    <saida>/data.yaml                          classes e revisadas.txt como treino
+    <saida>/previa/<anotador>/<nome>.jpg       com --previa: caixas desenhadas
+    <saida>/visualizar.html                    página para conferir propostas e rótulos
 
-As anotações são propostas para um revisor humano, não rótulos finais.
+As propostas não são rótulos: labels/ só recebe as caixas depois da revisão,
+ou com --aceitar, que copia as propostas como estão.
 
 Uso:
     python anotacao/anotar.py foto.jpg [outra.jpg ...] -o anotacoes --previa
+    python anotacao/anotar.py -o anotacoes --aceitar     # aceita as pendentes
 """
 
 import argparse
@@ -24,6 +27,8 @@ from pathlib import Path
 import yaml
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+import saida as formato
+from saida import linha_yolo  # noqa: F401 (usada pelos testes e pelo avaliar.py)
 from visualizar import gerar_pagina
 
 DIR_SCRIPT = Path(__file__).resolve().parent
@@ -105,13 +110,6 @@ def nms(deteccoes, limiar_iou):
     return mantidas
 
 
-def linha_yolo(classe, caixa):
-    """Caixa (x1, y1, x2, y2) normalizada -> linha 'id cx cy w h' do YOLO."""
-    x1, y1, x2, y2 = caixa
-    return (f"{classe} {(x1 + x2) / 2:.6f} {(y1 + y2) / 2:.6f} "
-            f"{x2 - x1:.6f} {y2 - y1:.6f}")
-
-
 def abrir_imagem(caminho):
     """Abre a imagem em RGB já com a rotação do EXIF aplicada."""
     imagem = Image.open(caminho)
@@ -119,8 +117,35 @@ def abrir_imagem(caminho):
     return ImageOps.exif_transpose(imagem).convert("RGB"), girada
 
 
-class Anotador:
-    """Grounding DINO carregado uma vez, com o prompt das classes já tokenizado."""
+class GroundingDino:
+    """
+    Grounding DINO carregado uma vez, com o prompt das classes já tokenizado.
+
+    Interface de todo anotador (ver ANOTADORES): o atributo nome, que é a pasta
+    das propostas; opcoes(parser), que acrescenta as opções de linha de comando
+    dele; criar(classes, args); e, na instância, versao, parametros e
+    anotar(imagem) -> [(id da classe, confianca, (x1, y1, x2, y2) normalizada)].
+    """
+
+    nome = "grounding-dino"
+
+    @staticmethod
+    def opcoes(parser):
+        grupo = parser.add_argument_group("grounding-dino")
+        grupo.add_argument("--modelo", default=MODELO_PADRAO,
+                           help=f"modelo do Hugging Face (padrão: {MODELO_PADRAO})")
+        grupo.add_argument("--confianca", type=float, default=0.35,
+                           help="confiança mínima por caixa (padrão: 0.35)")
+        grupo.add_argument("--iou", type=float, default=0.5,
+                           help="IoU acima do qual caixas sobrepostas viram uma (padrão: 0.5)")
+        grupo.add_argument("--area-maxima", type=float, default=0.5,
+                           help="descarta caixas maiores que essa fração da imagem "
+                                "(padrão: 0.5)")
+
+    @classmethod
+    def criar(cls, classes, args):
+        return cls(classes, args.modelo, args.dispositivo, args.confianca, args.iou,
+                   args.area_maxima)
 
     def __init__(self, classes, modelo, dispositivo, confianca, limiar_iou, area_maxima):
         import torch
@@ -132,6 +157,9 @@ class Anotador:
         self.limiar_iou = limiar_iou
         self.area_maxima = area_maxima
         self.n_classes = len(classes)
+        self.versao = modelo
+        self.parametros = {"confianca": confianca, "iou": limiar_iou,
+                           "area_maxima": area_maxima}
 
         print(f"Carregando {modelo} em {self.dispositivo}...")
         self.processador = AutoProcessor.from_pretrained(modelo)
@@ -198,10 +226,21 @@ class Anotador:
         return self.filtrar(*self.pontuar(imagem))
 
 
+# Anotadores disponíveis em --anotador, pelo nome
+ANOTADORES = {a.nome: a for a in (GroundingDino,)}
+
+
 def preparar_saida(saida, classes):
-    """Cria as pastas e o data.yaml; recusa um data.yaml com outras classes."""
-    for pasta in ("images", "labels"):
+    """
+    Cria as pastas, o data.yaml e o imagens.csv. Recusa um data.yaml com outras
+    classes e uma saída do formato antigo (labels/ sem imagens.csv), em que as
+    propostas eram gravadas direto como rótulos.
+    """
+    for pasta in ("images", "labels", "propostas"):
         (saida / pasta).mkdir(parents=True, exist_ok=True)
+    if not (saida / "imagens.csv").exists() and any((saida / "labels").glob("*.txt")):
+        raise ValueError(f"{saida} é do formato antigo (labels/ sem imagens.csv), em que "
+                         "as propostas eram gravadas como rótulos. Use outro diretório.")
     nomes = {i: c["nome"] for i, c in enumerate(classes)}
     data_yaml = saida / "data.yaml"
     if data_yaml.exists():
@@ -210,12 +249,14 @@ def preparar_saida(saida, classes):
         if existentes != nomes:
             raise ValueError(f"{data_yaml} tem outras classes; os ids não bateriam. "
                              "Use outro diretório de saída.")
-        return
-    with open(data_yaml, "w", encoding="utf-8") as f:
-        # Sem 'path': o Ultralytics usa a pasta do data.yaml. Ainda sem divisão
-        # treino/validação (a divisão deve ser por sessão, monografia 5.3.5).
-        yaml.safe_dump({"train": "images", "val": "images", "names": nomes},
-                       f, allow_unicode=True, sort_keys=False)
+    else:
+        # Sem 'path': o Ultralytics usa a pasta do data.yaml. Só as revisadas,
+        # e ainda sem divisão treino/validação (por sessão, monografia 5.3.5).
+        formato.gravar_atomico(data_yaml, yaml.safe_dump(
+            {"train": "revisadas.txt", "val": "revisadas.txt", "names": nomes},
+            allow_unicode=True, sort_keys=False))
+    if not (saida / "imagens.csv").exists():
+        formato.gravar_estado(saida, list(formato.COLUNAS), {})
 
 
 def salvar_imagem(origem, imagem, girada, destino):
@@ -246,64 +287,80 @@ def desenhar_previa(imagem, deteccoes, classes, destino):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Gera anotações YOLO com o Grounding DINO.")
-    parser.add_argument("imagens", nargs="+", type=Path, help="caminho de uma ou mais imagens")
+    parser = argparse.ArgumentParser(
+        description="Propõe caixas para as imagens com um anotador automático.")
+    parser.add_argument("imagens", nargs="*", type=Path, help="caminho de uma ou mais imagens")
     parser.add_argument("-o", "--saida", type=Path, default=Path("anotacoes"),
                         help="diretório de saída (padrão: ./anotacoes)")
+    parser.add_argument("--anotador", choices=sorted(ANOTADORES), default=GroundingDino.nome,
+                        help=f"anotador (padrão: {GroundingDino.nome})")
     parser.add_argument("--classes", type=Path, default=DIR_SCRIPT / "classes.yaml",
                         help="lista de classes (padrão: anotacao/classes.yaml)")
-    parser.add_argument("--modelo", default=MODELO_PADRAO,
-                        help=f"modelo do Hugging Face (padrão: {MODELO_PADRAO})")
-    parser.add_argument("--confianca", type=float, default=0.35,
-                        help="confiança mínima por caixa (padrão: 0.35)")
-    parser.add_argument("--iou", type=float, default=0.5,
-                        help="IoU acima do qual caixas sobrepostas viram uma (padrão: 0.5)")
-    parser.add_argument("--area-maxima", type=float, default=0.5,
-                        help="descarta caixas maiores que essa fração da imagem (padrão: 0.5)")
     parser.add_argument("--dispositivo", help="cuda ou cpu (padrão: cuda se houver)")
     parser.add_argument("--previa", action="store_true",
-                        help="grava também previa/<nome>.jpg com as caixas desenhadas")
+                        help="grava também previa/<anotador>/<nome>.jpg com as caixas desenhadas")
     parser.add_argument("--sobrescrever", action="store_true",
-                        help="substitui imagens que já estão na saída")
+                        help="anota de novo imagens que já têm proposta deste anotador")
+    parser.add_argument("--aceitar", action="store_true",
+                        help="copia as propostas do anotador para labels/ como rótulos finais "
+                             "e marca as imagens como revisadas (só as pendentes; sem "
+                             "imagens na linha de comando, todas)")
+    for anotador in ANOTADORES.values():
+        anotador.opcoes(parser)
     args = parser.parse_args(argv)
+    if not args.imagens and not args.aceitar:
+        parser.error("informe as imagens a anotar, ou --aceitar")
 
     classes = carregar_classes(args.classes)
 
     for caminho in args.imagens:
         if not caminho.is_file():
             parser.error(f"imagem não encontrada: {caminho}")
-    # O .txt é nomeado pelo nome sem extensão: foto.jpg e foto.png colidiriam
+    # A proposta é nomeada pelo nome sem extensão: foto.jpg e foto.png colidiriam
     nomes = [c.stem for c in args.imagens]
     repetidos = {n for n in nomes if nomes.count(n) > 1}
     if repetidos:
         parser.error(f"nomes de arquivo repetidos na entrada: {', '.join(sorted(repetidos))}")
     if not args.sobrescrever:
-        existentes = [n for n in nomes if (args.saida / "labels" / f"{n}.txt").exists()]
+        existentes = [c.name for c in args.imagens
+                      if formato.caminho_proposta(args.saida, args.anotador, c.name).exists()]
         if existentes:
-            parser.error(f"já anotadas em {args.saida}: {', '.join(existentes)} "
-                         "(use --sobrescrever)")
+            parser.error(f"já anotadas por {args.anotador} em {args.saida}: "
+                         f"{', '.join(existentes)} (use --sobrescrever)")
 
     preparar_saida(args.saida, classes)
-    if args.previa:
-        (args.saida / "previa").mkdir(exist_ok=True)
+    colunas, linhas = formato.ler_estado(args.saida)
+    for caminho in args.imagens:
+        formato.registrar_imagem(dict(linhas), caminho.name)  # só confere colisões
 
-    anotador = Anotador(classes, args.modelo, args.dispositivo, args.confianca, args.iou,
-                        args.area_maxima)
+    if args.imagens:
+        if args.previa:
+            (args.saida / "previa" / args.anotador).mkdir(parents=True, exist_ok=True)
+        anotador = ANOTADORES[args.anotador].criar(classes, args)
 
     for caminho in args.imagens:
         imagem, girada = abrir_imagem(caminho)
         deteccoes = anotador.anotar(imagem)
 
         salvar_imagem(caminho, imagem, girada, args.saida / "images" / caminho.name)
-        linhas = [linha_yolo(classe, caixa) for classe, _, caixa in deteccoes]
-        (args.saida / "labels" / f"{caminho.stem}.txt").write_text(
-            "".join(l + "\n" for l in linhas), encoding="utf-8")
+        formato.gravar_proposta(args.saida, formato.montar_proposta(
+            anotador.nome, anotador.versao, anotador.parametros, classes, caminho.name,
+            imagem.size, deteccoes))
+        # Grava o estado a cada imagem: interrompido, o que já foi feito vale
+        formato.registrar_imagem(linhas, caminho.name)
+        formato.gravar_estado(args.saida, colunas, linhas)
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
-                            args.saida / "previa" / f"{caminho.stem}.jpg")
+                            args.saida / "previa" / args.anotador / f"{caminho.stem}.jpg")
 
         resumo = ", ".join(f"{classes[c]['nome']} {conf:.2f}" for c, conf, _ in deteccoes)
         print(f"{caminho.name}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
+
+    if args.aceitar:
+        escolhidas = {c.name for c in args.imagens} if args.imagens else None
+        aceitas = formato.aceitar(args.saida, args.anotador, classes, escolhidas)
+        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.anotador} copiadas "
+              "para labels/")
 
     pagina = gerar_pagina(args.saida)
     print(f"Anotações em {args.saida.resolve()}")

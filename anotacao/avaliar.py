@@ -175,7 +175,7 @@ def main(argv=None):
     itens = listar_imagens(args.datasets)
     print(f"{len(itens)} imagem(ns) rotulada(s) em {len(args.datasets)} dataset(s)")
 
-    anotador = anotar.Anotador(classes, args.modelo, args.dispositivo, min(args.limiares),
+    anotador = anotar.GroundingDino(classes, args.modelo, args.dispositivo, min(args.limiares),
                                args.iou, args.area_maxima)
     matriz = Counter()
     contagens = {limiar: [0, 0, 0] for limiar in args.limiares}

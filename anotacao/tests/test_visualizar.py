@@ -9,6 +9,7 @@ import yaml
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import saida as formato  # noqa: E402
 import visualizar  # noqa: E402
 
 
@@ -26,16 +27,37 @@ def saida(tmp_path):
     return tmp_path
 
 
-def test_coletar(saida):
-    classes, imagens = visualizar.coletar(saida)
+def test_coletar_formato_yolo_sem_propostas(saida):
+    classes, anotadores, imagens = visualizar.coletar(saida)
     assert classes == {"0": "Garrafa", "1": "Lata"}
+    assert anotadores == []
     por_nome = {im["nome"]: im for im in imagens}
     assert set(por_nome) == {"a.jpg", "b c.png", "sem.jpg"}
-    assert por_nome["a.jpg"]["caixas"] == [[0, 0.5, 0.5, 0.2, 0.4]]
+    assert por_nome["a.jpg"]["final"] == [
+        {"id": 0, "nome": "Garrafa", "conf": None, "caixa": [0.4, 0.3, 0.6, 0.7]}]
     assert por_nome["a.jpg"]["invalidas"] == 2
-    assert por_nome["b c.png"]["caixas"] == [] and not por_nome["b c.png"]["sem_rotulo"]
+    assert por_nome["a.jpg"]["status"] is None and por_nome["a.jpg"]["propostas"] == {}
+    assert por_nome["b c.png"]["final"] == []
     assert por_nome["b c.png"]["src"] == "images/b%20c.png"
-    assert por_nome["sem.jpg"]["sem_rotulo"]
+    assert por_nome["sem.jpg"]["final"] is None
+
+
+def test_coletar_propostas_e_status(saida):
+    formato.gravar_estado(saida, ["nome", "status"], {
+        "a.jpg": {"nome": "a.jpg", "status": "revisada"},
+        "sem.jpg": {"nome": "sem.jpg", "status": "pendente"}})
+    formato.gravar_proposta(saida, {
+        "anotador": "falso", "imagem": "sem.jpg", "largura": 8, "altura": 4,
+        "caixas": [{"classe": "Lata", "confianca": 0.7, "caixa": [2, 1, 6, 3]},
+                   {"classe": "Pneu", "confianca": 0.3, "caixa": [0, 0, 8, 4]}]})
+    _, anotadores, imagens = visualizar.coletar(saida)
+    por_nome = {im["nome"]: im for im in imagens}
+    assert anotadores == ["falso"]
+    assert por_nome["a.jpg"]["status"] == "revisada"
+    assert por_nome["b c.png"]["status"] is None
+    assert por_nome["sem.jpg"]["propostas"] == {"falso": [
+        {"id": 1, "nome": "Lata", "conf": 0.7, "caixa": [0.25, 0.25, 0.75, 0.75]},
+        {"id": None, "nome": "Pneu", "conf": 0.3, "caixa": [0, 0, 1, 1]}]}
 
 
 def test_coletar_sem_data_yaml(tmp_path):
