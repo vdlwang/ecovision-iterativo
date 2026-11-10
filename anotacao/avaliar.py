@@ -12,7 +12,8 @@ validações de legado/database):
 
 Os rótulos da equipe usam os nomes TACO; só entram as classes de classes.yaml,
 casadas pelo nome. Polígonos (formato de segmentação) viram a caixa que os
-contém.
+contém. Antes, valem as correções de correcoes_rotulos.yaml (a equipe rotulou
+todo vidro como Glass bottle), sem editar legado/.
 
 Uso:
     python anotacao/avaliar.py
@@ -31,6 +32,7 @@ import anotar
 
 DIR_REPO = anotar.DIR_SCRIPT.parent
 DATASETS_PADRAO = sorted((DIR_REPO / "legado" / "database").glob("tcc-*/YOLO_dataset/validation"))
+CORRECOES_PADRAO = anotar.DIR_SCRIPT / "correcoes_rotulos.yaml"
 LIMIARES_PADRAO = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5]
 IOU_ACERTO = 0.5
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -46,17 +48,47 @@ def nomes_do_dataset(pasta):
     raise ValueError(f"data.yaml não encontrado em {pasta} nem em {pasta.parent}")
 
 
-def ler_verdade(caminho, nomes_dataset, nomes):
+def carregar_correcoes(caminho):
+    """
+    correcoes_rotulos.yaml -> {.txt resolvido: {linha (1..): (de, para)}}. As
+    chaves do arquivo são relativas à raiz do repositório.
+    """
+    with open(caminho, encoding="utf-8") as f:
+        dados = (yaml.safe_load(f) or {}).get("correcoes") or {}
+    correcoes = {}
+    for arquivo, itens in dados.items():
+        por_linha = {}
+        for item in itens:
+            try:
+                linha, de, para = int(item["linha"]), item["de"], item["para"]
+            except (KeyError, TypeError, ValueError):
+                raise ValueError(f"{caminho}: correção inválida em {arquivo}: {item!r}") from None
+            if linha in por_linha:
+                raise ValueError(f"{caminho}: linha {linha} de {arquivo} corrigida duas vezes")
+            por_linha[linha] = (de, para)
+        correcoes[(DIR_REPO / arquivo).resolve()] = por_linha
+    return correcoes
+
+
+def ler_verdade(caminho, nomes_dataset, nomes, correcoes=None):
     """
     Rótulos de um .txt YOLO (caixa 'id cx cy w h' ou polígono 'id x1 y1 x2 y2 ...')
     -> ([(classe em nomes, (x1, y1, x2, y2))], Counter dos nomes fora de nomes).
+    correcoes: {linha (1..): (classe no .txt, classe correta)} deste arquivo; a
+    classe no .txt é conferida.
     """
+    correcoes = dict(correcoes or {})
     verdade, fora = [], Counter()
-    for linha in caminho.read_text(encoding="utf-8").splitlines():
+    for numero, linha in enumerate(caminho.read_text(encoding="utf-8").splitlines(), 1):
         partes = linha.split()
         if not partes:
             continue
         nome = nomes_dataset[int(partes[0])]
+        if numero in correcoes:
+            de, para = correcoes.pop(numero)
+            if nome != de:
+                raise ValueError(f"{caminho}: linha {numero} é {nome}, a correção esperava {de}")
+            nome = para
         valores = [float(v) for v in partes[1:]]
         if len(valores) == 4:
             cx, cy, w, h = valores
@@ -70,6 +102,9 @@ def ler_verdade(caminho, nomes_dataset, nomes):
             verdade.append((nomes.index(nome), caixa))
         else:
             fora[nome] += 1
+    if correcoes:
+        raise ValueError(f"{caminho}: correções para linhas que não existem: "
+                         f"{', '.join(map(str, sorted(correcoes)))}")
     return verdade, fora
 
 
@@ -158,6 +193,10 @@ def main(argv=None):
                              "legado/database)")
     parser.add_argument("--classes", type=Path, default=anotar.DIR_SCRIPT / "classes.yaml",
                         help="lista de classes (padrão: anotacao/classes.yaml)")
+    parser.add_argument("--correcoes", type=Path, default=CORRECOES_PADRAO,
+                        help="correções dos rótulos (padrão: anotacao/correcoes_rotulos.yaml)")
+    parser.add_argument("--sem-correcoes", action="store_true",
+                        help="usa os rótulos da equipe como estão")
     parser.add_argument("--modelo", default=anotar.MODELO_PADRAO,
                         help=f"modelo do Hugging Face (padrão: {anotar.MODELO_PADRAO})")
     parser.add_argument("--limiares", type=float, nargs="+", default=LIMIARES_PADRAO,
@@ -174,14 +213,19 @@ def main(argv=None):
     nomes = [c["nome"] for c in classes]
     itens = listar_imagens(args.datasets)
     print(f"{len(itens)} imagem(ns) rotulada(s) em {len(args.datasets)} dataset(s)")
+    correcoes = {} if args.sem_correcoes else carregar_correcoes(args.correcoes)
+    corrigidas = sum(len(correcoes.get(r.resolve(), {})) for _, r, _ in itens)
+    print(f"{corrigidas} rótulo(s) corrigido(s) por "
+          f"{'nenhum arquivo' if args.sem_correcoes else args.correcoes.name}")
 
     anotador = anotar.GroundingDino(classes, args.modelo, args.dispositivo, min(args.limiares),
-                               args.iou, args.area_maxima)
+                                    args.iou, args.area_maxima)
     matriz = Counter()
     contagens = {limiar: [0, 0, 0] for limiar in args.limiares}
     fora = Counter()
     for i, (imagem, rotulo, nomes_dataset) in enumerate(itens, 1):
-        verdade, fora_imagem = ler_verdade(rotulo, nomes_dataset, nomes)
+        verdade, fora_imagem = ler_verdade(rotulo, nomes_dataset, nomes,
+                                           correcoes.get(rotulo.resolve()))
         fora += fora_imagem
         por_classe, caixas = anotador.pontuar(anotar.abrir_imagem(imagem)[0])
 

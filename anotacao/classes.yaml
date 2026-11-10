@@ -26,3 +26,12 @@ classes:
   - nome: Normal paper
     prompt: sheet of paper
     material: paper
+  # Decisão 8 do OBJETIVO.md (2026-11-09): vidro em três classes. O prompt
+  # descreve o objeto das fotos, não o nome TACO: no teste de 2026-10-27,
+  # "drinking glass" foi o termo que mais reconheceu esses copos.
+  - nome: Glass jar
+    prompt: glass jar
+    material: glass
+  - nome: Glass cup
+    prompt: drinking glass
+    material: glass

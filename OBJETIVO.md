@@ -104,10 +104,26 @@ Conclusão: manter o Grounding DINO para as caixas e trocar quem decide a classe
 - **Prompt que descreve o objeto real.** Só `Glass bottle` → "drinking glass": vidro de 7% para 38%, classe 46% → 55%, material 50% → 60%; detecção em 0,35, precisão 0,39 → 0,56 e recall 0,33 → 0,48. Trocar também tampa, lata e papel pelos vencedores do vocabulário amplo dá 57% e 62%, mas lata e papel pioram. O vencedor do teste qualitativo não é necessariamente o melhor prompt, e diferenças de 2 pontos são ruído: as 4 validações são as mesmas cenas, e os prompts foram ajustados nelas.
 
 Antes do SigLIP:
-1. ~~Decidir a taxonomia do vidro~~: decidido (decisão 8), três classes. Falta levá-las ao `classes.yaml` junto com as correções do item 3, para o `avaliar.py` não comparar as classes novas com rótulos `Glass bottle`.
+1. ~~Decidir a taxonomia do vidro~~: feito (decisão 8). `Glass jar` ("glass jar") e `Glass cup` ("drinking glass") no fim do `classes.yaml`.
 2. Permitir mais de um prompt por classe, com a pontuação máxima entre eles: um prompt não cobre copo, pote e tigela.
-3. Registrar as correções dos rótulos da equipe num arquivo em `anotacao/`, sem editar `legado/`.
-4. Refazer a linha de base. O SigLIP herda o mesmo cuidado: as descrições têm de corresponder aos objetos das fotos, não ao nome TACO.
+3. ~~Registrar as correções dos rótulos da equipe~~: feito, em `anotacao/correcoes_rotulos.yaml`, que o `avaliar.py` aplica na leitura (`--sem-correcoes` desliga).
+4. ~~Refazer a linha de base~~: feito (abaixo). O SigLIP herda o mesmo cuidado: as descrições têm de corresponder aos objetos das fotos, não ao nome TACO.
+
+### Linha de base com o vidro em três classes (2026-11-09)
+
+**Correções dos rótulos.** As 97 caixas `Glass bottle` da equipe, classificadas olhando os recortes e as mesmas cenas nos quatro cenários: 54 `Glass jar`, 40 `Glass cup` (24 copos, 16 taças, 8 tigelas) e 3 `Drink can`. Nenhuma garrafa de vidro. O caso duvidoso é o copo de requeijão (11 caixas, um objeto em várias cenas): embalagem com aba para tampa, usada como copo. Ficou como `Glass jar`, com nota no arquivo.
+
+**Resultado** (Grounding DINO tiny, 88 fotos, 375 caixas, 8 classes):
+
+| | 2026-10-27 (6 classes, sem correções) | 2026-11-09 |
+|---|---|---|
+| Classe certa | 46% | 51% |
+| Material certo | 50% | 58% |
+| Precisão / recall em 0,35 | 0,39 / 0,33 | 0,48 / 0,42 |
+
+- `Glass jar` acerta 47%, `Glass cup` 45%. Entre si, trocam pouco (6 e 4 caixas). Perdem mais para plástico e lata.
+- **`Glass bottle` virou o ralo do PET**: sem nenhuma caixa verdadeira, recebe 35 previsões, 28 delas de `Clear plastic bottle` (que acerta só 26%). Na esteira haverá garrafas de vidro, então a classe fica. Mas o prompt "glass bottle" atrai garrafas transparentes de qualquer material. É o primeiro caso para o SigLIP, ou para vários prompts por classe.
+- Os números não são comparáveis um a um com os de 2026-10-27: as classes e a verdade mudaram juntas.
 
 ### Plano: SigLIP como classificador no `avaliar.py`
 
@@ -156,7 +172,7 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita; faltam as pendências antes do SigLIP (taxonomia do vidro, vários prompts por classe, correções dos rótulos da equipe, nova linha de base), a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; faltam vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
 | T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama) | — | teste com a esteira |
 | T5 | [ ] | **Entrada por lote**: importa um lote para `imagens.csv` com `lote` e o sorteio treino/teste (1 lote em 5) | T1, T4 | pytest |

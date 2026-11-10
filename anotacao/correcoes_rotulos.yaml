@@ -1,0 +1,158 @@
+# Correções dos rótulos da equipe em legado/database, aplicadas pelo avaliar.py
+# na leitura (legado/ não é editado). Decisão 8 do OBJETIVO.md: o vidro é
+# Glass bottle, Glass jar (potes) ou Glass cup (copos, taças e tigelas). A equipe
+# rotulou todo vidro como Glass bottle; nenhuma das 97 caixas era garrafa.
+#
+# Classificação feita em 2026-11-09 olhando os recortes de cada caixa e as
+# mesmas cenas nos quatro cenários (fotos tiradas segundos uma da outra).
+#
+#   chave: o .txt de rótulos, a partir da raiz do repositório
+#   linha: número da linha no .txt, começando em 1
+#   de:    classe que o .txt tem nessa linha (conferida; se não bater, erro)
+#   para:  classe correta, pelo nome TACO
+#   nota:  opcional
+#
+# Duvidoso: o copo de requeijão (embalagem com aba para tampa, usada como copo)
+# está como Glass jar, por ser embalagem. Mudar para Glass cup é trocar 'para'
+# nas linhas com essa nota.
+
+correcoes:
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_140834.txt:
+    - {linha: 6, de: Glass bottle, para: Glass jar}
+    - {linha: 7, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_141520.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_141829.txt:
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_142500.txt:
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+    - {linha: 6, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_143329.txt:
+    - {linha: 2, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass cup}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_144451.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup}
+    - {linha: 2, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 5, de: Glass bottle, para: Glass cup}
+    - {linha: 6, de: Glass bottle, para: Glass cup, nota: "tigela"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_144742.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 2, de: Glass bottle, para: Glass cup}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_145715.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_145928.txt:
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0CF/YOLO_dataset/validation/labels/20250503_151029.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_140322.txt:
+    - {linha: 6, de: Glass bottle, para: Drink can, nota: "lata rotulada como vidro"}
+    - {linha: 7, de: Glass bottle, para: Drink can, nota: "lata rotulada como vidro"}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_141839.txt:
+    - {linha: 2, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_142451.txt:
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+    - {linha: 6, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_143131.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_143233.txt:
+    - {linha: 2, de: Glass bottle, para: Glass cup}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_144622.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 2, de: Glass bottle, para: Glass cup}
+    - {linha: 3, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+    - {linha: 6, de: Glass bottle, para: Glass cup}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_144722.txt:
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 5, de: Glass bottle, para: Glass cup}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_145232.txt:
+    - {linha: 2, de: Glass bottle, para: Drink can, nota: "lata rotulada como vidro"}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_145734.txt:
+    - {linha: 2, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_145913.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-0SF/YOLO_dataset/validation/labels/20250503_151025.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_140731.txt:
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_140827.txt:
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+    - {linha: 6, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_141821.txt:
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+    - {linha: 6, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_142514.txt:
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_143055.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+    - {linha: 2, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_143107.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+    - {linha: 2, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_143336.txt:
+    - {linha: 5, de: Glass bottle, para: Glass cup}
+    - {linha: 6, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 7, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_144500.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 2, de: Glass bottle, para: Glass cup}
+    - {linha: 3, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+    - {linha: 6, de: Glass bottle, para: Glass cup}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_144735.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 2, de: Glass bottle, para: Glass cup}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_145720.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_145923.txt:
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45CF/YOLO_dataset/validation/labels/20250503_151034.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_141849.txt:
+    - {linha: 4, de: Glass bottle, para: Glass jar}
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_142438.txt:
+    - {linha: 2, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_143136.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+    - {linha: 2, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_143309.txt:
+    - {linha: 2, de: Glass bottle, para: Glass jar}
+    - {linha: 3, de: Glass bottle, para: Glass cup}
+    - {linha: 4, de: Glass bottle, para: Glass cup, nota: "taça"}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_144619.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 2, de: Glass bottle, para: Glass cup, nota: "taça"}
+    - {linha: 3, de: Glass bottle, para: Glass cup}
+    - {linha: 4, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+    - {linha: 5, de: Glass bottle, para: Glass jar}
+    - {linha: 6, de: Glass bottle, para: Glass cup}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_144727.txt:
+    - {linha: 1, de: Glass bottle, para: Glass cup}
+    - {linha: 2, de: Glass bottle, para: Glass cup, nota: "tigela"}
+    - {linha: 3, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_145730.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar, nota: "copo de requeijão: embalagem com aba para tampa, usada como copo"}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_145917.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}
+  legado/database/tcc-45SF/YOLO_dataset/validation/labels/20250503_151021.txt:
+    - {linha: 1, de: Glass bottle, para: Glass jar}

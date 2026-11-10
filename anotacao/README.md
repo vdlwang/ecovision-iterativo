@@ -129,7 +129,7 @@ O que cada um faz com o `prompt` das classes é dele. `GroundingDino` é o exemp
 
 ## Classes
 
-`classes.yaml` lista as classes (nível 2 da taxonomia), cada uma com o `nome` gravado no `data.yaml`, o `prompt` em inglês enviado ao modelo e o `material` (nível 1). A lista inicial são as seis classes TACO das fotos da equipe. O índice na lista é o id da classe nos `.txt`: para não invalidar anotações já feitas, só acrescente classes no fim.
+`classes.yaml` lista as classes (nível 2 da taxonomia), cada uma com o `nome` gravado no `data.yaml`, o `prompt` em inglês enviado ao modelo e o `material` (nível 1). A lista inicial são as seis classes TACO das fotos da equipe, mais `Glass jar` e `Glass cup`: o vidro é dividido em garrafas, potes e copos (decisão 8 do [`OBJETIVO.md`](../OBJETIVO.md)). O índice na lista é o id da classe nos `.txt`: para não invalidar anotações já feitas, só acrescente classes no fim.
 
 O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir.
 
@@ -147,7 +147,7 @@ python anotacao/avaliar.py legado/database/tcc-0CF/YOLO_dataset/validation
 
 São duas medidas. A **classificação** pega, para cada caixa verdadeira, a caixa do modelo que mais se sobrepõe a ela e compara as classes: mostra a matriz de confusão, a taxa de acerto da classe e a do material, sem misturar com erros de localização. A **detecção** roda o `anotar.py` completo em vários limiares de confiança (`--limiares`) e dá precisão e recall, contando como acerto IoU ≥ 0,5 com a mesma classe.
 
-Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `classes.yaml`, casadas pelo nome, e os polígonos viram a caixa que os contém. As quatro validações são as mesmas cenas fotografadas de jeitos diferentes, então somá-las não equivale a quatro vezes mais dados; serve para comparar anotadores, que não treinaram nelas.
+Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `classes.yaml`, casadas pelo nome, e os polígonos viram a caixa que os contém. Antes disso, o `avaliar.py` aplica [`correcoes_rotulos.yaml`](correcoes_rotulos.yaml): a equipe rotulou todo vidro como `Glass bottle`, e as 97 caixas são, na verdade, potes, copos, taças, tigelas e 3 latas. O arquivo indica a linha de cada `.txt` e confere a classe original; `legado/` não é editado. `--sem-correcoes` usa os rótulos como estão, e `--correcoes` aponta para outro arquivo. As quatro validações são as mesmas cenas fotografadas de jeitos diferentes, então somá-las não equivale a quatro vezes mais dados; serve para comparar anotadores, que não treinaram nelas.
 
 ## Próximos passos
 
