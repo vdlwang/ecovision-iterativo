@@ -17,6 +17,8 @@ A ideia é separar o que o anotador propõe do que o revisor aprova, e evoluir a
 
 ## 1. Propostas separadas das anotações finais
 
+Formato das fases 1 a 3. Na fase 3b, `imagens.csv`, `propostas/` e `revisoes/` passam para um banco SQLite (seção 6); a separação entre proposta e rótulo final continua a mesma.
+
 Gravar as propostas em `labels/` mistura duas coisas: o Ultralytics trata imagem sem objetos como fundo (uma imagem não revisada entraria no treino como negativo falso), e a proposta original se perde, o que impede medir o anotador (RF13).
 
 ```
@@ -79,7 +81,7 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 - **Desfecho de cada caixa**: `aceita`, `classe_corrigida` ou `adicionada`; as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
 - **Versões** do anotador de base e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
-- **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão.
+- **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão. Com o SQLite (fase 3b, seção 6), todas as sessões ficam guardadas.
 
 O servidor calcula os desfechos comparando cada caixa com a proposta de origem, que a página indica pelo índice. Enquanto as caixas não se movem, ele recusa uma caixa que diz vir de uma proposta mas tem outras coordenadas, para que o registro nunca chame de `aceita` uma caixa alterada.
 
@@ -88,6 +90,77 @@ O servidor calcula os desfechos comparando cada caixa com a proposta de origem, 
 - **Histórico de sessões**: hoje a revisão de uma imagem reaberta (fase 5) sobrescreve a anterior. Para medir o anotador, vale a primeira; se as métricas (T10) precisarem, o registro vira uma lista de sessões.
 
 O registro é gravado desde a primeira versão da edição, mesmo sem `metricas.py` (tarefa T10 do `OBJETIVO.md`): sem ele, o tempo das primeiras revisões se perde.
+
+## 6. Armazenamento em SQLite (planejado em 2026-11-11)
+
+Substitui `imagens.csv`, `propostas/` e `revisoes/` (seções 1 e 5) por um banco SQLite, `<saida>/anotacoes.sqlite`. As imagens e o que o Ultralytics lê continuam como arquivos.
+
+**Por quê**:
+- **Escrita concorrente**: o `anotar.py` e o `revisar.py` reescrevem o mesmo `imagens.csv` inteiro; rodando juntos, um apaga a alteração do outro. No SQLite, cada gravação é uma transação.
+- **Propostas sobrescritas**: o `--sobrescrever` troca a proposta de uma imagem já revisada, e o registro da revisão, que aponta para as caixas pelo índice, deixa de corresponder a elas. No banco, anotar de novo cria uma nova versão da proposta, e a revisão guarda qual versão viu.
+- **Histórico de sessões** (seção 5, "para depois"): uma tabela de revisões guarda todas as sessões, sem mudar o formato quando a fase 5 reabrir imagens.
+- **Consultas**: a fila por incerteza (RF10), o voto (T6) e as métricas (T10) cruzam propostas de vários anotadores com as revisões. Com arquivos, cada consulta lê milhares de JSONs.
+- **Momento**: a saída atual foi apagada (2026-11-11), então não há dado a migrar; e a fase 4 mudaria o formato do registro (`caixa_ajustada`, desfecho em lista). Feito antes dela, o formato muda uma vez só.
+
+**Sem dependência nova**: `sqlite3` é da biblioteca padrão. Nada de ORM; SQL direto, concentrado no `saida.py`.
+
+```
+anotacoes/
+├── images/              # as imagens, como hoje
+├── anotacoes.sqlite     # fonte do estado: imagens, propostas, revisões
+├── labels/<nome>.txt    # gerado do banco (caixas da última revisão salva)
+├── revisadas.txt        # gerado do banco
+├── data.yaml            # gerado do banco (tabela classes)
+└── previa/              # opcional, como hoje
+```
+
+### Esquema
+
+| Tabela | Colunas | Observações |
+|---|---|---|
+| `classes` | `id` (PK, o id YOLO), `nome` (único) | Espaço de ids do `data.yaml`, carregado de `nomes` no `classes.yaml`. Só aceita acréscimo no fim (decisão 2, RF14); um `classes.yaml` que reordena ou remove é recusado. Substitui a conferência do `data.yaml` no `preparar_saida` |
+| `imagens` | `id`, `nome` (único), `stem` (único), `largura`, `altura`, `status` (`pendente`, `revisada`, `descartada`), `criada_em` | `stem` único mantém a recusa de nomes que colidem sem extensão. O sistema completo acrescenta `lote`, `conjunto`, `voto`, `motivo` (`OBJETIVO.md`, seção 2) com `ALTER TABLE` |
+| `execucoes` | `id`, `anotador`, `versao`, `parametros` (JSON), `classes_hash`, `data` | Uma por rodada do `anotar.py`. Hoje esses campos se repetem em cada proposta |
+| `propostas` | `id`, `imagem_id`, `execucao_id`, `data` | Nunca apagada nem alterada. A proposta atual de um anotador numa imagem é a de maior `id` |
+| `caixas_propostas` | `proposta_id`, `indice`, `classe` (nome), `confianca`, `x1`, `y1`, `x2`, `y2` | PK (`proposta_id`, `indice`). Classe pelo nome, como hoje: o anotador pode propor classe fora do `data.yaml`. Coordenadas normalizadas (hoje são pixels no JSON) |
+| `revisoes` | `id`, `imagem_id`, `proposta_id` (base, pode ser nula), `acao` (`salvar`, `descartar`), `data`, `tempo_ativo_s`, `revisor` | Uma linha por sessão; nenhuma é sobrescrita. A vigente é a de maior `id` |
+| `caixas_revisao` | `revisao_id`, `indice`, `classe_id` (FK `classes`), `x1`..`y2`, `proposta_indice` (nulo se adicionada), `classe_corrigida`, `caixa_ajustada` | Os desfechos viram colunas booleanas, e uma caixa pode ter os dois (seção 5). `aceita` = nenhum dos dois com proposta; `adicionada` = sem proposta. As removidas não são gravadas: são as caixas da proposta base que nenhuma caixa da revisão cita |
+
+- Versão do esquema em `PRAGMA user_version`; o `saida.py` recusa um banco de versão desconhecida e aplica as migrações conhecidas na abertura.
+- `PRAGMA foreign_keys = ON` e `CHECK` nos status, nas ações e em `0 <= x1 < x2 <= 1`, para que um erro de código não grave estado inválido.
+- `journal_mode = WAL` e `busy_timeout` de alguns segundos: o servidor lê enquanto o `anotar.py` grava.
+
+### Arquivos gerados
+
+`labels/`, `revisadas.txt` e `data.yaml` passam a ser saídas, regeneradas do banco:
+
+- Cada operação grava primeiro no banco (uma transação) e depois os arquivos daquela imagem, com a gravação atômica de hoje. Interrompida entre os dois, o banco vale; `anotar.py --exportar` (ou a abertura do `revisar.py`) regenera todos os arquivos a partir dele.
+- `labels/<stem>.txt` existe só para imagem `revisada`, com as caixas da última revisão `salvar`; fundo continua sendo `.txt` vazio. Descartar apaga o `.txt`.
+- O Ultralytics e o Colab continuam lendo arquivos; ninguém precisa abrir o banco para treinar.
+
+### O que muda no código
+
+- **`saida.py`**: as funções de hoje mantêm o papel e trocam a implementação: `ler_estado`/`gravar_estado`/`registrar_imagem` → consultas a `imagens`; `gravar_proposta`/`ler_proposta`/`anotadores` → `execucoes`, `propostas`, `caixas_propostas`; `revisar`/`ler_revisao` → `revisoes`, `caixas_revisao`; `aceitar` grava uma revisão `salvar` sem tempo, com `revisor = "aceitar"`, para que o registro mostre que ninguém olhou. Novas: `abrir(saida)` (conexão com os pragmas e a migração) e `exportar(saida, nomes=None)`.
+- **`anotar.py`**: `--sobrescrever` deixa de sobrescrever: grava uma proposta nova (sem a opção, imagem já anotada por aquele anotador continua sendo recusada). Uma imagem já `revisada` ou `descartada` mantém o status; a proposta nova só aparece se ela for reaberta (fase 5). Uma execução por rodada.
+- **`revisar.py`**: uma conexão por pedido (o `sqlite3` não compartilha conexão entre threads), com `BEGIN IMMEDIATE` no PUT, para que conferir o status e gravar sejam uma operação só. A fila por incerteza vira uma consulta. A página e a API não mudam, exceto `proposta_id` no detalhe e no PUT, para o servidor saber qual versão foi revisada.
+- **`visualizar.py`**: lê pelo `saida.py`, como hoje; a página estática não muda.
+- **Colab**: SQLite sobre o Google Drive montado (FUSE) não garante as travas e pode corromper o banco. O notebook copia o banco para `/content` no início e de volta ao Drive no fim (API `backup` do `sqlite3`), e avisa que dois Colabs na mesma pasta não podem rodar juntos.
+- **Formato antigo**: `imagens.csv` sem `anotacoes.sqlite` é recusado com uma mensagem, como já acontece com o formato anterior à fase 1. Sem importador: não há dado a preservar.
+
+### Custos e riscos
+
+- O estado deixa de ser legível e comparável em texto. Mitigações: `sqlite3 anotacoes.sqlite` ou o DB Browser for SQLite para inspecionar, e os arquivos gerados continuam em texto.
+- Um arquivo binário só: um banco corrompido perde tudo. Cópia de segurança antes de cada `anotar.py` (`anotacoes.sqlite.bak`, via `backup`), barata para o tamanho esperado (milhares de imagens, poucos MB).
+- Esforço estimado: ~1 a 1,5 dia, a maior parte reescrevendo os testes do `saida.py` e do `revisar.py` para o banco.
+
+### Verificação
+
+- pytest do esquema: as `CHECK` recusam estado inválido; `classes` só aceita acréscimo; versão desconhecida é recusada.
+- pytest das propostas: anotar duas vezes guarda as duas versões; a revisão aponta para a que viu; uma imagem revisada não volta a pendente.
+- pytest da revisão: os mesmos casos de hoje (desfechos, removidas, recusas) sobre o banco; duas sessões na mesma imagem ficam as duas.
+- pytest da exportação: `labels/`, `revisadas.txt` e `data.yaml` saem iguais aos do formato atual para o mesmo conteúdo; apagar `labels/` e rodar `--exportar` os recria.
+- pytest de concorrência: o servidor numa thread e um `anotar` gravando em outra conexão, sem perda de nenhum dos dois.
+- Manual: anotar as fotos de `tcc-0CF`, revisar algumas e treinar uma época do YOLO com o `data.yaml` gerado.
 
 ## Fases
 
@@ -98,6 +171,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 1 | [x] `8a0253d` | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
+| 3b | [ ] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
 | 4 | [ ] | Desenhar, mover e redimensionar caixas; desfazer | teste manual (Chrome headless para captura) |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 
@@ -110,6 +184,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 3 | ~~Um ou vários revisores?~~ | **Decidido (2026-10-28)**: um revisor, local. Sem trava por imagem nem identificação por enquanto. |
 | 9 | ~~Uma página ou duas?~~ | **Decidido (2026-11-09)**: duas. `visualizar.py` continua gerando a página estática (`file://`, serve no Colab); `revisar.html` é servida pelo `revisar.py` e vira o editor. Aceita-se algum HTML repetido. |
 | 10 | ~~Acesso de outro computador (RNF05)?~~ | **Decidido (2026-11-09)**: por enquanto só `127.0.0.1`; uma opção `--host` quando for preciso. |
+| 11 | ~~Onde guardar o estado da anotação?~~ | **Decidido (2026-11-11)**: SQLite (`anotacoes.sqlite`, biblioteca padrão) para imagens, propostas e revisões; imagens e rótulos YOLO continuam como arquivos (seção 6). PostgreSQL só com vários revisores em máquinas diferentes (decisão 3); FiftyOne serve para explorar, não substitui a página (decisão 1); DVC, para versionar as bases de treino e teste, entra com o T6/T12 e complementa o banco. |
 
 As decisões 4 a 7 (voto, teste sem classe, mesma classe no voto, sorteio por lote) e a 8 (vidro) são do sistema completo e estão no `OBJETIVO.md`.
 
