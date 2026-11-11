@@ -135,6 +135,17 @@ def test_proposta_sem_classe_abaixo_do_limiar():
                                    deteccoes)["caixas"][1]["classe"] == "Garrafa"
 
 
+def test_candidatas_em_pixels_e_de_volta():
+    proposta = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50), [],
+                                       candidatas=[(0.0812345, (0.1, 0.2, 0.5, 0.6))])
+    assert proposta["candidatas"] == [{"confianca": 0.0812, "caixa": [10.0, 10.0, 50.0, 30.0]}]
+    assert formato.candidatas_normalizadas(proposta) == [
+        (0.0812, pytest.approx((0.1, 0.2, 0.5, 0.6)))]
+    # sem candidatas, o campo não aparece (anotadores sem propor())
+    sem = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50), [])
+    assert "candidatas" not in sem and formato.candidatas_normalizadas(sem) == []
+
+
 def test_aceitar_deixa_pendente_imagem_com_caixa_sem_classe(tmp_path):
     (tmp_path / "labels").mkdir()
     formato.gravar_estado(tmp_path, ["nome", "status"], {

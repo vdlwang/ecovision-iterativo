@@ -109,7 +109,7 @@ def nome_valido(saida, bruto):
 def detalhar(saida, bruto):
     nome, linha = nome_valido(saida, bruto)
     dados = formato.ler_imagem(saida, nome, formato.nomes_classes(saida),
-                               formato.anotadores(saida), linha)
+                               formato.anotadores(saida), linha, com_candidatas=True)
     caminho = Path(saida) / "images" / nome
     if not caminho.is_file():
         raise ErroHTTP(HTTPStatus.NOT_FOUND, f"{caminho} não existe")

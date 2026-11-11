@@ -255,6 +255,16 @@ def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
     assert (saida / "revisadas.txt").read_text() == "./images/a.jpg\n./images/b.png\n"
 
 
+def test_main_grava_candidatas_de_quem_tem_propor(ambiente, monkeypatch):
+    fotos, saida, base = ambiente
+    monkeypatch.setattr(AnotadorFalso, "propor", lambda self, imagem: (
+        self.anotar(imagem), [(0.07, (0.0, 0.0, 0.5, 0.5))]), raising=False)
+    anotar.main(fotos[:1] + base)
+    proposta = json.loads((saida / "propostas" / "falso" / "a.json").read_text())
+    assert proposta["candidatas"] == [{"confianca": 0.07, "caixa": [0.0, 0.0, 100.0, 50.0]}]
+    assert len(proposta["caixas"]) == 2
+
+
 def test_main_confianca_classe(ambiente):
     fotos, saida, base = ambiente
     anotar.main(fotos[:1] + base + ["--confianca-classe", "0.5", "--previa"])

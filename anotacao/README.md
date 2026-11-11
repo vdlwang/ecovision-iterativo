@@ -39,6 +39,7 @@ Opções do `grounding-dino`:
 | `--confianca` | `0.2` | Confiança mínima por caixa. Baixa de propósito: cobre 92% dos objetos e sobram ~4 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
+| `--candidatas` | `0.05` | Grava também, sem classe, as caixas brutas do modelo com confiança a partir dessa, para a caixa por clique na página de revisão (cerca de 50 por foto, ~6 KB). `1` desliga |
 | `--contencao` | `0.9` | Remove a caixa que tem ao menos essa fração dentro de outra maior e mais confiante (partes do objeto, como o topo da lata proposto como tampa, e duplicatas menores, que o NMS não pega). A caixa grande que envolve uma menor mais confiante fica: em geral é o objeto inteiro. Acima de `1` desliga |
 
 ## Google Colab
@@ -70,7 +71,8 @@ Cada proposta é um JSON:
                 "confianca_classe": 0.35},
  "classes": "<hash da lista de classes>", "imagem": "foto.jpg", "largura": 4032, "altura": 3024,
  "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]},
-            {"classe": null, "sugerida": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]}]}
+            {"classe": null, "sugerida": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]}],
+ "candidatas": [{"confianca": 0.12, "caixa": [x1, y1, x2, y2]}]}
 ```
 
 A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Abaixo de `--confianca-classe`, a caixa vai sem classe (`null`); a classe do anotador fica em `sugerida`, que as páginas não mostram (serve às métricas). Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente`, e anotar de novo não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
@@ -119,6 +121,7 @@ Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas pro
 | Trocar para uma classe do anotador | — | `1`–`9`, na ordem de `classes` no `classes.yaml` |
 | Remover caixa | "Remover caixa" | `Del` |
 | Desfazer a seleção | clique fora das caixas | `Esc` |
+| Nova caixa por clique | "Nova caixa" e um clique no objeto | `N` (sem caixa selecionada), clique no objeto, `Tab`/`Shift+Tab` ou a roda do mouse trocam a candidata, `Enter` confirma, `Esc` cancela |
 | Salvar e ir para a próxima | "Salvar e próxima" | `Enter`, que pede confirmação (`Enter` confirma, `Esc` cancela); `Ctrl+S` (`Cmd+S` no Mac) salva direto, também com a busca aberta |
 | Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` sem caixa selecionada (com uma selecionada, o `d` vai para a busca); sempre pede confirmação |
 
@@ -130,7 +133,9 @@ A confirmação do `Enter` resume o que vai ser gravado: as classes das caixas, 
 
 Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava `labels/<nome>.txt` e marca a imagem como `revisada`; descartar apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
 
-Ainda não dá para desenhar, mover ou redimensionar caixas (fase 4), nem reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
+**Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as gravadas pelo `anotar.py` (`--candidatas`); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto. Propostas gravadas antes das candidatas não têm nenhuma: anote de novo.
+
+Ainda não dá para desenhar à mão, mover ou redimensionar caixas (fase 4), nem reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
 
 Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for revisada de novo:
 
@@ -142,7 +147,7 @@ Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for r
  "removidas": [1]}
 ```
 
-O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` para proposta sem classe, `adicionada`) é calculado pelo servidor frente à proposta de origem, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` para proposta sem classe, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 

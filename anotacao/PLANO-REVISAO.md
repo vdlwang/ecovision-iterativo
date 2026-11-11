@@ -65,6 +65,7 @@ O RNF08 pede revisão mais rápida que anotação manual: o fluxo comum deve cab
 | Selecionar caixa | clique | `Tab` |
 | Trocar a classe | clique na caixa abre a busca por nome (feito, 2026-11-10) | com a caixa selecionada, escrever o nome; `1`–`9` para as classes do anotador |
 | Remover caixa | botão | `Del` |
+| Caixa nova por clique (feito, 2026-11-11) | clique no objeto: a candidata mais confiante que contém o ponto | `N`, clique; `Tab` ou a roda trocam a candidata; `Enter` confirma |
 | Desenhar caixa nova | arrastar numa área vazia | `N` e depois arrastar |
 | Ajustar ou mover caixa | alças nos cantos | — |
 | Desfazer | — | `Ctrl+Z` |
@@ -78,7 +79,7 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 `revisoes/<nome>.json` guarda:
 
 - **Tempo ativo**: o cronômetro pausa quando a aba perde o foco ou depois de 60 s sem interação.
-- **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `classe_atribuida` (proposta sem classe, abaixo de `--confianca-classe`; 2026-11-11) ou `adicionada`; as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
+- **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `classe_atribuida` (proposta sem classe, abaixo de `--confianca-classe`; 2026-11-11) ou `adicionada` (com `origem`: `candidata`, e `desenho` na fase 4); as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
 - **Versões** do anotador de base e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
 - **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão. Com o SQLite (fase 3b, seção 6), todas as sessões ficam guardadas.
@@ -172,7 +173,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
 | 3b | [ ] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
-| 4 | [ ] | Desenhar, mover e redimensionar caixas; desfazer | teste manual (Chrome headless para captura) |
+| 4 | [~] | Caixa por clique sobre as candidatas do anotador (feito, 2026-11-11; medição no `OBJETIVO.md`); falta desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta), `caixa_ajustada` e desfazer | pytest da API; teste no Chrome headless pelo protocolo de depuração |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 
 ## Decisões

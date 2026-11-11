@@ -119,6 +119,7 @@ def test_detalhe_da_imagem(servidor):
         "nome": "b c.png", "status": "pendente", "final": None, "invalidas": 0,
         "propostas": {"falso": [{"id": 1, "nome": "Lata", "conf": 0.3,
                                  "caixa": [0.1, 0.1, 0.5, 0.5]}]},
+        "candidatas": {"falso": []},
         "largura": 40, "altura": 20, "revisao": None}
     _, dados = pedir_json(servidor + "/api/imagens/e.jpg")
     assert dados["final"] == [{"id": 1, "nome": "Lata", "conf": None,
@@ -222,6 +223,32 @@ def test_classe_dada_a_proposta_sem_classe(servidor, saida):
                            {"acao": "salvar", "base": "falso", "caixas": caixas})
     assert status == 200, dados
     assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["aceita", "classe_atribuida"]
+
+
+def test_caixa_de_candidata(servidor, saida):
+    dados = proposta("a.jpg", [("Lata", 0.9)])
+    dados["candidatas"] = [{"confianca": 0.12, "caixa": [20, 10, 36, 18]},
+                           {"confianca": 0.08, "caixa": [0, 0, 8, 8]}]
+    formato.gravar_proposta(saida, dados)
+    _, detalhe = pedir_json(servidor + "/api/imagens/a.jpg")
+    assert detalhe["candidatas"]["falso"] == [{"conf": 0.12, "caixa": [0.5, 0.5, 0.9, 0.9]},
+                                              {"conf": 0.08, "caixa": [0.0, 0.0, 0.2, 0.4]}]
+    url = servidor + "/api/imagens/a.jpg"
+    base = caixas_de(saida, "a.jpg")
+    nova = {"id": 0, "caixa": [0.5, 0.5, 0.9, 0.9], "proposta": None, "origem": "candidata"}
+    # origem desconhecida, candidata inexistente, origem em caixa de proposta
+    for caixa, trecho in ((dict(nova, origem="desenho"), "desconhecida"),
+                          (dict(nova, caixa=[0.5, 0.5, 0.8, 0.9]), "candidatas"),
+                          (dict(base[0], origem="candidata"), "não tem origem")):
+        status, erro = enviar(url, {"acao": "salvar", "base": "falso", "caixas": [caixa]})
+        assert status == 400 and trecho in erro["erro"], erro
+    status, dados = enviar(url, {"acao": "salvar", "base": "falso", "caixas": base + [nova]})
+    assert status == 200, dados
+    assert dados["revisao"]["caixas"][1] == {"id": 0, "caixa": [0.5, 0.5, 0.9, 0.9],
+                                             "proposta": None, "desfecho": "adicionada",
+                                             "origem": "candidata"}
+    assert (saida / "labels" / "a.txt").read_text().splitlines()[1] == \
+        "0 0.700000 0.700000 0.400000 0.400000"
 
 
 def test_descartar_apaga_o_rotulo(saida):

@@ -195,6 +195,19 @@ Na revisão apareceram caixas dentro de outras: o topo de uma lata proposto como
 - A confiança prevê se a caixa é um objeto, não se a classe está certa: a classe acerta 40–75% em toda faixa, com amostras pequenas abaixo de 0,30.
 - **Decisão**: abaixo de 0,35 (`--confianca-classe`, o limiar antigo da anotação), a caixa é proposta **sem classe** e o revisor tem de dá-la ou remover a caixa. O motivo não é a classe ser pior ali, e sim o viés de automação (seção 4): as caixas entre 0,20 e 0,35 são as que o limiar antigo escondia, a maioria sem objeto, e aceitá-las com uma tecla seria fácil demais. A classe do anotador fica em `sugerida`, para medir depois (T10) se valeria mostrá-la. Desfecho novo no registro: `classe_atribuida`.
 
+### Caixa por clique (2026-11-11)
+
+Para os objetos que a proposta não cobre, a página de revisão oferece as caixas brutas do modelo como **candidatas**: um clique no objeto mostra a mais confiante que contém o ponto. Simulado com um clique no centro de cada caixa verdadeira, mesmas 88 fotos, candidatas com confiança ≥ 0,05 e NMS 0,8 (~50 por foto depois do filtro de área):
+
+| Objetos | 1ª candidata com IoU ≥ 0,75 | Entre as 3 primeiras |
+|---|---|---|
+| Todos (375) | 90% | 97% |
+| Sem caixa na proposta, limiar 0,20 (31) | 81% | 87% |
+| Sem caixa na proposta, limiar 0,15 (19) | 74% | 84% |
+
+- **Decisão**: `anotar.py --candidatas 0.05` grava as candidatas na proposta, sem classe; na página, `N` e um clique criam a caixa, `Tab` troca a candidata. A caixa nasce sem classe, como as de baixa confiança. O registro marca `"origem": "candidata"`, e o servidor recusa uma caixa que diz ser candidata e não é, o que permite medir no uso quantas vezes o clique resolve.
+- **Ressalvas**: o clique simulado cai no centro exato do objeto; num objeto pequeno ou dentro de outro (a lata e o topo dela), há muitas candidatas no ponto (22 no teste da lata), mas a ordem pela confiança põe as úteis antes. Desenhar à mão continua necessário para os ~15% restantes (fase 4 do T1).
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.

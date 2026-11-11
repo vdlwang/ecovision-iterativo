@@ -53,6 +53,13 @@
                 color: #000; white-space: nowrap; }
   .caixa.sem-classe { border-color: var(--perigo) !important; }
   .sem-rotulos .caixa span { display: none; }
+  /* Nova caixa por clique: os cliques atravessam as caixas e vão para a imagem */
+  .novo { cursor: crosshair; }
+  .novo .caixa { pointer-events: none; }
+  .caixa.candidata { border: 2px dashed #fff !important; box-shadow: 0 0 0 1px #000; }
+  .caixa.candidata span { background: #fff !important; }
+  .ponto { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px; border-radius: 50%;
+           background: #fff; border: 2px solid #000; pointer-events: none; }
   .rodape { border-top: 1px solid var(--borda); padding: 8px 14px; display: grid; gap: 6px; }
   .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--suave); min-height: 21px; }
   .legenda i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
@@ -133,10 +140,11 @@
       <button class="salvar" id="salvar" title="Enter (pede confirmação) ou Ctrl+S (direto)">Salvar e próxima <kbd>Enter</kbd></button>
       <button class="descartar" id="descartar" title="D">Descartar imagem <kbd>D</kbd></button>
       <button id="remover" title="Del" disabled>Remover caixa <kbd>Del</kbd></button>
+      <button id="nova" title="N, sem caixa selecionada">Nova caixa <kbd>N</kbd></button>
       <span class="dica">Selecione uma caixa (clique ou <kbd>Tab</kbd>) e escreva a classe;
         <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
         confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
-        <kbd>Esc</kbd> desfaz a seleção.</span>
+        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.</span>
     </div>
   </div>
 </main>
@@ -159,7 +167,9 @@ let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
-let edicao = null;    // {base, caixas: [{id, caixa, proposta, tocada}], sel, sujo} se editável
+// {base, caixas: [{id, caixa, proposta, tocada, origem}], sel, sujo, novo} se editável;
+// novo: modo "nova caixa", {ponto, lista de candidatas no ponto, i} ou null
+let edicao = null;
 let pedido = 0;       // descarta respostas de pedidos já superados
 let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
 const nomeClasse = id => classes.find(c => c.id === id)?.nome;
@@ -258,7 +268,7 @@ async function mostrar(i) {
       // Base da edição: o primeiro anotador (em ordem alfabética) com proposta;
       // o seletor de anotador é a fase 5
       const base = Object.keys(dados.propostas).sort()[0] ?? null;
-      edicao = { base, sel: null, sujo: false,
+      edicao = { base, sel: null, sujo: false, novo: null,
         caixas: (base ? dados.propostas[base] : []).map((c, k) =>
           ({ id: c.id, caixa: c.caixa, proposta: k, tocada: false })) };
       tempo.ativo = 0;
@@ -301,7 +311,9 @@ function caixaDiv(id, rotulo, [x1, y1, x2, y2], tracejada) {
 function desenhar() {
   const quadro = $("quadro"), legenda = $("legenda");
   quadro.querySelectorAll(".caixa").forEach(c => c.remove());
+  quadro.querySelectorAll(".ponto").forEach(c => c.remove());
   quadro.classList.toggle("editando", !!editando());
+  quadro.classList.toggle("novo", !!(editando() && edicao.novo));
   $("acoes").hidden = !editando();
   if (!detalhe) {
     $("titulo").textContent = "";
@@ -363,14 +375,24 @@ function desenharEdicao() {
     div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); selecionar(k); abrirBusca(); };
     quadro.append(div);
   }
+  const novo = edicao.novo;
+  if (novo?.lista?.length) {
+    const c = novo.lista[novo.i];
+    const div = caixaDiv(0, `candidata ${novo.i + 1}/${novo.lista.length} · ${c.conf.toFixed(2)}`,
+                         c.caixa, true);
+    div.classList.add("candidata");
+    quadro.append(div);
+  }
+  if (novo?.ponto) quadro.append(Object.assign(document.createElement("div"), { className: "ponto",
+    style: `left: ${novo.ponto[0] * 100}%; top: ${novo.ponto[1] * 100}%` }));
   atualizarVisibilidade();
 
   const legenda = $("legenda");
-  const tocadas = edicao.caixas.filter(c => c.tocada).length;
+  if (novo) return legenda.replaceChildren(textoNova());
+  const { corrigidas, adicionadas, removidas } = contarAlteracoes();
   legenda.replaceChildren(edicao.base
     ? `Editando as propostas de ${edicao.base}: ${edicao.caixas.length} caixa(s), `
-      + `${tocadas} corrigida(s), `
-      + `${propostas.length - edicao.caixas.length} removida(s).`
+      + `${corrigidas} corrigida(s), ${adicionadas} adicionada(s), ${removidas} removida(s).`
     : "Sem propostas: salve para marcar como fundo (sem objetos) ou descarte.");
   if (edicao.caixas.some(c => c.id === null))
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
@@ -385,6 +407,19 @@ function desenharEdicao() {
 }
 
 const area = ([x1, y1, x2, y2]) => (x2 - x1) * (y2 - y1);
+const iou = (a, b) => {
+  const inter = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
+              * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  return inter ? inter / (area(a) + area(b) - inter) : 0;
+};
+
+function contarAlteracoes() {
+  const propostas = edicao.base ? detalhe.propostas[edicao.base].length : 0;
+  const daProposta = edicao.caixas.filter(c => c.proposta !== null);
+  return { corrigidas: daProposta.filter(c => c.tocada).length,
+           adicionadas: edicao.caixas.length - daProposta.length,
+           removidas: propostas - daProposta.length };
+}
 
 // A imagem ocupa o espaço livre da .area, qualquer que seja a altura do rodapé
 function ajustarImagem() {
@@ -405,6 +440,71 @@ function selecionar(k) {
   if (!editando()) return;
   edicao.sel = k;
   desenhar();
+}
+
+// --- nova caixa por clique ---------------------------------------------------
+// O anotar.py grava, com a proposta, as caixas brutas do modelo acima de um piso
+// baixo (candidatas). Um clique no objeto mostra a mais confiante que contém o
+// ponto; Tab ou a roda passam às seguintes. A caixa confirmada nasce sem classe.
+
+const candidatasBase = () => (edicao.base ? detalhe.candidatas?.[edicao.base] ?? [] : []);
+
+function iniciarNova() {
+  if (!editando()) return;
+  fecharBusca();
+  edicao.sel = null;
+  edicao.novo = { ponto: null, lista: null, i: 0 };
+  desenhar();
+}
+
+function cancelarNova() {
+  edicao.novo = null;
+  desenhar();
+}
+
+// Candidatas que contêm o ponto, menos as quase iguais a uma caixa já presente
+function escolherPonto(e) {
+  const r = $("imagem").getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  const presentes = edicao.caixas.map(c => c.caixa);
+  const lista = candidatasBase()
+    .filter(({ caixa: [x1, y1, x2, y2] }) => x1 <= x && x <= x2 && y1 <= y && y <= y2)
+    .filter(c => !presentes.some(p => iou(p, c.caixa) >= 0.9))
+    .sort((a, b) => b.conf - a.conf);
+  edicao.novo = { ponto: [x, y], lista, i: 0 };
+  desenhar();
+}
+
+function trocarCandidata(passo) {
+  const n = edicao.novo?.lista?.length;
+  if (!n) return;
+  edicao.novo.i = (edicao.novo.i + passo + n) % n;
+  desenhar();
+}
+
+function confirmarNova() {
+  const c = edicao.novo?.lista?.[edicao.novo.i];
+  if (!c) return;
+  edicao.caixas.push({ id: null, caixa: c.caixa, proposta: null, tocada: true, origem: "candidata" });
+  edicao.sel = edicao.caixas.length - 1;
+  edicao.novo = null;
+  edicao.sujo = true;
+  desenhar();
+  abrirBusca();
+}
+
+function textoNova() {
+  const novo = edicao.novo;
+  if (!candidatasBase().length)
+    return "Esta proposta não tem candidatas (anote de novo com o anotar.py atual). Esc sai.";
+  if (!novo.lista) return "Nova caixa: clique no objeto. Esc cancela.";
+  if (!novo.lista.length)
+    return "Nenhuma candidata nova contém esse ponto: clique em outra parte do objeto "
+      + "(desenhar à mão é a fase 4). Esc cancela.";
+  return `Candidata ${novo.i + 1} de ${novo.lista.length} (confiança `
+    + `${novo.lista[novo.i].conf.toFixed(2)}): Tab ou a roda do mouse trocam, Enter confirma, `
+    + "Esc cancela.";
 }
 
 function trocarClasse(id) {
@@ -564,15 +664,14 @@ function confirmar(texto, rotulo, perigo) {
 
 function resumoSalvar() {
   const caixas = edicao.caixas;
-  const propostas = edicao.base ? detalhe.propostas[edicao.base].length : 0;
+  const { corrigidas, adicionadas, removidas } = contarAlteracoes();
   const contagem = new Map();
   for (const c of caixas) contagem.set(nomeClasse(c.id), (contagem.get(nomeClasse(c.id)) || 0) + 1);
   const classes = [...contagem].map(([nome, n]) => n > 1 ? `${nome} ×${n}` : nome).join(", ");
   return `Salvar ${detalhe.nome}?\n`
     + (caixas.length ? `${caixas.length} caixa(s): ${classes}.`
                      : "Nenhuma caixa: a imagem vai para o treino como fundo (sem objetos).")
-    + `\n${caixas.filter(c => c.tocada).length} corrigida(s), `
-    + `${propostas - caixas.filter(c => c.proposta !== null).length} removida(s).`;
+    + `\n${corrigidas} corrigida(s), ${adicionadas} adicionada(s), ${removidas} removida(s).`;
 }
 
 // confirmar: pede confirmação antes de salvar (o Enter); descartar sempre pede
@@ -585,7 +684,8 @@ async function enviar(acao, pedirConfirmacao = false) {
   if (acao === "salvar" && pedirConfirmacao && !await confirmar(resumoSalvar(), "Salvar e próxima"))
     return;
   const corpo = { acao, base: edicao.base, tempo_ativo_s: tempo.ativo,
-    caixas: edicao.caixas.map(({ id, caixa, proposta }) => ({ id, caixa, proposta })) };
+    caixas: edicao.caixas.map(({ id, caixa, proposta, origem }) =>
+      ({ id, caixa, proposta, origem: origem ?? null })) };
   $("salvar").disabled = $("descartar").disabled = true;
   try {
     await api(`/api/imagens/${encodeURIComponent(detalhe.nome)}`, {
@@ -619,6 +719,7 @@ $("confirmar").onkeydown = e => {
 };
 $("descartar").onclick = () => enviar("descartar");
 $("remover").onclick = remover;
+$("nova").onclick = () => (edicao?.novo ? cancelarNova() : iniciarNova());
 $("busca").oninput = () => { busca.ativa = 0; mostrarOpcoes(); };
 $("busca").onfocus = mostrarOpcoes;
 $("busca").onblur = () => { $("opcoes").hidden = true; };
@@ -640,7 +741,16 @@ $("busca").onkeydown = e => {
     selecionarVizinha(e.shiftKey ? -1 : 1);
   }
 };
-$("area").onmousedown = () => { if (editando() && edicao.sel !== null) selecionar(null); };
+$("area").onmousedown = e => {
+  if (!editando()) return;
+  if (edicao.novo) { e.preventDefault(); escolherPonto(e); }
+  else if (edicao.sel !== null) selecionar(null);
+};
+$("area").addEventListener("wheel", e => {
+  if (!editando() || !edicao.novo?.lista?.length) return;
+  e.preventDefault();
+  trocarCandidata(e.deltaY > 0 ? 1 : -1);
+}, { passive: false });
 
 // Ctrl+S (Cmd+S no Mac) salva de qualquer lugar da página, inclusive da busca;
 // nunca abre o "salvar página" do navegador
@@ -659,7 +769,16 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") { if (podeSair()) mostrar(atual - 1); return; }
   if (e.key === "ArrowRight") { if (podeSair()) mostrar(atual + 1); return; }
   if (!editando()) return;
-  if (e.key === "Tab" && edicao.caixas.length) {
+  if (edicao.novo) {  // modo nova caixa: Tab troca a candidata, Enter confirma
+    if (e.key === "Tab") { e.preventDefault(); trocarCandidata(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Enter") { e.preventDefault(); confirmarNova(); }
+    else if (["Escape", "n", "N"].includes(e.key)) { e.preventDefault(); cancelarNova(); }
+    return;
+  }
+  if ((e.key === "n" || e.key === "N") && edicao.sel === null) {
+    e.preventDefault();
+    iniciarNova();
+  } else if (e.key === "Tab" && edicao.caixas.length) {
     e.preventDefault();
     selecionarVizinha(e.shiftKey ? -1 : 1);
   } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && edicao.sel !== null) {

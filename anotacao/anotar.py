@@ -38,6 +38,10 @@ CONFIANCA_PADRAO = 0.20  # pela cobertura sem classe (OBJETIVO.md, 2026-11-11)
 CONFIANCA_CLASSE_PADRAO = 0.35
 # Caixa contida nessa fração numa maior e mais confiante é removida (OBJETIVO.md, 2026-11-11)
 CONTENCAO_PADRAO = 0.9
+# Candidatas da caixa por clique na revisão (OBJETIVO.md, 2026-11-11): caixas
+# brutas com confiança >= piso, sem classe, depois de um NMS frouxo
+PISO_CANDIDATAS_PADRAO = 0.05
+NMS_CANDIDATAS = 0.8
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
@@ -200,6 +204,8 @@ class GroundingDino:
     das propostas; opcoes(parser), que acrescenta as opções de linha de comando
     dele; criar(classes, args); e, na instância, versao, parametros e
     anotar(imagem) -> [(id da classe, confianca, (x1, y1, x2, y2) normalizada)].
+    Opcional: propor(imagem) -> (as mesmas detecções, [(confianca, caixa)]), com
+    as candidatas para a caixa por clique na página de revisão.
     """
 
     nome = "grounding-dino"
@@ -216,6 +222,9 @@ class GroundingDino:
         grupo.add_argument("--area-maxima", type=float, default=0.5,
                            help="descarta caixas maiores que essa fração da imagem "
                                 "(padrão: 0.5)")
+        grupo.add_argument("--candidatas", type=float, default=PISO_CANDIDATAS_PADRAO,
+                           help="confiança mínima das candidatas gravadas para a caixa por "
+                                f"clique; 1 desliga (padrão: {PISO_CANDIDATAS_PADRAO})")
         grupo.add_argument("--contencao", type=float, default=CONTENCAO_PADRAO,
                            help="remove a caixa contida nessa fração numa maior e mais "
                                 f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
@@ -223,10 +232,10 @@ class GroundingDino:
     @classmethod
     def criar(cls, classes, args):
         return cls(classes, args.modelo, args.dispositivo, args.confianca, args.iou,
-                   args.area_maxima, args.contencao)
+                   args.area_maxima, args.contencao, args.candidatas)
 
     def __init__(self, classes, modelo, dispositivo, confianca, limiar_iou, area_maxima,
-                 contencao=CONTENCAO_PADRAO):
+                 contencao=CONTENCAO_PADRAO, piso_candidatas=PISO_CANDIDATAS_PADRAO):
         import torch
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
@@ -236,11 +245,13 @@ class GroundingDino:
         self.limiar_iou = limiar_iou
         self.area_maxima = area_maxima
         self.contencao = contencao
+        self.piso_candidatas = piso_candidatas
         self.n_classes = len(classes)
         self.reservas = frozenset(i for i, c in enumerate(classes) if c.get("reserva"))
         self.versao = modelo
         self.parametros = {"confianca": confianca, "iou": limiar_iou,
-                           "area_maxima": area_maxima, "contencao": contencao}
+                           "area_maxima": area_maxima, "contencao": contencao,
+                           "candidatas": piso_candidatas}
 
         print(f"Carregando {modelo} em {self.dispositivo}...")
         self.processador = AutoProcessor.from_pretrained(modelo)
@@ -301,6 +312,24 @@ class GroundingDino:
             if caixa[2] > caixa[0] and caixa[3] > caixa[1] and area <= self.area_maxima:
                 deteccoes.append((classe, conf, caixa))
         return sem_contidas(nms(deteccoes, self.limiar_iou), self.contencao)
+
+    def candidatas(self, por_classe, caixas):
+        """
+        Saída de pontuar() -> [(confianca, (x1, y1, x2, y2))]: as caixas brutas
+        com a maior pontuação entre as classes >= piso_candidatas, dentro da
+        área máxima, depois de um NMS frouxo (só junta quase iguais), da mais
+        confiante para a menos. Sem classe: o revisor dá a classe.
+        """
+        conf = por_classe.max(dim=1).values.tolist()
+        brutas = [(None, s, c) for s, c in zip(conf, caixas)
+                  if s >= self.piso_candidatas and c[2] > c[0] and c[3] > c[1]
+                  and (c[2] - c[0]) * (c[3] - c[1]) <= self.area_maxima]
+        return [(s, c) for _, s, c in nms(brutas, NMS_CANDIDATAS)]
+
+    def propor(self, imagem):
+        """(detecções como em anotar(), candidatas como em candidatas())."""
+        por_classe, caixas = self.pontuar(imagem)
+        return self.filtrar(por_classe, caixas), self.candidatas(por_classe, caixas)
 
     def anotar(self, imagem):
         """Devolve [(classe, confianca, (x1, y1, x2, y2) normalizada)] após o NMS."""
@@ -441,13 +470,16 @@ def main(argv=None):
 
     for caminho in args.imagens:
         imagem, girada = abrir_imagem(caminho)
-        deteccoes = anotador.anotar(imagem)
+        if hasattr(anotador, "propor"):
+            deteccoes, candidatas = anotador.propor(imagem)
+        else:
+            deteccoes, candidatas = anotador.anotar(imagem), []
 
         salvar_imagem(caminho, imagem, girada, args.saida / "images" / caminho.name)
         formato.gravar_proposta(args.saida, formato.montar_proposta(
             anotador.nome, anotador.versao,
             dict(anotador.parametros, confianca_classe=args.confianca_classe), classes,
-            caminho.name, imagem.size, deteccoes, args.confianca_classe))
+            caminho.name, imagem.size, deteccoes, args.confianca_classe, candidatas))
         # Grava o estado a cada imagem: interrompido, o que já foi feito vale
         formato.registrar_imagem(linhas, caminho.name)
         formato.gravar_estado(args.saida, colunas, linhas)
