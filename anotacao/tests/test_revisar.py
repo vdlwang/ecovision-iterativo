@@ -207,6 +207,23 @@ def test_aceitar_como_esta_e_fundo(servidor, saida):
     assert status == 200 and (saida / "labels" / "d.txt").read_text() == ""
 
 
+def test_classe_dada_a_proposta_sem_classe(servidor, saida):
+    formato.gravar_proposta(saida, proposta("a.jpg", [("Lata", 0.9), (None, 0.25)]))
+    # A página mostra a caixa sem classe e não deixa salvar com id nulo
+    _, dados = pedir_json(servidor + "/api/imagens/a.jpg")
+    assert dados["propostas"]["falso"][1]["id"] is None
+    assert dados["propostas"]["falso"][1]["nome"] is None
+    caixas = caixas_de(saida, "a.jpg")
+    status, erro = enviar(servidor + "/api/imagens/a.jpg",
+                          {"acao": "salvar", "base": "falso", "caixas": caixas})
+    assert status == 400 and "fora do data.yaml" in erro["erro"]
+    caixas[1]["id"] = 0
+    status, dados = enviar(servidor + "/api/imagens/a.jpg",
+                           {"acao": "salvar", "base": "falso", "caixas": caixas})
+    assert status == 200, dados
+    assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["aceita", "classe_atribuida"]
+
+
 def test_descartar_apaga_o_rotulo(saida):
     (saida / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
     registro = formato.revisar(saida, "a.jpg", {"acao": "descartar", "base": "falso"}, "agora")

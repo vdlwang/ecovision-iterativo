@@ -78,7 +78,7 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 `revisoes/<nome>.json` guarda:
 
 - **Tempo ativo**: o cronômetro pausa quando a aba perde o foco ou depois de 60 s sem interação.
-- **Desfecho de cada caixa**: `aceita`, `classe_corrigida` ou `adicionada`; as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
+- **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `classe_atribuida` (proposta sem classe, abaixo de `--confianca-classe`; 2026-11-11) ou `adicionada`; as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
 - **Versões** do anotador de base e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
 - **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão. Com o SQLite (fase 3b, seção 6), todas as sessões ficam guardadas.
@@ -124,7 +124,7 @@ anotacoes/
 | `propostas` | `id`, `imagem_id`, `execucao_id`, `data` | Nunca apagada nem alterada. A proposta atual de um anotador numa imagem é a de maior `id` |
 | `caixas_propostas` | `proposta_id`, `indice`, `classe` (nome), `confianca`, `x1`, `y1`, `x2`, `y2` | PK (`proposta_id`, `indice`). Classe pelo nome, como hoje: o anotador pode propor classe fora do `data.yaml`. Coordenadas normalizadas (hoje são pixels no JSON) |
 | `revisoes` | `id`, `imagem_id`, `proposta_id` (base, pode ser nula), `acao` (`salvar`, `descartar`), `data`, `tempo_ativo_s`, `revisor` | Uma linha por sessão; nenhuma é sobrescrita. A vigente é a de maior `id` |
-| `caixas_revisao` | `revisao_id`, `indice`, `classe_id` (FK `classes`), `x1`..`y2`, `proposta_indice` (nulo se adicionada), `classe_corrigida`, `caixa_ajustada` | Os desfechos viram colunas booleanas, e uma caixa pode ter os dois (seção 5). `aceita` = nenhum dos dois com proposta; `adicionada` = sem proposta. As removidas não são gravadas: são as caixas da proposta base que nenhuma caixa da revisão cita |
+| `caixas_revisao` | `revisao_id`, `indice`, `classe_id` (FK `classes`), `x1`..`y2`, `proposta_indice` (nulo se adicionada), `classe_corrigida`, `caixa_ajustada` | Os desfechos viram colunas booleanas, e uma caixa pode ter os dois (seção 5). `aceita` = nenhum dos dois com proposta; `adicionada` = sem proposta; `classe_atribuida` = proposta sem classe (`caixas_propostas.classe` nula). As removidas não são gravadas: são as caixas da proposta base que nenhuma caixa da revisão cita |
 
 - Versão do esquema em `PRAGMA user_version`; o `saida.py` recusa um banco de versão desconhecida e aplica as migrações conhecidas na abertura.
 - `PRAGMA foreign_keys = ON` e `CHECK` nos status, nas ações e em `0 <= x1 < x2 <= 1`, para que um erro de código não grave estado inválido.

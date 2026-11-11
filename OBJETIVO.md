@@ -169,6 +169,32 @@ As fotos têm em média 4,3 objetos. "Sobra" são as propostas que não cobrem n
 - **Ressalvas**: parte da sobra pode ser objeto real de classe que a equipe não rotulou, ou pedaço de objeto (não separado); fotos de celular, com as mesmas cenas nas quatro validações; os rótulos da equipe são polígonos de 4 pontos convertidos em caixa. Refazer com quadros da esteira (T4).
 - **Não muda**: as medidas anteriores de precisão e recall continuam em 0,35, o limiar em que foram medidas. O `avaliar.py` usa o `CONFIANCA_PADRAO` só para decidir a classe de reserva, que nenhuma classe usa hoje.
 
+### Caixas contidas e propostas sem classe (2026-11-11)
+
+Na revisão apareceram caixas dentro de outras: o topo de uma lata proposto como `Plastic bottle cap` dentro da caixa `Drink can`, uma `Glass cup` fraca em volta da lata, duas caixas de papel uma dentro da outra. O NMS não as pega: o IoU entre uma caixa pequena e a grande que a contém é baixo. Medido com a **contenção** (fração da área da caixa menor dentro da maior), sobre as mesmas saídas brutas da seção anterior. Nos rótulos da equipe, só 1 das 375 caixas está dentro de outra (≥ 80%).
+
+| Limiar 0,20, depois do NMS | Cobertos | Imagens completas | Caixas por imagem | Sobra por imagem |
+|---|---|---|---|---|
+| Só NMS | 92% | 73% | 7,8 | 3,9 |
+| Remove a grande que envolve uma menor mais confiante | 84% | 47% | 6,6 | 3,1 |
+| **Remove a contida numa maior mais confiante** | **91–92%** | **73%** | **5,7–5,8** | **1,8** |
+| Remove a contida, qualquer que seja a confiança | 86% | 58% | 4,7 | 1,0 |
+
+- **A grande fica.** O Grounding DINO dá, com frequência, mais confiança a uma parte do objeto que ao objeto inteiro (o topo da lata, 0,38, dentro da lata, 0,37); remover a grande apaga o objeto.
+- **A pequena sai só se a grande for mais confiante.** Sem essa condição, uma caixa grande espúria apaga o objeto de dentro.
+- Contenção de 0,7, 0,8 ou 0,9 dá o mesmo resultado (± 1 ponto); em 0,15 a sobra cai de 7,1 para 3,1 por imagem, sem perder cobertura.
+- **Decisão**: `--contencao 0.9` no `anotar.py`, aplicada no `filtrar` (o `avaliar.py` também a aplica). Caixas fora da esteira (papel no fundo branco) pedem outro filtro, por região de interesse, quando houver quadros da esteira (T4).
+
+**Propostas sem classe.** Acerto de classe por faixa de confiança, entre as caixas que cobrem um objeto (limiar 0,15, com a contenção):
+
+| Confiança | 0,15–0,20 | 0,20–0,25 | 0,25–0,30 | 0,30–0,35 | 0,35–0,40 | 0,40–0,50 | ≥ 0,50 |
+|---|---|---|---|---|---|---|---|
+| Caixas que cobrem objeto | 12% | 15% | 39% | 75% | 86% | 87% | 85% |
+| Classe certa, das que cobrem | 73% (11/15) | 50% (6/12) | 62% (16/26) | 53% (20/38) | 38% (32/85) | 61% (73/120) | 75% (45/60) |
+
+- A confiança prevê se a caixa é um objeto, não se a classe está certa: a classe acerta 40–75% em toda faixa, com amostras pequenas abaixo de 0,30.
+- **Decisão**: abaixo de 0,35 (`--confianca-classe`, o limiar antigo da anotação), a caixa é proposta **sem classe** e o revisor tem de dá-la ou remover a caixa. O motivo não é a classe ser pior ali, e sim o viés de automação (seção 4): as caixas entre 0,20 e 0,35 são as que o limiar antigo escondia, a maioria sem objeto, e aceitá-las com uma tecla seria fácil demais. A classe do anotador fica em `sugerida`, para medir depois (T10) se valeria mostrá-la. Desfecho novo no registro: `classe_atribuida`.
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.

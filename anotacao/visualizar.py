@@ -212,7 +212,8 @@ function mostrar(i) {
       width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id ?? 0),
     });
     const span = document.createElement("span");
-    span.textContent = conf === null ? nome : `${nome} ${conf.toFixed(2)}`;
+    const rotulo = nome ?? "sem classe";
+    span.textContent = conf === null ? rotulo : `${rotulo} ${conf.toFixed(2)}`;
     span.style.background = cor(id ?? 0);
     div.append(span);
     quadro.append(div);
@@ -231,7 +232,8 @@ function mostrar(i) {
     const item = document.createElement("span");
     const amostra = document.createElement("i");
     amostra.style.background = cor(id ?? 0);
-    item.append(amostra, `${nome}${id === null ? " (fora do data.yaml)" : ""}: ${n}`);
+    item.append(amostra, nome === null ? `sem classe: ${n}`
+      : `${nome}${id === null ? " (fora do data.yaml)" : ""}: ${n}`);
     legenda.append(item);
   }
   if (caixas === null) legenda.append(tipo === "final"

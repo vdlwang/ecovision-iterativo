@@ -124,18 +124,25 @@ def caminho_proposta(saida, anotador, nome):
     return Path(saida) / "propostas" / anotador / f"{Path(nome).stem}.json"
 
 
-def montar_proposta(anotador, versao, parametros, classes, nome, tamanho, deteccoes):
+def montar_proposta(anotador, versao, parametros, classes, nome, tamanho, deteccoes,
+                    confianca_classe=0.0):
     """
     deteccoes: [(id da classe, confianca, (x1, y1, x2, y2) normalizada)].
-    A caixa vai em pixels da imagem gravada; a classe, pelo nome.
+    A caixa vai em pixels da imagem gravada; a classe, pelo nome. Abaixo de
+    confianca_classe, a caixa vai sem classe ("classe": null), para o revisor
+    dá-la sem ver a do anotador; esta fica em "sugerida", que as páginas não
+    mostram e as métricas (T10) podem usar.
     """
     largura, altura = tamanho
-    caixas = [{
-        "classe": classes[classe]["nome"],
-        "confianca": round(float(conf), 4),
-        "caixa": [round(x1 * largura, 4), round(y1 * altura, 4),
-                  round(x2 * largura, 4), round(y2 * altura, 4)],
-    } for classe, conf, (x1, y1, x2, y2) in deteccoes]
+    caixas = []
+    for classe, conf, (x1, y1, x2, y2) in deteccoes:
+        caixa = {"classe": classes[classe]["nome"]}
+        if conf < confianca_classe:
+            caixa = {"classe": None, "sugerida": caixa["classe"]}
+        caixa["confianca"] = round(float(conf), 4)
+        caixa["caixa"] = [round(x1 * largura, 4), round(y1 * altura, 4),
+                          round(x2 * largura, 4), round(y2 * altura, 4)]
+        caixas.append(caixa)
     return {"anotador": anotador, "versao": versao, "parametros": parametros,
             "classes": hash_classes(classes), "imagem": nome,
             "largura": largura, "altura": altura, "caixas": caixas}
@@ -157,7 +164,10 @@ def ler_proposta(caminho):
 
 
 def caixas_normalizadas(proposta):
-    """[(nome da classe, confianca, (x1, y1, x2, y2) normalizada)] de uma proposta."""
+    """
+    [(nome da classe, confianca, (x1, y1, x2, y2) normalizada)] de uma
+    proposta; nome None para caixa proposta sem classe.
+    """
     largura, altura = proposta["largura"], proposta["altura"]
     return [(c["classe"], c["confianca"],
              (c["caixa"][0] / largura, c["caixa"][1] / altura,
@@ -175,20 +185,25 @@ def aceitar(saida, anotador, nomes=None):
     """
     Copia as propostas do anotador para labels/, com os ids do data.yaml, e
     marca as imagens como revisadas: o comportamento antigo, proposta direto
-    como rótulo. Só mexe nas pendentes (nomes=None: todas); devolve quantas
-    aceitou.
+    como rótulo. Só mexe nas pendentes (nomes=None: todas). Imagem com caixa
+    sem classe fica pendente: a classe dela é do revisor. Devolve (quantas
+    aceitou, [imagens deixadas pendentes por caixa sem classe]).
     """
     ids = {n: i for i, n in nomes_classes(saida).items()}
     colunas, linhas = ler_estado(saida)
-    aceitas = 0
+    aceitas, sem_classe = 0, []
     for nome, linha in linhas.items():
         if linha["status"] != "pendente" or (nomes is not None and nome not in nomes):
             continue
         caminho = caminho_proposta(saida, anotador, nome)
         if not caminho.exists():
             continue
+        caixas = caixas_normalizadas(ler_proposta(caminho))
+        if any(classe is None for classe, _, _ in caixas):
+            sem_classe.append(nome)
+            continue
         texto = []
-        for classe, _, caixa in caixas_normalizadas(ler_proposta(caminho)):
+        for classe, _, caixa in caixas:
             if classe not in ids:
                 raise ValueError(f"{caminho}: classe '{classe}' fora do data.yaml")
             texto.append(linha_yolo(ids[classe], caixa) + "\n")
@@ -196,7 +211,7 @@ def aceitar(saida, anotador, nomes=None):
         linha["status"] = "revisada"
         aceitas += 1
     gravar_estado(saida, colunas, linhas)
-    return aceitas
+    return aceitas, sem_classe
 
 
 # --- leitura de uma imagem, para as páginas ---------------------------------
@@ -340,13 +355,16 @@ def validar_caixas(caixas, nomes, propostas):
 def desfechos(caixas, propostas, ids):
     """
     Desfecho de cada caixa final frente à proposta de origem: 'aceita',
-    'classe_corrigida' ou 'adicionada' (sem proposta); e os índices das
-    propostas removidas. ids: {nome da classe: id}.
+    'classe_corrigida', 'classe_atribuida' (proposta sem classe) ou
+    'adicionada' (sem proposta); e os índices das propostas removidas.
+    ids: {nome da classe: id}.
     """
     registro = []
     for id_classe, caixa, proposta in caixas:
         if proposta is None:
             desfecho = "adicionada"
+        elif propostas[proposta][0] is None:
+            desfecho = "classe_atribuida"
         elif ids.get(propostas[proposta][0]) == id_classe:
             desfecho = "aceita"
         else:

@@ -101,8 +101,8 @@ def test_aceitar_so_pendentes_e_escolhidas(tmp_path):
         gravar(tmp_path, "falso", nome, [(1, 0.9, (0.1, 0.2, 0.5, 0.6))])
     gravar(tmp_path, "outro", "d.jpg", [])
 
-    assert formato.aceitar(tmp_path, "falso", {"a.jpg"}) == 1
-    assert formato.aceitar(tmp_path, "falso") == 1  # só b.jpg sobra
+    assert formato.aceitar(tmp_path, "falso", {"a.jpg"}) == (1, [])
+    assert formato.aceitar(tmp_path, "falso") == (1, [])  # só b.jpg sobra
     _, estado = formato.ler_estado(tmp_path)
     assert {n: l["status"] for n, l in estado.items()} == {
         "a.jpg": "revisada", "b.jpg": "revisada", "c.jpg": "descartada", "d.jpg": "pendente"}
@@ -120,6 +120,34 @@ def test_aceitar_recusa_classe_desconhecida(tmp_path):
     gravar(tmp_path, "falso", "a.jpg", [(1, 0.9, (0.1, 0.2, 0.5, 0.6))])
     with pytest.raises(ValueError, match="Lata"):
         formato.aceitar(tmp_path, "falso")
+
+
+def test_proposta_sem_classe_abaixo_do_limiar():
+    deteccoes = [(1, 0.5, (0.1, 0.2, 0.5, 0.6)), (0, 0.2, (0.6, 0.2, 0.9, 0.6))]
+    proposta = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50),
+                                       deteccoes, confianca_classe=0.35)
+    assert proposta["caixas"][0]["classe"] == "Lata" and "sugerida" not in proposta["caixas"][0]
+    assert proposta["caixas"][1] == {"classe": None, "sugerida": "Garrafa", "confianca": 0.2,
+                                     "caixa": [60.0, 10.0, 90.0, 30.0]}
+    assert [c[0] for c in formato.caixas_normalizadas(proposta)] == ["Lata", None]
+    # sem limiar, todas com classe
+    assert formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50),
+                                   deteccoes)["caixas"][1]["classe"] == "Garrafa"
+
+
+def test_aceitar_deixa_pendente_imagem_com_caixa_sem_classe(tmp_path):
+    (tmp_path / "labels").mkdir()
+    formato.gravar_estado(tmp_path, ["nome", "status"], {
+        n: {"nome": n, "status": "pendente"} for n in ("a.jpg", "b.jpg")})
+    escrever_data_yaml(tmp_path, ["Garrafa", "Lata"])
+    for nome, conf in (("a.jpg", 0.9), ("b.jpg", 0.2)):
+        formato.gravar_proposta(tmp_path, formato.montar_proposta(
+            "falso", "v1", {}, CLASSES, nome, (100, 50),
+            [(1, 0.9, (0.1, 0.2, 0.5, 0.6)), (0, conf, (0.6, 0.2, 0.9, 0.6))], 0.35))
+    assert formato.aceitar(tmp_path, "falso") == (1, ["b.jpg"])
+    _, estado = formato.ler_estado(tmp_path)
+    assert estado["b.jpg"]["status"] == "pendente"
+    assert not (tmp_path / "labels" / "b.txt").exists()
 
 
 def test_gravar_atomico_usa_o_modo_de_um_open_comum(tmp_path):

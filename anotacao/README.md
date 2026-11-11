@@ -27,8 +27,9 @@ python anotacao/anotar.py -o anotacoes --aceitar         # propostas viram rótu
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
+| `--confianca-classe` | `0.35` | Caixas com confiança abaixo dessa são propostas **sem classe**: o revisor tem de dar a classe ou remover a caixa. `0` desliga |
 | `--sobrescrever` | — | Anota de novo imagens que já têm proposta deste anotador |
-| `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
+| `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`, e deixa pendentes as que têm caixa sem classe. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
 Opções do `grounding-dino`:
 
@@ -38,6 +39,7 @@ Opções do `grounding-dino`:
 | `--confianca` | `0.2` | Confiança mínima por caixa. Baixa de propósito: cobre 92% dos objetos e sobram ~4 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
+| `--contencao` | `0.9` | Remove a caixa que tem ao menos essa fração dentro de outra maior e mais confiante (partes do objeto, como o topo da lata proposto como tampa, e duplicatas menores, que o NMS não pega). A caixa grande que envolve uma menor mais confiante fica: em geral é o objeto inteiro. Acima de `1` desliga |
 
 ## Google Colab
 
@@ -64,12 +66,14 @@ Cada proposta é um JSON:
 
 ```json
 {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny",
- "parametros": {"confianca": 0.2, "iou": 0.5, "area_maxima": 0.5},
+ "parametros": {"confianca": 0.2, "iou": 0.5, "area_maxima": 0.5, "contencao": 0.9,
+                "confianca_classe": 0.35},
  "classes": "<hash da lista de classes>", "imagem": "foto.jpg", "largura": 4032, "altura": 3024,
- "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]}]}
+ "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]},
+            {"classe": null, "sugerida": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]}]}
 ```
 
-A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente`, e anotar de novo não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
+A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Abaixo de `--confianca-classe`, a caixa vai sem classe (`null`); a classe do anotador fica em `sugerida`, que as páginas não mostram (serve às métricas). Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente`, e anotar de novo não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
 Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos. Se o EXIF da foto pede rotação (fotos de celular), a imagem é gravada já girada, e as caixas valem para ela.
 
@@ -106,7 +110,7 @@ A página mostra a fila das imagens `pendente`, das mais incertas para as mais s
 
 ### Edição
 
-Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas propostas pelo anotador (o primeiro em ordem alfabética, se houver vários) podem ser corrigidas. Proposta intocada aparece tracejada, com a confiança; caixa corrigida, em linha contínua.
+Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas propostas pelo anotador (o primeiro em ordem alfabética, se houver vários) podem ser corrigidas. Proposta intocada aparece tracejada, com a confiança; caixa corrigida, em linha contínua. Caixa proposta sem classe (confiança baixa) aparece em vermelho como "sem classe": a imagem só pode ser salva depois que cada uma recebe classe ou é removida.
 
 | Ação | Mouse | Teclado |
 |---|---|---|
@@ -138,7 +142,7 @@ Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for r
  "removidas": [1]}
 ```
 
-O desfecho de cada caixa (`aceita`, `classe_corrigida`, `adicionada`) é calculado pelo servidor frente à proposta de origem, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` para proposta sem classe, `adicionada`) é calculado pelo servidor frente à proposta de origem, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 

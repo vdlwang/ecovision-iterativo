@@ -34,6 +34,10 @@ from visualizar import gerar_pagina
 DIR_SCRIPT = Path(__file__).resolve().parent
 MODELO_PADRAO = "IDEA-Research/grounding-dino-tiny"
 CONFIANCA_PADRAO = 0.20  # pela cobertura sem classe (OBJETIVO.md, 2026-11-11)
+# Abaixo dela, a caixa é proposta sem classe e o revisor tem de dá-la (OBJETIVO.md, 2026-11-11)
+CONFIANCA_CLASSE_PADRAO = 0.35
+# Caixa contida nessa fração numa maior e mais confiante é removida (OBJETIVO.md, 2026-11-11)
+CONTENCAO_PADRAO = 0.9
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
@@ -154,6 +158,33 @@ def nms(deteccoes, limiar_iou):
     return mantidas
 
 
+def contida(a, b):
+    """Fração da área de a que está dentro de b."""
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    if not area_a:
+        return 0.0
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return ix * iy / area_a
+
+
+def sem_contidas(deteccoes, limiar):
+    """
+    Remove a caixa contida (fração >= limiar da área dela) numa caixa maior e
+    mais confiante, de qualquer classe: o Grounding DINO propõe partes do
+    objeto (o topo da lata como tampa) e duplicatas menores, que o NMS não
+    pega porque o IoU entre elas é baixo. A caixa grande que envolve uma
+    menor mais confiante fica: costuma ser o objeto inteiro, com a parte mais
+    confiante que ele. limiar >= 1 só remove caixas inteiramente contidas;
+    acima de 1, nenhuma.
+    """
+    def area(c):
+        return (c[2] - c[0]) * (c[3] - c[1])
+    return [d for d in deteccoes
+            if not any(o[1] > d[1] and area(o[2]) > area(d[2]) and contida(d[2], o[2]) >= limiar
+                       for o in deteccoes)]
+
+
 def abrir_imagem(caminho):
     """Abre a imagem em RGB já com a rotação do EXIF aplicada."""
     imagem = Image.open(caminho)
@@ -185,13 +216,17 @@ class GroundingDino:
         grupo.add_argument("--area-maxima", type=float, default=0.5,
                            help="descarta caixas maiores que essa fração da imagem "
                                 "(padrão: 0.5)")
+        grupo.add_argument("--contencao", type=float, default=CONTENCAO_PADRAO,
+                           help="remove a caixa contida nessa fração numa maior e mais "
+                                f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
 
     @classmethod
     def criar(cls, classes, args):
         return cls(classes, args.modelo, args.dispositivo, args.confianca, args.iou,
-                   args.area_maxima)
+                   args.area_maxima, args.contencao)
 
-    def __init__(self, classes, modelo, dispositivo, confianca, limiar_iou, area_maxima):
+    def __init__(self, classes, modelo, dispositivo, confianca, limiar_iou, area_maxima,
+                 contencao=CONTENCAO_PADRAO):
         import torch
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
 
@@ -200,11 +235,12 @@ class GroundingDino:
         self.confianca = confianca
         self.limiar_iou = limiar_iou
         self.area_maxima = area_maxima
+        self.contencao = contencao
         self.n_classes = len(classes)
         self.reservas = frozenset(i for i, c in enumerate(classes) if c.get("reserva"))
         self.versao = modelo
         self.parametros = {"confianca": confianca, "iou": limiar_iou,
-                           "area_maxima": area_maxima}
+                           "area_maxima": area_maxima, "contencao": contencao}
 
         print(f"Carregando {modelo} em {self.dispositivo}...")
         self.processador = AutoProcessor.from_pretrained(modelo)
@@ -251,7 +287,7 @@ class GroundingDino:
     def filtrar(self, por_classe, caixas, confianca=None):
         """
         Saída de pontuar() -> [(classe, confianca, (x1, y1, x2, y2))] após os
-        filtros e o NMS. confianca substitui a do construtor (para o avaliar.py).
+        filtros, o NMS e a remoção das caixas contidas. confianca substitui a do construtor (para o avaliar.py).
         """
         if confianca is None:
             confianca = self.confianca
@@ -264,7 +300,7 @@ class GroundingDino:
             # O Grounding DINO costuma propor uma caixa para a esteira inteira
             if caixa[2] > caixa[0] and caixa[3] > caixa[1] and area <= self.area_maxima:
                 deteccoes.append((classe, conf, caixa))
-        return nms(deteccoes, self.limiar_iou)
+        return sem_contidas(nms(deteccoes, self.limiar_iou), self.contencao)
 
     def anotar(self, imagem):
         """Devolve [(classe, confianca, (x1, y1, x2, y2) normalizada)] após o NMS."""
@@ -329,7 +365,7 @@ def salvar_imagem(origem, imagem, girada, destino):
         shutil.copy2(origem, destino)
 
 
-def desenhar_previa(imagem, deteccoes, classes, destino):
+def desenhar_previa(imagem, deteccoes, classes, destino, confianca_classe=0.0):
     previa = imagem.copy()
     desenho = ImageDraw.Draw(previa)
     largura, altura = previa.size
@@ -338,7 +374,8 @@ def desenhar_previa(imagem, deteccoes, classes, destino):
     for classe, conf, (x1, y1, x2, y2) in deteccoes:
         caixa = (x1 * largura, y1 * altura, x2 * largura, y2 * altura)
         desenho.rectangle(caixa, outline=(34, 197, 94), width=espessura)
-        rotulo = f"{classes[classe]['nome']} {conf:.2f}"
+        nome = classes[classe]["nome"] if conf >= confianca_classe else "sem classe"
+        rotulo = f"{nome} {conf:.2f}"
         fundo = desenho.textbbox((caixa[0], caixa[1]), rotulo, font=fonte, anchor="lb")
         desenho.rectangle(fundo, fill=(34, 197, 94))
         desenho.text((caixa[0], caixa[1]), rotulo, fill=(0, 0, 0), font=fonte, anchor="lb")
@@ -358,6 +395,10 @@ def main(argv=None):
     parser.add_argument("--dispositivo", help="cuda ou cpu (padrão: cuda se houver)")
     parser.add_argument("--previa", action="store_true",
                         help="grava também previa/<anotador>/<nome>.jpg com as caixas desenhadas")
+    parser.add_argument("--confianca-classe", type=float, default=CONFIANCA_CLASSE_PADRAO,
+                        help="caixas com confiança abaixo dessa são propostas sem classe, e o "
+                             "revisor tem de dá-la; 0 desliga "
+                             f"(padrão: {CONFIANCA_CLASSE_PADRAO})")
     parser.add_argument("--sobrescrever", action="store_true",
                         help="anota de novo imagens que já têm proposta deste anotador")
     parser.add_argument("--aceitar", action="store_true",
@@ -404,23 +445,30 @@ def main(argv=None):
 
         salvar_imagem(caminho, imagem, girada, args.saida / "images" / caminho.name)
         formato.gravar_proposta(args.saida, formato.montar_proposta(
-            anotador.nome, anotador.versao, anotador.parametros, classes, caminho.name,
-            imagem.size, deteccoes))
+            anotador.nome, anotador.versao,
+            dict(anotador.parametros, confianca_classe=args.confianca_classe), classes,
+            caminho.name, imagem.size, deteccoes, args.confianca_classe))
         # Grava o estado a cada imagem: interrompido, o que já foi feito vale
         formato.registrar_imagem(linhas, caminho.name)
         formato.gravar_estado(args.saida, colunas, linhas)
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
-                            args.saida / "previa" / args.anotador / f"{caminho.stem}.jpg")
+                            args.saida / "previa" / args.anotador / f"{caminho.stem}.jpg",
+                            args.confianca_classe)
 
-        resumo = ", ".join(f"{classes[c]['nome']} {conf:.2f}" for c, conf, _ in deteccoes)
+        resumo = ", ".join(
+            f"{classes[c]['nome'] if conf >= args.confianca_classe else 'sem classe'} {conf:.2f}"
+            for c, conf, _ in deteccoes)
         print(f"{caminho.name}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
 
     if args.aceitar:
         escolhidas = {c.name for c in args.imagens} if args.imagens else None
-        aceitas = formato.aceitar(args.saida, args.anotador, escolhidas)
+        aceitas, sem_classe = formato.aceitar(args.saida, args.anotador, escolhidas)
         print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.anotador} copiadas "
               "para labels/")
+        if sem_classe:
+            print(f"{len(sem_classe)} imagem(ns) continuam pendentes, com caixa sem classe "
+                  f"(revise-as na página): {', '.join(sem_classe)}")
 
     pagina = gerar_pagina(args.saida)
     print(f"Anotações em {args.saida.resolve()}")

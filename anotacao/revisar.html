@@ -163,6 +163,9 @@ let edicao = null;    // {base, caixas: [{id, caixa, proposta, tocada}], sel, su
 let pedido = 0;       // descarta respostas de pedidos já superados
 let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
 const nomeClasse = id => classes.find(c => c.id === id)?.nome;
+// Rótulo de uma caixa sem id: proposta sem classe (nome null) ou classe fora do data.yaml
+const semId = nome => nome == null ? "sem classe" : `${nome} (fora do data.yaml)`;
+const AVISO_SEM_ID = "Há caixa sem classe ou com classe fora do data.yaml: dê a classe ou remova.";
 
 async function api(rota, opcoes) {
   const resposta = await fetch(rota, opcoes);
@@ -314,8 +317,8 @@ function desenhar() {
 
   const { tipo, caixas } = camada(im);
   for (const { id, nome, conf, caixa } of caixas ?? [])
-    quadro.append(caixaDiv(id, conf === null ? nome : `${nome} ${conf.toFixed(2)}`, caixa,
-                           conf !== null));
+    quadro.append(caixaDiv(id, `${id === null ? semId(nome) : nome}`
+                             + (conf === null ? "" : ` ${conf.toFixed(2)}`), caixa, conf !== null));
   atualizarVisibilidade();
 
   legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
@@ -329,7 +332,7 @@ function desenhar() {
     const item = document.createElement("span");
     const amostra = document.createElement("i");
     amostra.style.background = cor(id === "null" ? null : Number(id));
-    item.append(amostra, `${nome}${id === "null" ? " (fora do data.yaml)" : ""}: ${n}`);
+    item.append(amostra, `${id === "null" ? semId(nome === "null" ? null : nome) : nome}: ${n}`);
     legenda.append(item);
   }
   if (caixas === null) legenda.append(tipo === "final"
@@ -352,7 +355,7 @@ function desenharEdicao() {
   for (const k of ordem) {
     const c = edicao.caixas[k];
     const conf = c.proposta === null ? null : propostas[c.proposta].conf;
-    const nome = nomeClasse(c.id) ?? `${propostas[c.proposta]?.nome} (fora do data.yaml)`;
+    const nome = nomeClasse(c.id) ?? semId(propostas[c.proposta]?.nome);
     const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
                          c.caixa, !c.tocada);
     div.classList.toggle("selecionada", edicao.sel === k);
@@ -371,7 +374,7 @@ function desenharEdicao() {
     : "Sem propostas: salve para marcar como fundo (sem objetos) ou descarte.");
   if (edicao.caixas.some(c => c.id === null))
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
-      textContent: " Há caixa com classe fora do data.yaml: troque a classe ou remova." }));
+      textContent: " " + AVISO_SEM_ID }));
   $("remover").disabled = edicao.sel === null;
   const campo = $("busca");
   campo.disabled = edicao.sel === null;
@@ -576,7 +579,7 @@ function resumoSalvar() {
 async function enviar(acao, pedirConfirmacao = false) {
   if (!editando() || $("confirmar").open) return;
   if (acao === "salvar" && edicao.caixas.some(c => c.id === null))
-    return alert("Há caixa com classe fora do data.yaml: troque a classe ou remova.");
+    return alert(AVISO_SEM_ID);
   if (acao === "descartar" && !await confirmar(
       `Descartar ${detalhe.nome}?\nEla não vai para o treino.`, "Descartar", true)) return;
   if (acao === "salvar" && pedirConfirmacao && !await confirmar(resumoSalvar(), "Salvar e próxima"))

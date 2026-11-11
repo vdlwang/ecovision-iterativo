@@ -69,6 +69,27 @@ def test_nms_suprime_sobreposta_de_qualquer_classe():
     assert anotar.nms([b, c, a], 0.5) == [a, c]
 
 
+def test_contida():
+    assert anotar.contida((0.2, 0.2, 0.4, 0.4), (0, 0, 1, 1)) == 1
+    assert anotar.contida((0, 0, 1, 1), (0.2, 0.2, 0.4, 0.4)) == pytest.approx(0.04)
+    assert anotar.contida((0.5, 0, 1.5, 1), (0, 0, 1, 1)) == pytest.approx(0.5)
+    assert anotar.contida((0.3, 0.3, 0.3, 0.5), (0, 0, 1, 1)) == 0  # sem área
+
+
+def test_sem_contidas_remove_a_interna_menos_confiante():
+    lata = (0, 0.37, (0.3, 0.3, 0.5, 0.5))
+    topo_fraco = (1, 0.33, (0.32, 0.32, 0.45, 0.45))   # dentro da lata, menos confiante: sai
+    topo_forte = (1, 0.38, (0.31, 0.31, 0.46, 0.46))   # dentro da lata, mais confiante: fica
+    envolvente = (2, 0.22, (0.25, 0.25, 0.6, 0.6))     # envolve mais confiantes: fica
+    longe = (0, 0.2, (0.7, 0.7, 0.8, 0.8))
+    meio_dentro = (0, 0.1, (0.55, 0.3, 0.65, 0.4))     # metade dentro da envolvente: fica
+    deteccoes = [lata, topo_fraco, topo_forte, envolvente, longe, meio_dentro]
+    assert anotar.sem_contidas(deteccoes, 0.9) == [lata, topo_forte, envolvente, longe,
+                                                   meio_dentro]
+    assert anotar.sem_contidas(deteccoes, 0.45) == [lata, topo_forte, envolvente, longe]
+    assert anotar.sem_contidas(deteccoes, 1.01) == deteccoes  # desligado
+
+
 def test_linha_yolo():
     assert anotar.linha_yolo(3, (0.2, 0.4, 0.6, 0.5)) == "3 0.400000 0.450000 0.400000 0.100000"
 
@@ -232,6 +253,18 @@ def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
         assert (saida / "labels" / f"{stem}.txt").read_text() == esperado
     assert (saida / "imagens.csv").read_text() == "nome,status\na.jpg,revisada\nb.png,revisada\n"
     assert (saida / "revisadas.txt").read_text() == "./images/a.jpg\n./images/b.png\n"
+
+
+def test_main_confianca_classe(ambiente):
+    fotos, saida, base = ambiente
+    anotar.main(fotos[:1] + base + ["--confianca-classe", "0.5", "--previa"])
+    proposta = json.loads((saida / "propostas" / "falso" / "a.json").read_text())
+    # Garrafa (0.42) fica sem classe; Lata (0.91) mantém
+    assert [c["classe"] for c in proposta["caixas"]] == ["Lata", None]
+    assert proposta["caixas"][1]["sugerida"] == "Garrafa"
+    assert proposta["parametros"]["confianca_classe"] == 0.5
+    anotar.main(base + ["--aceitar"])  # a.jpg tem caixa sem classe: continua pendente
+    assert (saida / "imagens.csv").read_text() == "nome,status\na.jpg,pendente\n"
 
 
 def test_main_sem_imagens_nem_aceitar(ambiente):
