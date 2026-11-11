@@ -142,9 +142,32 @@ Os rótulos passaram a usar as 60 classes TACO e `Background` (`nomes` no `class
 
 ### Ajustes futuros da avaliação (2026-11-10)
 
-- **Cobertura sem classe no limiar.** O "não localizadas" do `avaliar.py` olha as consultas brutas do modelo, antes do limiar, e deu 100%; o recall da detecção exige a classe certa. Nenhum dos dois diz se todo objeto recebe caixa na proposta. Falta, por limiar: a fração dos objetos verdadeiros com alguma caixa (IoU ≥ 0,5, qualquer classe) e a fração das imagens completas (nenhum objeto sem caixa), a que importa para o treino (seção 2).
-- **Limiar da anotação pela cobertura.** Em `legado/images/20250323_184428.jpg` saiu nenhuma caixa: as latas e tampas pontuam 0,33–0,35, logo abaixo do limiar de 0,35 (com 0,30 saem 4 caixas, com 0,20 saem 10). Na revisão, remover caixa custa uma tecla e desenhar ainda não existe (fase 4 do T1), então o limiar da anotação deve ser mais baixo que o de precisão máxima. Escolher pela métrica acima. Até a fase 4, imagem com objeto sem caixa é descartada, não salva.
+- **Cobertura sem classe no limiar.** O "não localizadas" do `avaliar.py` olha as consultas brutas do modelo, antes do limiar, e deu 100%; o recall da detecção exige a classe certa. Nenhum dos dois diz se todo objeto recebe caixa na proposta. Falta, por limiar: a fração dos objetos verdadeiros com alguma caixa (IoU ≥ 0,5, qualquer classe) e a fração das imagens completas (nenhum objeto sem caixa), a que importa para o treino (seção 2). Medida avulsa feita (abaixo); falta levá-la ao `avaliar.py`.
+- ~~**Limiar da anotação pela cobertura**~~: feito (abaixo), padrão do `anotar.py` em 0,20. Em `legado/images/20250323_184428.jpg` saiu nenhuma caixa: as latas e tampas pontuam 0,33–0,35, logo abaixo do limiar de 0,35 (com 0,30 saem 4 caixas, com 0,20 saem 10). Até a fase 4 do T1, imagem com objeto sem caixa é descartada, não salva.
 - **`taco_to_material` do backend** não tem `Carded blister pack` (cai em `other`).
+
+### Cobertura sem classe e limiar da anotação (2026-11-11)
+
+Grounding DINO `tiny`, mesmas 88 fotos e 375 caixas (8 classes, rótulos corrigidos), com os filtros e o NMS do `anotar.py`. Script avulso, ainda fora do `avaliar.py`. Uma caixa verdadeira está **coberta** se alguma proposta tem IoU ≥ 0,5 com ela, qualquer que seja a classe; a imagem está **completa** se todas as suas caixas estão cobertas.
+
+**Posição.** Entre as 900 consultas brutas, a melhor caixa de cada objeto tem IoU ≥ 0,75 em 98% dos casos e ≥ 0,9 em 68% (mediana 0,93). Quando o modelo acha o objeto, a caixa é boa. O que tira o objeto da proposta é a confiança: a maior entre as consultas com IoU ≥ 0,5 tem mediana 0,39, e um quarto dos objetos fica abaixo de 0,34 (p10 0,24; p5 0,16).
+
+| Limiar | Cobertos | Cobertos com IoU ≥ 0,75 | Imagens completas | Caixas por imagem | Sobra por imagem |
+|---|---|---|---|---|---|
+| 0,05 | 99% | 94% | 98% | 58,3 | 54,1 |
+| 0,10 | 98% | 93% | 93% | 19,4 | 15,2 |
+| 0,15 | 95% | 90% | 84% | 11,2 | 7,1 |
+| **0,20** | **92%** | **87%** | **73%** | **7,8** | **3,9** |
+| 0,25 | 89% | 84% | 66% | 5,8 | 2,0 |
+| 0,30 | 82% | 78% | 56% | 4,6 | 1,1 |
+| 0,35 (antigo padrão) | 72% | 69% | 41% | 3,7 | 0,6 |
+
+As fotos têm em média 4,3 objetos. "Sobra" são as propostas que não cobrem nenhum objeto rotulado, e remover cada uma custa uma tecla. Em todo limiar, as caixas que cobrem um objeto têm IoU mediano de 0,92, e a classe delas acerta ~57%: baixar o limiar não piora a classe das caixas que acham objeto.
+
+- **Decisão**: padrão do `anotar.py` em 0,20 (era 0,35). Com 0,35, 59% das imagens ficavam com objeto sem caixa, que até a fase 4 só podiam ser descartadas. Com 0,20, 73% chegam completas, ao custo de ~4 caixas a remover por imagem. 0,15 (84% completas, ~7 a remover) fica como alternativa se a fase 4 trouxer remoção em lote.
+- **Para a fase 4 do T1**: desenhar do zero fica raro (5–8% dos objetos em 0,15–0,20); remover vira a ação mais comum (vale um atalho para remover as caixas de confiança baixa, ou mostrá-las com outro estilo); ajustar continua necessário (~um terço dos objetos abaixo de IoU 0,9).
+- **Ressalvas**: parte da sobra pode ser objeto real de classe que a equipe não rotulou, ou pedaço de objeto (não separado); fotos de celular, com as mesmas cenas nas quatro validações; os rótulos da equipe são polígonos de 4 pontos convertidos em caixa. Refazer com quadros da esteira (T4).
+- **Não muda**: as medidas anteriores de precisão e recall continuam em 0,35, o limiar em que foram medidas. O `avaliar.py` usa o `CONFIANCA_PADRAO` só para decidir a classe de reserva, que nenhuma classe usa hoje.
 
 ### Plano: SigLIP como classificador no `avaliar.py`
 
@@ -193,7 +216,7 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); faltam a cobertura sem classe no `avaliar.py` e o limiar da anotação escolhido por ela, vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); faltam levar a cobertura ao `avaliar.py`, vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
 | T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
 | T5 | [ ] | **Entrada por lote**: importa um lote para `imagens.csv` com `lote` e o sorteio treino/teste (1 lote em 5) | T1, T4 | pytest |

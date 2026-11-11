@@ -35,7 +35,7 @@ Opções do `grounding-dino`:
 | Opção | Padrão | |
 |---|---|---|
 | `--modelo` | `IDEA-Research/grounding-dino-tiny` | Também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento |
-| `--confianca` | `0.35` | Confiança mínima por caixa |
+| `--confianca` | `0.2` | Confiança mínima por caixa. Baixa de propósito: cobre 92% dos objetos e sobram ~4 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
 
@@ -64,7 +64,7 @@ Cada proposta é um JSON:
 
 ```json
 {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny",
- "parametros": {"confianca": 0.35, "iou": 0.5, "area_maxima": 0.5},
+ "parametros": {"confianca": 0.2, "iou": 0.5, "area_maxima": 0.5},
  "classes": "<hash da lista de classes>", "imagem": "foto.jpg", "largura": 4032, "altura": 3024,
  "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]}]}
 ```

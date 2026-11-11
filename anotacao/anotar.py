@@ -33,7 +33,7 @@ from visualizar import gerar_pagina
 
 DIR_SCRIPT = Path(__file__).resolve().parent
 MODELO_PADRAO = "IDEA-Research/grounding-dino-tiny"
-CONFIANCA_PADRAO = 0.35
+CONFIANCA_PADRAO = 0.20  # pela cobertura sem classe (OBJETIVO.md, 2026-11-11)
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
