@@ -61,13 +61,13 @@ O RNF08 pede revisão mais rápida que anotação manual: o fluxo comum deve cab
 | Ação | Mouse | Teclado |
 |---|---|---|
 | Selecionar caixa | clique | `Tab` |
-| Trocar a classe | clique na caixa abre a busca por nome (feito, 2026-11-10) | `/` e escrever; `1`–`9` para as classes do anotador |
+| Trocar a classe | clique na caixa abre a busca por nome (feito, 2026-11-10) | com a caixa selecionada, escrever o nome; `1`–`9` para as classes do anotador |
 | Remover caixa | botão | `Del` |
 | Desenhar caixa nova | arrastar numa área vazia | `N` e depois arrastar |
 | Ajustar ou mover caixa | alças nos cantos | — |
 | Desfazer | — | `Ctrl+Z` |
-| Salvar e ir para a próxima | botão | `Enter` |
-| Descartar a imagem (inútil para treino) | botão | `D` |
+| Salvar e ir para a próxima | botão | `Enter`, com janela de confirmação; `Ctrl+S` direto (2026-11-10) |
+| Descartar a imagem (inútil para treino) | botão | `D` sem caixa selecionada, com confirmação |
 
 Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revisor, fica contínua. A fila mostra só as `pendente` por padrão, com filtro por status e ordem por confiança, para começar pelas incertas (RF10). Com mais de um anotador, a página mostra as propostas de um por vez (seletor) ou todas, coloridas por anotador; a vista de concordância do voto é a tarefa T7 do `OBJETIVO.md`. Uma imagem `revisada` pode ser reaberta e editada de novo.
 
