@@ -144,7 +144,8 @@
       <span class="dica">Selecione uma caixa (clique ou <kbd>Tab</kbd>) e escreva a classe;
         <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
         confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
-        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.</span>
+        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.
+        <kbd>Ctrl+Z</kbd> desfaz; <kbd>Ctrl+Shift+Z</kbd>, refaz.</span>
     </div>
   </div>
 </main>
@@ -167,8 +168,9 @@ let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
-// {base, caixas: [{id, caixa, proposta, tocada, origem}], sel, sujo, novo} se editável;
-// novo: modo "nova caixa", {ponto, lista de candidatas no ponto, i} ou null
+// {base, caixas: [{id, caixa, proposta, tocada, origem}], sel, sujo, novo, desfazer,
+// refazer} se editável; novo: modo "nova caixa", {ponto, lista de candidatas no
+// ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel} desta imagem
 let edicao = null;
 let pedido = 0;       // descarta respostas de pedidos já superados
 let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
@@ -268,7 +270,7 @@ async function mostrar(i) {
       // Base da edição: o primeiro anotador (em ordem alfabética) com proposta;
       // o seletor de anotador é a fase 5
       const base = Object.keys(dados.propostas).sort()[0] ?? null;
-      edicao = { base, sel: null, sujo: false, novo: null,
+      edicao = { base, sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
         caixas: (base ? dados.propostas[base] : []).map((c, k) =>
           ({ id: c.id, caixa: c.caixa, proposta: k, tocada: false })) };
       tempo.ativo = 0;
@@ -486,10 +488,10 @@ function trocarCandidata(passo) {
 function confirmarNova() {
   const c = edicao.novo?.lista?.[edicao.novo.i];
   if (!c) return;
+  guardar();
   edicao.caixas.push({ id: null, caixa: c.caixa, proposta: null, tocada: true, origem: "candidata" });
   edicao.sel = edicao.caixas.length - 1;
   edicao.novo = null;
-  edicao.sujo = true;
   desenhar();
   abrirBusca();
 }
@@ -510,7 +512,7 @@ function textoNova() {
 function trocarClasse(id) {
   if (!editando() || edicao.sel === null) return;
   const c = edicao.caixas[edicao.sel];
-  if (c.id !== id) { c.id = id; c.tocada = true; edicao.sujo = true; }
+  if (c.id !== id) { guardar(); c.id = id; c.tocada = true; }
   recentes = [id, ...recentes.filter(r => r !== id)].slice(0, 20);
   desenhar();
 }
@@ -642,9 +644,35 @@ function escolherOpcao(k) {
 
 function remover() {
   if (!editando() || edicao.sel === null) return;
+  guardar();
   edicao.caixas.splice(edicao.sel, 1);
   edicao.sel = edicao.caixas.length ? Math.min(edicao.sel, edicao.caixas.length - 1) : null;
+  desenhar();
+}
+
+// --- desfazer ----------------------------------------------------------------
+// Toda alteração das caixas chama guardar() antes: o estado anterior vai para a
+// pilha de desfazer, e a de refazer se esvazia. As pilhas são da imagem atual.
+
+function guardar() {
+  edicao.desfazer.push({ caixas: structuredClone(edicao.caixas), sel: edicao.sel });
+  edicao.refazer = [];
   edicao.sujo = true;
+}
+
+// passo -1: desfaz; +1: refaz
+function voltar(passo) {
+  if (!editando()) return;
+  const [de, para] = passo < 0 ? ["desfazer", "refazer"] : ["refazer", "desfazer"];
+  const estado = edicao[de].pop();
+  if (!estado) return;
+  edicao[para].push({ caixas: edicao.caixas, sel: edicao.sel });
+  edicao.caixas = estado.caixas;
+  edicao.sel = estado.sel !== null && estado.sel < edicao.caixas.length ? estado.sel : null;
+  edicao.novo = null;
+  // Sem nada a desfazer, as caixas são as propostas como chegaram
+  edicao.sujo = edicao.desfazer.length > 0;
+  fecharBusca();
   desenhar();
 }
 
@@ -759,6 +787,17 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
     if (editando() && !$("confirmar").open) { fecharBusca(); enviar("salvar"); }
   }
+});
+
+// Ctrl+Z desfaz; Ctrl+Shift+Z e Ctrl+Y refazem (Cmd no Mac). Na busca com texto,
+// ficam com o campo, como em qualquer caixa de texto.
+document.addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || $("confirmar").open) return;
+  const tecla = e.key.toLowerCase();
+  if (tecla !== "z" && tecla !== "y") return;
+  if (e.target === $("busca") && $("busca").value) return;
+  e.preventDefault();
+  voltar(tecla === "y" || e.shiftKey ? 1 : -1);
 });
 
 document.addEventListener("keydown", e => {

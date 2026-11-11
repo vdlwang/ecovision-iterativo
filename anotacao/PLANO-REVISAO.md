@@ -68,7 +68,7 @@ O RNF08 pede revisão mais rápida que anotação manual: o fluxo comum deve cab
 | Caixa nova por clique (feito, 2026-11-11) | clique no objeto: a candidata mais confiante que contém o ponto | `N`, clique; `Tab` ou a roda trocam a candidata; `Enter` confirma |
 | Desenhar caixa nova | arrastar numa área vazia | `N` e depois arrastar |
 | Ajustar ou mover caixa | alças nos cantos | — |
-| Desfazer | — | `Ctrl+Z` |
+| Desfazer | — | `Ctrl+Z`; refazer com `Ctrl+Shift+Z` ou `Ctrl+Y` (feito, 2026-11-11) |
 | Salvar e ir para a próxima | botão | `Enter`, com janela de confirmação; `Ctrl+S` direto (2026-11-10) |
 | Descartar a imagem (inútil para treino) | botão | `D` sem caixa selecionada, com confirmação |
 
@@ -173,7 +173,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
 | 3b | [ ] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
-| 4 | [~] | Caixa por clique sobre as candidatas do anotador (feito, 2026-11-11; medição no `OBJETIVO.md`); falta desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta), `caixa_ajustada` e desfazer | pytest da API; teste no Chrome headless pelo protocolo de depuração |
+| 4 | [~] | Caixa por clique sobre as candidatas do anotador e desfazer/refazer (feitos, 2026-11-11; medição no `OBJETIVO.md`). Adiados pela decisão 12: desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta) e `caixa_ajustada` | pytest da API; teste no Chrome headless pelo protocolo de depuração |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 
 ## Decisões
@@ -186,6 +186,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 9 | ~~Uma página ou duas?~~ | **Decidido (2026-11-09)**: duas. `visualizar.py` continua gerando a página estática (`file://`, serve no Colab); `revisar.html` é servida pelo `revisar.py` e vira o editor. Aceita-se algum HTML repetido. |
 | 10 | ~~Acesso de outro computador (RNF05)?~~ | **Decidido (2026-11-09)**: por enquanto só `127.0.0.1`; uma opção `--host` quando for preciso. |
 | 11 | ~~Onde guardar o estado da anotação?~~ | **Decidido (2026-11-11)**: SQLite (`anotacoes.sqlite`, biblioteca padrão) para imagens, propostas e revisões; imagens e rótulos YOLO continuam como arquivos (seção 6). PostgreSQL só com vários revisores em máquinas diferentes (decisão 3); FiftyOne serve para explorar, não substitui a página (decisão 1); DVC, para versionar as bases de treino e teste, entra com o T6/T12 e complementa o banco. |
+| 12 | ~~Desenhar caixas à mão agora?~~ | **Decidido (2026-11-11)**: não. Objeto que nenhuma candidata cobre leva ao descarte da imagem. Medir nos registros de revisão a fração de imagens descartadas (`acao: descartar`); se for alta, o desenho à mão volta. |
 
 As decisões 4 a 7 (voto, teste sem classe, mesma classe no voto, sorteio por lote) e a 8 (vidro) são do sistema completo e estão no `OBJETIVO.md`.
 

@@ -121,6 +121,7 @@ Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas pro
 | Trocar para uma classe do anotador | — | `1`–`9`, na ordem de `classes` no `classes.yaml` |
 | Remover caixa | "Remover caixa" | `Del` |
 | Desfazer a seleção | clique fora das caixas | `Esc` |
+| Desfazer e refazer | — | `Ctrl+Z`; `Ctrl+Shift+Z` ou `Ctrl+Y` (`Cmd` no Mac). Valem para trocar classe, remover e adicionar caixa, na imagem atual; na busca com texto, ficam com o campo |
 | Nova caixa por clique | "Nova caixa" e um clique no objeto | `N` (sem caixa selecionada), clique no objeto, `Tab`/`Shift+Tab` ou a roda do mouse trocam a candidata, `Enter` confirma, `Esc` cancela |
 | Salvar e ir para a próxima | "Salvar e próxima" | `Enter`, que pede confirmação (`Enter` confirma, `Esc` cancela); `Ctrl+S` (`Cmd+S` no Mac) salva direto, também com a busca aberta |
 | Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` sem caixa selecionada (com uma selecionada, o `d` vai para a busca); sempre pede confirmação |
@@ -135,7 +136,7 @@ Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem cai
 
 **Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as gravadas pelo `anotar.py` (`--candidatas`); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto. Propostas gravadas antes das candidatas não têm nenhuma: anote de novo.
 
-Ainda não dá para desenhar à mão, mover ou redimensionar caixas (fase 4), nem reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
+Desfazer tudo volta às propostas como chegaram, e a imagem deixa de contar como alterada. Ainda não dá para desenhar à mão, mover ou redimensionar caixas: um objeto que nenhuma candidata cobre leva ao descarte da imagem (decisão 12 do `PLANO-REVISAO.md`). Também não dá para reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
 
 Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for revisada de novo:
 
