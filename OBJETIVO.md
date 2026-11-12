@@ -277,7 +277,7 @@ A importação é simples, por decisão (2026-11-11): sem hash, sem análise de 
 
 Fora da importação, de propósito:
 - **Normalizar cor ou brilho**: afastaria a base de treino dos quadros que o YOLO vê na operação, crus. Variação de cor e brilho é aumento de dados no treino (o Ultralytics já faz), não mudança na base.
-- **Recortar a esteira**: a imagem gravada mantém o quadro inteiro, porque é o que a câmera vê na operação. O que está fora da esteira (o papel no fundo branco, seção 5) se resolve com uma **região de interesse** do lote, guardada como metadado: os anotadores descartam as caixas fora dela, e a imagem não muda.
+- **Recortar a esteira**: a imagem gravada mantém o quadro inteiro, porque é o que a câmera vê na operação. O que está fora da esteira (o papel no fundo branco, seção 5) se resolve com uma **região de interesse** do lote, guardada como metadado: os anotadores descartam as caixas **com o centro fora dela**, e a imagem não muda. A regra é o centro, e não a caixa inteira dentro, para não descartar objeto real na borda da esteira: o YOLO aprenderia esse objeto como fundo. Fora da esteira é fundo fixo (a mesa), então quase toda caixa lá é erro do anotador. A página de revisão desenha a região, para o revisor ver por que uma caixa não aparece.
 
 ### Anotadores configuráveis
 
@@ -330,6 +330,13 @@ Anotado em 2026-11-10, para o T4:
 - **Hoje nada está fixado.** O backend passa só o índice da câmera ao Ultralytics: a resolução é a padrão do driver (em webcam USB, em geral 640×480), e o YOLO reduz cada quadro a 640 no lado maior (`imgsz` padrão; o `best.pt` treinou com `imgsz: 640`). Não foi conferido com a câmera da esteira.
 - **O banco não é da esteira.** As fotos de `legado/database` são de celular (4080×3060, ~9,5 MB cada), e as de `legado/images` são recortes de foto de celular (de ~1650×3200 a 4624×2316). O YOLO as reduz a 640 de qualquer jeito, então o que pesa é a origem: nitidez, ruído, compressão, cor, iluminação, ângulo e distância diferem dos quadros da webcam. O mAP do `best.pt` mede fotos de celular, não a operação.
 - **Para o T4**: gravar os quadros como o backend os recebe, na resolução nativa da câmera, sem reduzir (permite testar um `imgsz` maior depois); pôr a largura e a altura da câmera e o `imgsz` no `config.json`, explícitos; registrá-los no log de cada lote.
+- **Captura (anotado em 2026-11-11, com a pipeline da seção 6)**:
+  - **Quando gravar**: não todo quadro. Quadros seguidos são quase iguais, e cada um a mais custa anotação e revisão sem trazer informação. Por exemplo: gravar quando o YOLO detecta algo na região de interesse, e no máximo um quadro a cada N segundos. Como a importação não analisa conteúdo (seção 6), a redundância se controla aqui.
+  - **Resolução**: a maior que a webcam sustenta a uma taxa de quadros aceitável (em geral 1280×720 ou 1920×1080, ~150–400 KB por quadro em JPEG). A importação não recupera resolução que a captura não gravou; o YOLO a 640 não perde, e os anotadores (Grounding DINO até 1333, OWLv2 960) ganham nos objetos pequenos.
+  - **Qualidade**: o quadro cru, em JPEG de qualidade alta (95), separado do quadro comprimido que o backend envia pelo WebSocket.
+  - **Exposição e balanço de branco fixos** na webcam (sem o automático): estabiliza a imagem na fonte, para o treino e para a operação ao mesmo tempo. É a normalização que vale; normalizar a base depois afastaria o treino da operação (seção 6).
+  - **Duas regiões, com nomes diferentes**: a de interesse da anotação (a esteira visível inteira, seção 6) e a faixa de acionamento do backend (`roi_y_min`/`roi_y_max`, quando o servo atua). Ambas podem ficar na configuração da câmera.
+- **Validação com a webcam**: os limiares escolhidos nas fotos de celular (0,20, 0,35, 0,05, contenção 0,9) e a escolha do trio têm de ser refeitos com quadros da esteira; a base de teste revisada (T9) passa a cumprir esse papel.
 - **Fotos de celular** continuam servindo para comparar anotadores no `avaliar.py`; para treino e teste do YOLO, dão lugar aos quadros da esteira. Quando houver quadros, refazer a linha de base dos anotadores com eles: o Grounding DINO viu fotos de 12 MP, reduzidas a até 1333 no lado maior.
 
 ## Decisões do sistema

@@ -1,10 +1,11 @@
 """
 Formato do diretório de saída da anotação (PLANO-REVISAO.md, seção 1).
 
-    <saida>/images/<nome>.jpg
+    <saida>/images/<nome>.jpg                  gravada pelo importar.py
+    <saida>/lotes.yaml                         por lote: conjunto, região de interesse
     <saida>/propostas/<anotador>/<nome>.json   saída de cada anotador
     <saida>/labels/<nome>.txt                  caixas finais (YOLO), só após a revisão
-    <saida>/imagens.csv                        nome, status de cada imagem
+    <saida>/imagens.csv                        nome, status, lote, conjunto de cada imagem
     <saida>/revisadas.txt                      gerado de imagens.csv; o data.yaml aponta para ele
     <saida>/data.yaml
 
@@ -116,6 +117,28 @@ def registrar_imagem(linhas, nome):
             raise ValueError(f"'{nome}' colide com '{existente}', já registrada "
                              "(mesmo nome sem extensão)")
     linhas[nome] = {"nome": nome, "status": "pendente"}
+
+
+def ler_lotes(saida):
+    """lotes.yaml (do importar.py) -> {lote: {conjunto, regiao, importado_em}}; {} se não existe."""
+    caminho = Path(saida) / "lotes.yaml"
+    if not caminho.exists():
+        return {}
+    with open(caminho, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def gravar_lotes(saida, lotes):
+    gravar_atomico(Path(saida) / "lotes.yaml",
+                   yaml.safe_dump(lotes, allow_unicode=True, sort_keys=True))
+
+
+def dentro_da_regiao(caixa, regiao):
+    """Se o centro da caixa (normalizada) cai na região [x1, y1, x2, y2]; sem região, sim."""
+    if regiao is None:
+        return True
+    cx, cy = (caixa[0] + caixa[2]) / 2, (caixa[1] + caixa[3]) / 2
+    return regiao[0] <= cx <= regiao[2] and regiao[1] <= cy <= regiao[3]
 
 
 # --- propostas ------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Anotação assistida
 
-Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `anotar.py` propõe caixas para uma ou mais imagens com o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny), um detector de vocabulário aberto. Ele não depende do detector em operação (`best.pt`), então não herda os erros dele. As caixas são **propostas** para um revisor humano: ficam em `propostas/`, à parte dos rótulos finais em `labels/`.
+Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `importar.py` grava as imagens de um lote num armazenamento comum, e `anotar.py` propõe caixas para elas com o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny), um detector de vocabulário aberto. Ele não depende do detector em operação (`best.pt`), então não herda os erros dele. As caixas são **propostas** para um revisor humano: ficam em `propostas/`, à parte dos rótulos finais em `labels/`.
 
 ## Instalação
 
@@ -15,20 +15,43 @@ No Linux, o torch do PyPI já vem com CUDA; no Windows, ele é só para CPU, e p
 ## Uso
 
 ```bash
-python anotacao/anotar.py foto.jpg                       # saída em ./anotacoes
-python anotacao/anotar.py fotos/*.jpg -o anotacoes --previa
+python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a   # copia para anotacoes/images
+python anotacao/anotar.py -o anotacoes --previa          # anota as pendentes ainda sem proposta
+python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
 python anotacao/anotar.py -o anotacoes --aceitar         # propostas viram rótulos, sem revisão
 ```
+
+### Importar
+
+O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra em `imagens.csv` como `pendente`, com o lote e o conjunto. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
+
+- **A imagem muda o mínimo**: é copiada byte a byte, a não ser que o EXIF a gire (fotos de celular; ela é gravada já girada, e as caixas valem para ela) ou que passe de `--lado-maximo`. Sem normalizar cor nem recortar: a base de treino tem de parecer com o que a câmera vê na operação.
+- **Conjunto por lote**: o lote inteiro vai para `treino` ou `teste` (frames seguidos são quase iguais). O sorteio é pelo hash do nome do lote, cerca de 1 em cada 5 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força. Depois de gravado em `lotes.yaml`, não muda.
+- **Região de interesse** (`--regiao X1 Y1 X2 Y2`, de 0 a 1): os anotadores descartam caixas com o **centro** fora dela (a mesa em volta da esteira). A imagem continua inteira.
 
 | Opção | Padrão | |
 |---|---|---|
 | `-o`, `--saida` | `anotacoes` | Diretório de saída |
+| `--lote` | obrigatório | Nome do lote de captura: letras, dígitos, `.` e `-` (o `_` separa o lote do nome da imagem) |
+| `--conjunto` | sorteio | `treino` ou `teste` |
+| `--regiao` | — | Região de interesse do lote, normalizada |
+| `--lado-maximo` | — | Reduz imagens com o lado maior acima disso (só para fotos grandes de outra origem; a da esteira fica na resolução nativa) |
+| `--link` | — | Link (hardlink, ou simbólico se não der) em vez de cópia, quando a imagem não precisa ser regravada |
+| `--classes` | `anotacao/classes.yaml` | Lista de classes, para o `data.yaml` |
+
+### Anotar
+
+O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de comando, as que ainda não têm proposta do anotador (todas as pendentes com `--sobrescrever`). Imagens revisadas ou descartadas nunca são anotadas de novo, porque o registro da revisão cita a proposta que o revisor viu.
+
+| Opção | Padrão | |
+|---|---|---|
+| `-o`, `--saida` | `anotacoes` | Diretório de saída, já com imagens importadas |
 | `--anotador` | `grounding-dino` | Qual anotador propõe as caixas (por enquanto, só esse) |
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
 | `--confianca-classe` | `0.35` | Caixas com confiança abaixo dessa são propostas **sem classe**: o revisor tem de dar a classe ou remover a caixa. `0` desliga |
-| `--sobrescrever` | — | Anota de novo imagens que já têm proposta deste anotador |
+| `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
 | `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`, e deixa pendentes as que têm caixa sem classe. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
 Opções do `grounding-dino`:
@@ -44,18 +67,19 @@ Opções do `grounding-dino`:
 
 ## Google Colab
 
-Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, e a saída fica no Drive (ou é baixada como `.zip`). Imagens que já têm proposta na saída são puladas, então, se o Colab desconectar, basta rodar de novo. O campo `RAMO` escolhe o ramo clonado.
+Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `importar.py` e o `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, são importadas como um lote, e a saída fica no Drive (ou é baixada como `.zip`). Imagens já importadas e já anotadas são puladas, então, se o Colab desconectar, basta rodar de novo. O campo `RAMO` escolhe o ramo clonado.
 
 ## Saída
 
 ```
 anotacoes/
 ├── data.yaml                          # names: os nomes de classes.yaml (TACO + Background); train e val: revisadas.txt
-├── images/foto.jpg
-├── propostas/grounding-dino/foto.json # o que o anotador propôs, com a confiança
+├── images/lote_foto.jpg               # gravada pelo importar.py
+├── lotes.yaml                         # por lote: conjunto, região de interesse, data da importação
+├── propostas/grounding-dino/lote_foto.json # o que o anotador propôs, com a confiança
 ├── labels/foto.txt                    # rótulos finais (YOLO): só depois da revisão ou de --aceitar
 ├── revisoes/foto.json                 # registro da última revisão (tempo, desfecho de cada caixa)
-├── imagens.csv                        # nome e status de cada imagem: pendente, revisada, descartada
+├── imagens.csv                        # nome, status (pendente, revisada, descartada), lote e conjunto
 ├── revisadas.txt                      # imagens revisadas com rótulo; gerado de imagens.csv
 ├── previa/grounding-dino/foto.jpg     # só com --previa
 └── visualizar.html                    # página para conferir propostas e rótulos (abaixo)
@@ -75,9 +99,9 @@ Cada proposta é um JSON:
  "candidatas": [{"confianca": 0.12, "caixa": [x1, y1, x2, y2]}]}
 ```
 
-A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Abaixo de `--confianca-classe`, a caixa vai sem classe (`null`); a classe do anotador fica em `sugerida`, que as páginas não mostram (serve às métricas). Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente`, e anotar de novo não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
+A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Abaixo de `--confianca-classe`, a caixa vai sem classe (`null`); a classe do anotador fica em `sugerida`, que as páginas não mostram (serve às métricas). Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
-Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos. Se o EXIF da foto pede rotação (fotos de celular), a imagem é gravada já girada, e as caixas valem para ela.
+Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos.
 
 Ainda não há divisão entre treino e validação: ela deve ser feita por sessão de captura, nunca por imagem (monografia, seção 5.3.5), e fica para quando houver sessões.
 

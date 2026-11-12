@@ -2,25 +2,27 @@
 Anotação automática de imagens por um anotador intercambiável (hoje, o
 Grounding DINO, de vocabulário aberto).
 
-Recebe uma ou mais imagens e grava, no diretório de saída (formato em saida.py):
+Anota as imagens já importadas pelo importar.py (o armazenamento comum,
+<saida>/images/) e grava, no diretório de saída (formato em saida.py):
 
-    <saida>/images/<nome>.jpg
     <saida>/propostas/<anotador>/<nome>.json   caixas propostas, com a confiança
-    <saida>/imagens.csv                        status de cada imagem (pendente...)
-    <saida>/data.yaml                          classes e revisadas.txt como treino
     <saida>/previa/<anotador>/<nome>.jpg       com --previa: caixas desenhadas
     <saida>/visualizar.html                    página para conferir propostas e rótulos
+
+Só anota imagens pendentes, e não copia nem muda imagens. Caixas com o centro
+fora da região de interesse do lote (lotes.yaml) são descartadas.
 
 As propostas não são rótulos: labels/ só recebe as caixas depois da revisão,
 ou com --aceitar, que copia as propostas como estão.
 
 Uso:
-    python anotacao/anotar.py foto.jpg [outra.jpg ...] -o anotacoes --previa
+    python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a
+    python anotacao/anotar.py -o anotacoes --previa      # as pendentes ainda sem proposta
+    python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
     python anotacao/anotar.py -o anotacoes --aceitar     # aceita as pendentes
 """
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -383,17 +385,6 @@ def preparar_saida(saida, nomes):
         formato.gravar_estado(saida, list(formato.COLUNAS), {})
 
 
-def salvar_imagem(origem, imagem, girada, destino):
-    """
-    Copia a imagem como está; se o EXIF a girava, grava a versão já girada,
-    para que as caixas valham para qualquer leitor, respeite ele o EXIF ou não.
-    """
-    if girada:
-        imagem.save(destino, quality=95)
-    else:
-        shutil.copy2(origem, destino)
-
-
 def desenhar_previa(imagem, deteccoes, classes, destino, confianca_classe=0.0):
     previa = imagem.copy()
     desenho = ImageDraw.Draw(previa)
@@ -411,12 +402,44 @@ def desenhar_previa(imagem, deteccoes, classes, destino, confianca_classe=0.0):
     previa.save(destino, quality=90)
 
 
+def escolher_imagens(parser, args, linhas):
+    """
+    As imagens a anotar, entre as importadas: as pedidas na linha de comando ou,
+    sem nenhuma, as pendentes ainda sem proposta deste anotador (todas as
+    pendentes com --sobrescrever). Só pendentes: anotar de novo uma revisada ou
+    descartada trocaria a proposta que o registro da revisão cita.
+    """
+    if not args.imagens:
+        return [n for n, linha in linhas.items() if linha["status"] == "pendente"
+                and (args.sobrescrever
+                     or not formato.caminho_proposta(args.saida, args.anotador, n).exists())]
+    pedidas = list(dict.fromkeys(Path(i).name for i in args.imagens))
+    fora = [n for n in pedidas if n not in linhas]
+    if fora:
+        parser.error(f"não importadas em {args.saida}: {', '.join(fora)} "
+                     "(importe antes com o importar.py)")
+    nao_pendentes = [n for n in pedidas if linhas[n]["status"] != "pendente"]
+    if nao_pendentes:
+        print(f"Puladas (já {', '.join(sorted({linhas[n]['status'] for n in nao_pendentes}))}): "
+              f"{', '.join(nao_pendentes)}")
+    pedidas = [n for n in pedidas if n not in nao_pendentes]
+    if not args.sobrescrever:
+        existentes = [n for n in pedidas
+                      if formato.caminho_proposta(args.saida, args.anotador, n).exists()]
+        if existentes:
+            parser.error(f"já anotadas por {args.anotador} em {args.saida}: "
+                         f"{', '.join(existentes)} (use --sobrescrever)")
+    return pedidas
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Propõe caixas para as imagens com um anotador automático.")
-    parser.add_argument("imagens", nargs="*", type=Path, help="caminho de uma ou mais imagens")
+        description="Propõe caixas para as imagens importadas com um anotador automático.")
+    parser.add_argument("imagens", nargs="*",
+                        help="nomes de imagens já importadas (padrão: as pendentes ainda sem "
+                             "proposta deste anotador)")
     parser.add_argument("-o", "--saida", type=Path, default=Path("anotacoes"),
-                        help="diretório de saída (padrão: ./anotacoes)")
+                        help="diretório de saída, já com imagens importadas (padrão: ./anotacoes)")
     parser.add_argument("--anotador", choices=sorted(ANOTADORES), default=GroundingDino.nome,
                         help=f"anotador (padrão: {GroundingDino.nome})")
     parser.add_argument("--classes", type=Path, default=DIR_SCRIPT / "classes.yaml",
@@ -429,7 +452,7 @@ def main(argv=None):
                              "revisor tem de dá-la; 0 desliga "
                              f"(padrão: {CONFIANCA_CLASSE_PADRAO})")
     parser.add_argument("--sobrescrever", action="store_true",
-                        help="anota de novo imagens que já têm proposta deste anotador")
+                        help="anota de novo imagens pendentes que já têm proposta deste anotador")
     parser.add_argument("--aceitar", action="store_true",
                         help="copia as propostas do anotador para labels/ como rótulos finais "
                              "e marca as imagens como revisadas (só as pendentes; sem "
@@ -437,64 +460,49 @@ def main(argv=None):
     for anotador in ANOTADORES.values():
         anotador.opcoes(parser)
     args = parser.parse_args(argv)
-    if not args.imagens and not args.aceitar:
-        parser.error("informe as imagens a anotar, ou --aceitar")
 
+    if not (args.saida / "imagens.csv").exists():
+        parser.error(f"{args.saida} não tem imagens importadas (use o importar.py antes)")
     classes = carregar_classes(args.classes)
-    nomes_classes = carregar_nomes(args.classes)
+    preparar_saida(args.saida, carregar_nomes(args.classes))
+    _, linhas = formato.ler_estado(args.saida)
+    lotes = formato.ler_lotes(args.saida)
+    alvo = escolher_imagens(parser, args, linhas)
+    if not alvo and not args.aceitar:
+        print(f"Nada a anotar com {args.anotador} em {args.saida}.")
 
-    for caminho in args.imagens:
-        if not caminho.is_file():
-            parser.error(f"imagem não encontrada: {caminho}")
-    # A proposta é nomeada pelo nome sem extensão: foto.jpg e foto.png colidiriam
-    nomes = [c.stem for c in args.imagens]
-    repetidos = {n for n in nomes if nomes.count(n) > 1}
-    if repetidos:
-        parser.error(f"nomes de arquivo repetidos na entrada: {', '.join(sorted(repetidos))}")
-    if not args.sobrescrever:
-        existentes = [c.name for c in args.imagens
-                      if formato.caminho_proposta(args.saida, args.anotador, c.name).exists()]
-        if existentes:
-            parser.error(f"já anotadas por {args.anotador} em {args.saida}: "
-                         f"{', '.join(existentes)} (use --sobrescrever)")
-
-    preparar_saida(args.saida, nomes_classes)
-    colunas, linhas = formato.ler_estado(args.saida)
-    for caminho in args.imagens:
-        formato.registrar_imagem(dict(linhas), caminho.name)  # só confere colisões
-
-    if args.imagens:
+    if alvo:
         if args.previa:
             (args.saida / "previa" / args.anotador).mkdir(parents=True, exist_ok=True)
         anotador = ANOTADORES[args.anotador].criar(classes, args)
 
-    for caminho in args.imagens:
-        imagem, girada = abrir_imagem(caminho)
+    for nome in alvo:
+        imagem, _ = abrir_imagem(args.saida / "images" / nome)
         if hasattr(anotador, "propor"):
             deteccoes, candidatas = anotador.propor(imagem)
         else:
             deteccoes, candidatas = anotador.anotar(imagem), []
+        # Região de interesse do lote: fora dela (pelo centro da caixa), é fundo fixo
+        regiao = lotes.get(linhas[nome].get("lote"), {}).get("regiao")
+        deteccoes = [d for d in deteccoes if formato.dentro_da_regiao(d[2], regiao)]
+        candidatas = [c for c in candidatas if formato.dentro_da_regiao(c[1], regiao)]
 
-        salvar_imagem(caminho, imagem, girada, args.saida / "images" / caminho.name)
         formato.gravar_proposta(args.saida, formato.montar_proposta(
             anotador.nome, anotador.versao,
             dict(anotador.parametros, confianca_classe=args.confianca_classe), classes,
-            caminho.name, imagem.size, deteccoes, args.confianca_classe, candidatas))
-        # Grava o estado a cada imagem: interrompido, o que já foi feito vale
-        formato.registrar_imagem(linhas, caminho.name)
-        formato.gravar_estado(args.saida, colunas, linhas)
+            nome, imagem.size, deteccoes, args.confianca_classe, candidatas))
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
-                            args.saida / "previa" / args.anotador / f"{caminho.stem}.jpg",
+                            args.saida / "previa" / args.anotador / f"{Path(nome).stem}.jpg",
                             args.confianca_classe)
 
         resumo = ", ".join(
             f"{classes[c]['nome'] if conf >= args.confianca_classe else 'sem classe'} {conf:.2f}"
             for c, conf, _ in deteccoes)
-        print(f"{caminho.name}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
+        print(f"{nome}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
 
     if args.aceitar:
-        escolhidas = {c.name for c in args.imagens} if args.imagens else None
+        escolhidas = set(alvo) if args.imagens else None
         aceitas, sem_classe = formato.aceitar(args.saida, args.anotador, escolhidas)
         print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.anotador} copiadas "
               "para labels/")
