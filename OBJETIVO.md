@@ -2,7 +2,7 @@
 
 O sistema completo que este repositório persegue: as imagens da própria esteira viram base de treino e de teste do YOLO, com anotação automática por voto entre modelos e revisão humana só onde ela é necessária. Requisitos na monografia preliminar (`docs/ecovision-iterativo-prelim.pdf`): RF11 a RF14, RNF08, seções 5.3.2 (taxonomia), 5.3.4 (viés de automação) e 5.3.5 (divisão dos dados). Fluxo desenhado em `docs/diagrams/diagrama_v3.drawio`.
 
-**Escopo atual**: só o **framework de anotação** (anotadores intercambiáveis que gravam propostas) e a **página de visualização, correção e edição** dos resultados, planejados em [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) (tarefa T1). Os demais passos do fluxo estão nas [tarefas](#tarefas), com o que já foi decidido sobre eles.
+**Escopo atual**: o **framework de anotação** (anotadores intercambiáveis que gravam propostas) e a **página de visualização, correção e edição** dos resultados, planejados em [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) (tarefa T1); em seguida, a **pipeline com múltiplos anotadores** (seção 6; ordem: T5, interface de detector e `avaliar.py` sobre propostas, OWLv2 e YOLOE, T3, T6, T14). Os demais passos do fluxo estão nas [tarefas](#tarefas), com o que já foi decidido sobre eles.
 
 **Status**: `[ ]` pendente · `[x]` feito (com hash) · `[~]` parcial
 
@@ -250,16 +250,70 @@ Para os objetos que a proposta não cobre, a página de revisão oferece as caix
 
 Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). Levantamento de 2026-10-27; custos e cabimento na GPU são estimativas, não medidos.
 
+## 6. Pipeline de anotação (planejado em 2026-11-11)
+
+O fluxo do diagrama v3, do lado da anotação, em passos separados que se podem rodar um de cada vez ou encadeados por um `pipeline.py`:
+
+```
+importar.py lote/   → armazenamento comum (images/), imagens.csv com lote, conjunto, metadados
+anotar.py × N       → propostas/<anotador>/<nome>.json, um anotador por vez (anotadores.yaml)
+treino: votar.py    → aprovadas: labels/ com as caixas de consenso; reprovadas e auditoria: fila de revisão
+teste:  unir.py     → caixas sem classe (união dos N), fila de revisão obrigatória (T9)
+revisar.py          → revisão humana
+exportar            → treino.txt, teste.txt, data.yaml
+```
+
+### Importação (T5)
+
+A fonte prevista é uma só: a webcam da esteira em operação (T4). As imagens chegam ao servidor, e o `importar.py` grava **uma cópia** de cada uma em `images/`, o armazenamento comum de todos os anotadores; o `anotar.py` deixa de copiar e passa a ler só de lá. Se o espaço pesar, a cópia vira link (hardlink no mesmo sistema de arquivos, senão simbólico).
+
+A importação é simples, por decisão (2026-11-11): sem hash, sem análise de conteúdo (nitidez, exposição, quase duplicadas) e sem tratamento especial de metadados, porque todas as imagens vêm da mesma câmera.
+
+| Passo | Muda a imagem? | Por quê |
+|---|---|---|
+| Nome único | Não (só o nome) | `<lote>_<nome original>`, para lotes diferentes não colidirem; o `stem` continua único (`registrar_imagem`) |
+| Girar pelo EXIF | Só se houver orientação no EXIF | Quadros da webcam não têm; fica para fotos de outra origem (validação, celular), em que as caixas têm de valer para a imagem girada. Sem giro, cópia byte a byte: recomprimir um JPEG perde qualidade |
+| Reduzir a resolução | Não por padrão | Resolução nativa (T4), para não limitar um modelo que reduza menos que o YOLO (640) ou o Grounding DINO (1333). Opção `--lado-maximo` com um teto folgado, só para fotos grandes de outra origem (as de celular têm 4080×3060, ~8 MB) |
+
+Fora da importação, de propósito:
+- **Normalizar cor ou brilho**: afastaria a base de treino dos quadros que o YOLO vê na operação, crus. Variação de cor e brilho é aumento de dados no treino (o Ultralytics já faz), não mudança na base.
+- **Recortar a esteira**: a imagem gravada mantém o quadro inteiro, porque é o que a câmera vê na operação. O que está fora da esteira (o papel no fundo branco, seção 5) se resolve com uma **região de interesse** do lote, guardada como metadado: os anotadores descartam as caixas fora dela, e a imagem não muda.
+
+### Anotadores configuráveis
+
+- **`anotadores.yaml`**: quais anotadores rodam, com o tipo (`grounding-dino`, `owlv2`, `yoloe`...), a versão do modelo e os parâmetros (limiares, contenção). A pipeline lê dele, o voto registra qual configuração usou (RNF07).
+- **Interface genérica de detector**: uma classe base no `anotar.py` cuida de tudo que não depende do modelo (limiar, área máxima, NMS, contenção, candidatas). Um detector novo sobrescreve só o carregamento e a inferência: imagem → caixas brutas com a pontuação de cada classe. Um anotador que só reclassifica (SigLIP) sobrescreve outra etapa, recebendo as caixas de outro.
+- **Uma lista só de caixas por proposta**, a partir de um piso baixo (0,05), com a confiança de cada uma. Quem lê aplica o próprio limiar: a página mostra a partir de 0,20, oferece as de baixo como candidatas do clique e esconde a classe abaixo de 0,35; o voto aplica o limiar de cada anotador; o `avaliar.py` varre limiares. O custo de gerar as caixas extras é desprezível (o modelo sempre calcula todas; o filtro é depois); ~10–15 KB por foto. Aproximação: o NMS e a contenção rodam com mais caixas presentes do que rodariam no limiar final; conferir uma vez contra a anotação direta.
+- **Candidatas do clique de um anotador só** (o de base), por enquanto. Medir depois se algum gera caixas melhores que os outros.
+
+### `avaliar.py` sobre propostas gravadas
+
+O `avaliar.py` deixa de rodar o modelo: lê `propostas/<anotador>/` de uma saída anotada sobre as fotos de validação (importadas como as outras) e os rótulos da equipe. Mede qualquer anotador pela mesma interface, em segundos e sem GPU, e o voto (T3) é ler N arquivos por foto. Medidas: cobertura sem classe e imagens completas por limiar, caixas a remover, acerto de classe e de material das caixas que cobrem um objeto, precisão e recall. Sai o "não localizadas" sobre as 900 consultas do Grounding DINO: provou que as caixas do modelo eram aproveitáveis, e a cobertura o substitui para qualquer anotador.
+
+### Paralelismo (possível, não necessário)
+
+Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, liberar a memória, o próximo). O formato já permite paralelizar sem mudança:
+- **Unidade de trabalho**: (imagem, anotador). Cada anotador grava só em `propostas/<anotador>/`, com gravação atômica, e pula o que já tem: N anotadores podem rodar em processos ou GPUs diferentes, e uma rodada interrompida continua de onde parou.
+- **O voto espera**: só vota uma imagem com proposta de todos os N anotadores configurados; a incompleta fica para a próxima rodada, não é reprovada.
+- **Um escritor por vez no `imagens.csv`**: `importar.py`, `votar.py` e o `revisar.py` escrevem nele. Até o SQLite (fase 3b do T1), um arquivo de trava enquanto a pipeline escreve, e o `revisar.py` recusa gravar enquanto ele existir.
+
+### Voto e revisão
+
+- **O voto usa a classe do anotador, mesmo abaixo de 0,35** (`sugerida`); a classe só é escondida do revisor, quando a imagem vai à revisão.
+- **Desvio treino/teste antes do voto**: lote de teste não é votado; vai à união sem classe e à revisão obrigatória (seção 4).
+- **Auditoria cega**: as aprovadas sorteadas (5%) entram na fila com o mesmo status das reprovadas; a marca de auditoria fica num campo que a página não mostra.
+- **`--aceitar`** vira um caso particular (voto de um anotador só): fica para testes, fora da pipeline.
+
 ## Tarefas
 
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); faltam levar a cobertura ao `avaliar.py`, vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
-| T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio | T2 | pytest com caixas sintéticas; tabelas |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); faltam o `avaliar.py` sobre propostas gravadas, com a cobertura (seção 6), a interface genérica de detector, vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6) | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
-| T5 | [ ] | **Entrada por lote**: importa um lote para `imagens.csv` com `lote` e o sorteio treino/teste (1 lote em 5) | T1, T4 | pytest |
-| T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3), grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml` | T1, T3 | pytest do voto com caixas sintéticas |
+| T5 | [ ] | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o `imagens.csv`, com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
+| T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores; trava do `imagens.csv` (seção 6) | T1, T3, T5 | pytest do voto com caixas sintéticas |
 | T7 | [ ] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs | T1, T6 | pytest da API; teste manual |
 | T8 | [ ] | **Auditoria**: amostra das aprovadas (ex.: 5%) na fila de revisão, sem o revisor saber | T6, T7 | pytest |
 | T9 | [ ] | **Modo de teste**: segmentado e sem classe (padrão no teste, seção 4) e sem pré-anotação | T1, T5 | pytest; teste manual |
@@ -267,6 +321,7 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 | T11 | [ ] | **Novas classes pela página** (RF14): acrescenta no fim do `classes.yaml` e regenera o `data.yaml` | T1 | pytest; teste manual |
 | T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07) | T6, T7 | métricas do treino |
 | T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa | T9, T12 | métricas por classe e material |
+| T14 | [ ] | **`pipeline.py` e `anotadores.yaml`** (seção 6): importar, anotar com os N anotadores configurados, votar ou unir conforme o conjunto, com unidade de trabalho (imagem, anotador) retomável | T5, T6 | pytest com anotadores sintéticos |
 
 ### Resolução e origem das imagens
 
@@ -287,4 +342,8 @@ As decisões que só valem para o framework (ferramenta própria, fonte das clas
 | 5 | ~~O teste chega ao revisor com as propostas dos anotadores ou sem elas?~~ | **Decidido (2026-10-28)**: segmentado e sem classe. Os objetos chegam delimitados para poupar a seleção; a classe é do revisor (seção 4). |
 | 6 | ~~O voto exige a mesma classe ou só o mesmo material?~~ | **Decidido (2026-10-28)**: mesma classe. Por material aprovaria mais, mas a imagem ficaria sem classe definida para o treino. |
 | 7 | ~~Proporção treino/teste e unidade do sorteio~~ | **Decidido (2026-10-28)**: sorteio por lote de captura, 1 lote em cada 5 para o teste. Frames seguidos da esteira são quase iguais; sortear imagem a imagem vazaria cenas entre os conjuntos. |
+| 13 | ~~Onde as imagens ficam e quem as copia?~~ | **Decidido (2026-11-11)**: o `importar.py` grava uma cópia de cada imagem em `images/`, na resolução nativa e sem normalizar nem recortar (seção 6), e todos os anotadores leem de lá; link em vez de cópia se o espaço pesar. Sem hash nem análise de conteúdo: a fonte é uma só, a webcam da esteira. |
+| 14 | ~~Como os anotadores são definidos e medidos?~~ | **Decidido (2026-11-11)**: por `anotadores.yaml`, sobre uma classe base de detector que só exige a inferência; o `avaliar.py` mede propostas gravadas, não roda modelo (seção 6). |
+| 15 | ~~A classe abaixo de 0,35 entra no voto?~~ | **Decidido (2026-11-11)**: sim, a `sugerida`; só é escondida do revisor. Candidatas do clique vêm de um anotador só, por enquanto. |
+| 16 | ~~Limiar na gravação ou na leitura?~~ | **Decidido (2026-11-11)**: na leitura. A proposta guarda todas as caixas a partir de 0,05, com a confiança, e cada consumidor (página, voto, `avaliar.py`) aplica o seu. |
 | 8 | ~~Taxonomia do vidro~~ | **Decidido (2026-11-09)**: três classes TACO, `Glass bottle`, `Glass jar` e `Glass cup` (copos, taças e tigelas). `Glass jar` e `Glass cup` entram no fim do `classes.yaml`, para não mudar os ids. |
