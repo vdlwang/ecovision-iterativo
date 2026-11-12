@@ -1,6 +1,11 @@
 # EcoVision Backend Dependencies
-ultralytics>=8.0.0
-opencv-python>=4.8.0
-pyserial>=3.5
-websockets>=11.0
-numpy>=1.24.0
+# Versões fixas: as testadas com Python 3.14 (numpy 2.5 exige Python 3.12+).
+# Atualizar todas juntas, rodando os testes e o bloco de verificação de
+# REFATORACAO.md, antes de qualquer retreinamento (reprodutibilidade, RNF07).
+ultralytics==8.4.183
+torch==2.14.1          # GPU: instale antes a build CUDA da mesma versão (pytorch.org)
+torchvision==0.29.1
+opencv-python==5.0.0.93
+pyserial==3.5
+websockets==17.3
+numpy==2.5.4

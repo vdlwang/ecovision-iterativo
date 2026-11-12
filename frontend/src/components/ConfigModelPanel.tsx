@@ -4,10 +4,11 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Slider } from './ui/slider';
 import { Button } from './ui/button';
-import { Badge } from './ui/badge';
 import { Save, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
+import { BadgeBackend } from './BadgeBackend';
+import { BACKEND_WS_URL } from '../config';
 import {
   Select,
   SelectContent,
@@ -16,24 +17,45 @@ import {
   SelectValue,
 } from './ui/select';
 
+// Pesos TACO em yolo_models/taco/ (veja yolo_models/README.md). O yolov8s.pt
+// de lá é o modelo COCO e não detecta lixo, por isso não está na lista.
+const MODELOS = [
+  { value: 'best', label: 'best.pt: YOLOv8s com fine-tuning (padrão)' },
+  { value: '150ep_best', label: '150ep_best.pt: fine-tuning anterior' },
+  { value: '97ep_best', label: '97ep_best.pt: fine-tuning anterior' },
+  { value: '50ep_best', label: '50ep_best.pt: fine-tuning anterior' },
+  { value: 'yolov8n', label: 'yolov8n.pt: TACO, sem fine-tuning' },
+  { value: 'yolov8m', label: 'yolov8m.pt: TACO, sem fine-tuning' },
+];
+
+// Nome do modelo da lista que corresponde ao caminho, ou '' se for outro arquivo
+const modeloDoCaminho = (caminho: string) => {
+  const nome = caminho.split(/[\\/]/).pop()?.replace(/\.pt$/, '') ?? '';
+  return MODELOS.some((m) => m.value === nome) ? nome : '';
+};
+
 export function ConfigModelPanel() {
-  const [confidence, setConfidence] = useState(0.4);
-  const [modelType, setModelType] = useState('yolov8s');
-  const [modelPath, setModelPath] = useState('');
+  const [confidence, setConfidence] = useState(0.35);  // mesmo padrão de load_config() no backend
+  const [modelType, setModelType] = useState('best');
+  const [modelPath, setModelPath] = useState('../yolo_models/taco/best.pt');
   const [serialPort, setSerialPort] = useState('COM8');
   const [baudRate, setBaudRate] = useState(115200);
-  const [cameraIndex, setCameraIndex] = useState(0);
+  // Índice da webcam ("0") ou URL de stream; guardado como texto
+  const [cameraIndex, setCameraIndex] = useState('0');
   const [connected, setConnected] = useState(false);
-  const { connected: wsConnected, send } = useStableWebSocket('ws://localhost:8765', {
+  const { connected: wsConnected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'config') {
           if (data.confidence !== undefined) setConfidence(data.confidence);
-          if (data.model_path) setModelPath(data.model_path);
+          if (data.model_path) {
+            setModelPath(data.model_path);
+            setModelType(modeloDoCaminho(data.model_path));
+          }
           if (data.serial_port) setSerialPort(data.serial_port);
           if (data.baud_rate) setBaudRate(data.baud_rate);
-          if (data.camera_index !== undefined) setCameraIndex(data.camera_index);
+          if (data.camera_index !== undefined) setCameraIndex(String(data.camera_index));
         }
       } catch (error) {
         // Silencioso
@@ -60,18 +82,13 @@ export function ConfigModelPanel() {
       model_path: modelPath,
       serial_port: serialPort,
       baud_rate: baudRate,
-      camera_index: cameraIndex,
+      camera_index: /^\d+$/.test(cameraIndex.trim()) ? parseInt(cameraIndex, 10) : cameraIndex.trim(),
     };
 
     if (send(config)) {
-      toast.success('Configuração salva! Reinicie o backend para aplicar.');
+      toast.success('Configuração salva! A confiança já vale; os demais campos, após reiniciar o backend.');
     } else {
-      try {
-        localStorage.setItem('ecovision_config_model', JSON.stringify(config));
-        toast.success('Configuração salva localmente! Inicie o backend para aplicar.');
-      } catch (error) {
-        toast.error('Erro ao salvar');
-      }
+      toast.error('Backend desconectado: a configuração não foi salva.');
     }
   };
 
@@ -93,9 +110,7 @@ export function ConfigModelPanel() {
           <h2 className="text-white text-xl md:text-2xl mb-1 md:mb-2">Configuração do Modelo</h2>
           <p className="text-neutral-400 text-sm md:text-base">Configure modelo YOLO, confiança e hardware</p>
         </div>
-        <Badge variant="outline" className={`${connected ? 'bg-green-600/20 text-green-600 border-green-600/30' : 'bg-red-600/20 text-red-600 border-red-600/30'}`}>
-          {connected ? 'Backend Conectado' : 'Backend Offline'}
-        </Badge>
+        <BadgeBackend connected={connected} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
@@ -110,18 +125,16 @@ export function ConfigModelPanel() {
                 </Label>
                 <Select value={modelType} onValueChange={handleModelTypeChange}>
                   <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white">
-                    <SelectValue placeholder="Selecione o modelo" />
+                    <SelectValue placeholder="Outro arquivo (veja o caminho abaixo)" />
                   </SelectTrigger>
                   <SelectContent className="bg-neutral-800 border-neutral-700">
-                    <SelectItem value="yolov8n" className="text-white">YOLOv8 Nano (mais rápido)</SelectItem>
-                    <SelectItem value="yolov8s" className="text-white">YOLOv8 Small (balanceado)</SelectItem>
-                    <SelectItem value="yolov8m" className="text-white">YOLOv8 Medium</SelectItem>
-                    <SelectItem value="yolov8l" className="text-white">YOLOv8 Large</SelectItem>
-                    <SelectItem value="yolov8x" className="text-white">YOLOv8 XLarge (mais preciso)</SelectItem>
+                    {MODELOS.map((m) => (
+                      <SelectItem key={m.value} value={m.value} className="text-white">{m.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-neutral-500 text-xs mt-1">
-                  Modelos maiores são mais precisos mas mais lentos
+                  O best.pt é o modelo do projeto; os demais servem para comparação
                 </p>
               </div>
 
@@ -132,7 +145,10 @@ export function ConfigModelPanel() {
                 <Input
                   id="model-path"
                   value={modelPath}
-                  onChange={(e) => setModelPath(e.target.value)}
+                  onChange={(e) => {
+                    setModelPath(e.target.value);
+                    setModelType(modeloDoCaminho(e.target.value));
+                  }}
                   placeholder="../yolo_models/taco/best.pt"
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
@@ -213,23 +229,24 @@ export function ConfigModelPanel() {
             
             <div>
               <Label htmlFor="camera-index" className="text-neutral-300 mb-2 block text-sm md:text-base">
-                Índice da Câmera
+                Câmera (índice ou URL)
               </Label>
               <Input
                 id="camera-index"
-                type="number"
                 value={cameraIndex}
-                onChange={(e) => setCameraIndex(parseInt(e.target.value))}
+                onChange={(e) => setCameraIndex(e.target.value)}
+                placeholder="0 ou http://<ip>:8080/video"
                 className="bg-neutral-800 border-neutral-700 text-white"
               />
               <p className="text-neutral-500 text-xs mt-1">
-                Geralmente 0 (primeira câmera). Tente 1, 2 se não funcionar
+                Webcam: 0 (primeira câmera); tente 1, 2 se não funcionar. Celular: URL do stream de vídeo, não da página do app
               </p>
             </div>
           </Card>
 
           <Button
             onClick={saveConfiguration}
+            disabled={!connected}
             className="w-full bg-green-600 hover:bg-green-700 text-white"
           >
             <Save className="w-4 h-4 mr-2" />
@@ -237,7 +254,9 @@ export function ConfigModelPanel() {
           </Button>
 
           <p className="text-neutral-500 text-xs text-center">
-            Reinicie o backend após salvar para aplicar as mudanças
+            {connected
+              ? 'A confiança vale ao salvar; modelo, câmera e serial só após reiniciar o backend'
+              : 'Backend offline: os valores acima são os padrões, não os do config.json. Inicie o backend para carregar e salvar.'}
           </p>
         </div>
       </div>

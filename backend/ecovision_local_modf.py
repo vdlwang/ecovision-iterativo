@@ -10,16 +10,36 @@ import cv2
 import base64
 import json
 import asyncio
+import logging
+import os
 import websockets
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock
+
+from deteccao import deteccoes_do_quadro, angulo_a_disparar
+
+# ==== Logging ====
+# INFO por padrão; ECOVISION_LOG=DEBUG mostra também cada comando enviado ao
+# ESP32 e as detecções de cada quadro. Bibliotecas (websockets etc.) ficam em WARNING.
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("ecovision")
+_nivel = os.environ.get("ECOVISION_LOG", "INFO").strip().upper()  # "set X=DEBUG && ..." no cmd deixa um espaço
+log.setLevel(_nivel if isinstance(logging.getLevelName(_nivel), int) else logging.INFO)
 
 # ==== Configuração ====
 BACKEND_DIR = Path(__file__).parent
 CONFIG_FILE = BACKEND_DIR / "config.json"
 
-# Cooldown fixo entre detecções enviadas (em segundos)
-DETECTION_COOLDOWN = 1.5
+# Espera antes de reabrir a câmera depois de uma falha (em segundos)
+CAMERA_RETRY_SECONDS = 5
+
+# O conf passado ao YOLO fica fixo enquanto o stream roda; por isso o modelo
+# roda com este piso e o filtro por config['confidence'] é feito a cada quadro
+CONF_MINIMA_MODELO = 0.1
 
 def load_config():
     """Carrega configuração do arquivo JSON"""
@@ -54,94 +74,6 @@ def load_config():
 
 config = load_config()
 
-# ==== Mapeamento TACO -> material genérico ====
-PLASTIC = "plastic"
-METAL   = "metal"
-GLASS   = "glass"
-PAPER   = "paper"
-OTHER   = "other"  # opcional
-
-# Dicionário: nome da classe TACO (lowercase) -> grupo de material
-taco_to_material = {
-    # --- Metal ---
-    "aluminium foil": METAL,
-    "battery": METAL,
-    "aluminium blister pack": METAL,
-    "metal bottle cap": METAL,
-    "food can": METAL,
-    "aerosol": METAL,
-    "drink can": METAL,
-    "metal lid": METAL,
-    "scrap metal": METAL,
-    "pop tab": METAL,
-
-    # --- Glass ---
-    "glass bottle": GLASS,
-    "broken glass": GLASS,
-    "glass cup": GLASS,
-    "glass jar": GLASS,
-
-    # --- Paper / papel ---
-    "toilet tube": PAPER,
-    "other carton": PAPER,
-    "egg carton": PAPER,
-    "drink carton": PAPER,          # Tetrapak: aqui tratado como papel
-    "corrugated carton": PAPER,
-    "meal carton": PAPER,
-    "pizza box": PAPER,
-    "paper cup": PAPER,
-    "magazine paper": PAPER,
-    "tissues": PAPER,
-    "wrapping paper": PAPER,
-    "normal paper": PAPER,
-    "paper bag": PAPER,
-    "plastified paper bag": PAPER,
-    "paper straw": PAPER,
-
-    # --- Plastic / plástico ---
-    "other plastic bottle": PLASTIC,
-    "clear plastic bottle": PLASTIC,
-    "plastic bottle cap": PLASTIC,
-    "disposable plastic cup": PLASTIC,
-    "foam cup": PLASTIC,             # isopor
-    "other plastic cup": PLASTIC,
-    "plastic lid": PLASTIC,
-    "other plastic": PLASTIC,
-    "plastic film": PLASTIC,
-    "six pack rings": PLASTIC,
-    "garbage bag": PLASTIC,
-    "other plastic wrapper": PLASTIC,
-    "single-use carrier bag": PLASTIC,
-    "polypropylene bag": PLASTIC,
-    "crisp packet": PLASTIC,         # embalagem metalizada
-    "spread tub": PLASTIC,
-    "tupperware": PLASTIC,
-    "disposable food container": PLASTIC,
-    "foam food container": PLASTIC,
-    "other plastic container": PLASTIC,
-    "plastic glooves": PLASTIC,
-    "plastic gloves": PLASTIC,       # por segurança
-    "plastic utensils": PLASTIC,
-    "squeezable tube": PLASTIC,
-    "plastic straw": PLASTIC,
-    "styrofoam piece": PLASTIC,
-    "rope & strings": PLASTIC,       # assumindo corda sintética
-
-    # --- Outros / não mapeados nos 4 grupos ---
-    "food waste": OTHER,
-    "shoe": OTHER,
-    "unlabeled litter": OTHER,
-    "cigarette": OTHER,
-}
-
-def map_taco_to_material(class_name: str) -> str:
-    """
-    Recebe o nome da classe TACO (como vem do YOLO) e
-    devolve 'plastic', 'metal', 'glass', 'paper' ou 'other'.
-    """
-    key = class_name.strip().lower()
-    return taco_to_material.get(key, OTHER)
-
 # ==== Estado Global ====
 class SystemState:
     def __init__(self):
@@ -159,67 +91,68 @@ state = SystemState()
 SERVER_LOOP: asyncio.AbstractEventLoop | None = None
 
 # ==== Serial (ESP32) ====
+# A thread do YOLO (ângulos) e o handler do WebSocket (motor, teste de ângulo)
+# escrevem na mesma porta; a trava impede que duas linhas se misturem
+serial_lock = Lock()
+
 def send_line(ser, msg):
     """Envia comando via serial"""
-    print(f"send_line")
     if ser is None:
-        print(f"[DEMO] Serial indisponível; comando ignorado: {msg.strip()}")
+        log.warning("[DEMO] Serial indisponível; comando ignorado: %s", msg.strip())
         return False
     try:
-        print(msg)
         if not msg.endswith("\n"):
             msg += "\n"
-        ser.write(msg.encode("utf-8"))
-        ser.flush()
+        with serial_lock:
+            ser.write(msg.encode("utf-8"))
+            ser.flush()
+        log.debug("→ ESP32: %s", msg.strip())
         return True
     except Exception as exc:
         # Quando a serial está ocupada ou inacessível no Windows o pyserial
         # levanta PermissionError("WriteFile failed..."). Neste caso
         # desativamos a serial para evitar quedas no WebSocket e seguimos em
         # modo demonstração.
-        print(f"[DEMO] Falha ao enviar para serial ({exc}); desativando serial")
+        log.error("[DEMO] Falha ao enviar para serial (%s); desativando serial", exc)
         state.serial_port = None
         return False
 
-def read_reply(ser, timeout=1.5):
-    """Lê resposta do ESP32"""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        line = ser.readline().decode("utf-8", errors="ignore").strip()
+def read_serial_loop(ser):
+    """Thread que registra tudo o que o ESP32 envia.
+
+    Ninguém espera resposta depois de mandar um comando: o firmware só
+    responde a um ângulo quando ele sai da fila (até 5 s por item), então a
+    resposta lida logo após um comando podia ser a de outro.
+    """
+    while state.serial_port is ser:
+        try:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+        except Exception as exc:
+            if state.serial_port is ser:
+                log.error("[DEMO] Falha ao ler da serial (%s); desativando serial", exc)
+                state.serial_port = None
+            return
         if line:
-            return line
-    return None
+            log.info("ESP32: %s", line)
 
 def motor_on(ser):
     """Liga o motor da esteira"""
-    print(f"motor_on chamado com ser:{ser}" )
-    if send_line(ser, "MOTOR ON"):
-        print("MOTOR ON enviado")
-        r = read_reply(ser)
-        if r:
-            print("Motor ligado")
-            print(f"ESP32: {r}")
+    send_line(ser, "MOTOR ON")
 
 def motor_off(ser):
     """Desliga o motor da esteira"""
-    if send_line(ser, "MOTOR OFF"):
-        r = read_reply(ser)
-        if r:
-            print(f"ESP32: {r}")
+    send_line(ser, "MOTOR OFF")
 
 def send_angle(ser, angle):
     """Envia ângulo para o servo"""
-    if send_line(ser, str(angle)):
-        r = read_reply(ser)
-        if r:
-            print(f"ESP32: {r}")
+    send_line(ser, str(angle))
 
 # ==== WebSocket Server ====
 async def websocket_handler(websocket):
     """Gerencia conexões WebSocket (compatível com websockets≥12)."""
     try:
         state.websocket_clients.add(websocket)
-        print(f"Cliente WebSocket conectado. Total: {len(state.websocket_clients)}")
+        log.info("Cliente WebSocket conectado. Total: %d", len(state.websocket_clients))
         async for message in websocket:
             try:
                 data = json.loads(message)
@@ -241,38 +174,48 @@ async def websocket_handler(websocket):
                 elif data.get('type') == 'config':
                     if 'confidence' in data:
                         config['confidence'] = data['confidence']
-                        print(f"Confiança atualizada: {config['confidence']}")
+                        log.info("Confiança atualizada: %s", config['confidence'])
                 
+                # Envia a configuração atual (os painéis pedem ao conectar)
+                elif data.get('type') == 'get_config':
+                    await websocket.send(json.dumps({**config, 'type': 'config'}))
+
                 # Salvar configuração
                 elif data.get('type') == 'save_config':
-                    config.update(data)
+                    config.update({k: v for k, v in data.items() if k != 'type'})
+                    config.pop('type', None)  # chave gravada por versões anteriores
                     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                         json.dump(config, f, indent=2)
-                    print("Configuração salva em config.json")
+                    log.info("Configuração salva em config.json")
                 
             except Exception as e:
-                print(f"Erro ao processar mensagem WebSocket: {e}")
+                log.exception("Erro ao processar mensagem WebSocket: %s", e)
     
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         state.websocket_clients.discard(websocket)
-        print(f"Cliente WebSocket desconectado. Total: {len(state.websocket_clients)}")
+        envios_pendentes.pop(websocket, None)
+        log.info("Cliente WebSocket desconectado. Total: %d", len(state.websocket_clients))
 
-async def broadcast_frame(frame_data):
-    """Envia frame para todos os clientes conectados"""
-    print("broadcast")
-    if state.websocket_clients:
-        message = json.dumps(frame_data)
-        await asyncio.gather(
-            *[client.send(message) for client in state.websocket_clients],
-            return_exceptions=True
-        )
+# Envio em andamento por cliente. Um cliente lento perde quadros em vez de
+# acumular envios no loop, e não atrasa os outros.
+envios_pendentes = {}
+
+def broadcast_frame(message):
+    """Envia o quadro a cada cliente que já recebeu o anterior (roda no loop do WebSocket)"""
+    for client in state.websocket_clients:
+        envio = envios_pendentes.get(client)
+        if envio is not None and not envio.done():
+            continue
+        envio = asyncio.ensure_future(client.send(message))
+        # Conexão fechada no meio do envio: a saída do cliente é tratada no handler
+        envio.add_done_callback(lambda t: t.cancelled() or t.exception())
+        envios_pendentes[client] = envio
 
 # ==== YOLO Processing ====
 def process_yolo_stream():
     """Thread principal: YOLO + Serial + WebSocket broadcast"""
-    print("yolo_stream")
     # Conectar serial
     try:
         ser = serial.Serial(config['serial_port'], config['baud_rate'], timeout=1)
@@ -280,46 +223,64 @@ def process_yolo_stream():
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         state.serial_port = ser
-        print(f"Serial conectada: {config['serial_port']}")
+        log.info("Serial conectada: %s", config['serial_port'])
+        Thread(target=read_serial_loop, args=(ser,), name="serial", daemon=True).start()
         
         # Liga motor inicial
         motor_on(ser)
         state.motor_running = True
     except Exception as e:
-        print(f"Erro ao conectar serial: {e}")
-        print("Continuando sem serial (modo demonstração)")
-        ser = None
+        log.warning("Erro ao conectar serial (%s); continuando sem serial (modo demonstração)", e)
         state.serial_port = None
     
     # Carregar YOLO
-    print(f"Carregando modelo YOLO: {config['model_path']}")
+    log.info("Carregando modelo YOLO: %s", config['model_path'])
     # Caminho relativo é resolvido a partir de backend/, não do diretório atual
     model_path = Path(config['model_path'])
     if not model_path.is_absolute():
         model_path = BACKEND_DIR / model_path
     model = YOLO(str(model_path))
-    
-    # Stream da webcam
+
+    # Se a câmera não abre ou o stream cai (URL errada, Wi-Fi), tenta de novo
+    # em vez de deixar a thread morrer com o servidor no ar e sem vídeo
+    while True:
+        try:
+            run_yolo_stream(model)
+            log.warning("Stream da câmera terminou; reabrindo em %d s", CAMERA_RETRY_SECONDS)
+        except Exception as e:
+            log.error("Erro no stream da câmera (%s): %s. Nova tentativa em %d s",
+                      config['camera_index'], e, CAMERA_RETRY_SECONDS)
+        time.sleep(CAMERA_RETRY_SECONDS)
+
+def run_yolo_stream(model):
+    """Roda o YOLO sobre a câmera até o stream terminar ou falhar"""
     results_gen = model(
         source=config['camera_index'],
-        conf=config['confidence'],
+        conf=min(CONF_MINIMA_MODELO, config['confidence']),
         show=False,  # Não mostra janela OpenCV
         stream=True,
         verbose=False
     )
     
-    print("Stream YOLO iniciado!")
+    log.info("Abrindo câmera: %s", config['camera_index'])
     
     frame_count = 0
-    start_time = time.time()
+    # FPS medido em janelas de 1 s (a média desde o início escondia quedas)
+    fps_frames = 0
+    fps_start = time.time()
     
     for result in results_gen:
         frame_count += 1
+        if frame_count == 1:
+            log.info("Stream YOLO iniciado!")
         
         # Calcula FPS
-        elapsed = time.time() - start_time
-        if elapsed > 0:
-            state.fps = int(frame_count / elapsed)
+        fps_frames += 1
+        elapsed = time.time() - fps_start
+        if elapsed >= 1.0:
+            state.fps = round(fps_frames / elapsed)
+            fps_frames = 0
+            fps_start = time.time()
         
         # Extrai frame original
         frame = result.orig_img
@@ -328,81 +289,46 @@ def process_yolo_stream():
         # Processa detecções
         detections = []
         if result.boxes is not None and result.boxes.cls is not None:
-            names = result.names
             boxes = result.boxes
-            cls_ids = boxes.cls.cpu().numpy().astype(int)
-            print(f"cls_ids: {cls_ids}")
-            confs = boxes.conf.cpu().numpy()
-            xyxy = boxes.xyxy.cpu().numpy()
+            # config['confidence'] lida a cada quadro: o slider vale sem reiniciar
+            detections = deteccoes_do_quadro(
+                result.names,
+                boxes.cls.cpu().numpy().astype(int),
+                boxes.conf.cpu().numpy(),
+                boxes.xyxy.cpu().numpy(),
+                config['confidence'],
+            )
+        if detections:
+            log.debug("Quadro %d: %s", frame_count, ", ".join(
+                f"{d['class']} ({d['material']}) {d['confidence']:.2f}" for d in detections))
+        
+        # Dispara o servo para a primeira detecção que cumpre as condições
+        now = time.time()
+        for det in detections:
+            angle = angulo_a_disparar(det, H, config, state.processing,
+                                      now - state.last_detection_ts)
+            if angle is None:
+                continue
+            log.info("Disparando: %s → %s → %d°", det['class'], det['material'], angle)
+            send_angle(state.serial_port, angle)
             
-            now = time.time()
-            
-            for i, cls_id in enumerate(cls_ids):
-                class_name_raw = names[cls_id]       # nome original
-                class_name = class_name_raw.lower()  # em lowercase
-                confidence = float(confs[i])
-                x1, y1, x2, y2 = xyxy[i]
-                
-                # Descobre o material genérico a partir da classe TACO
-                material = map_taco_to_material(class_name)
-                
-                # Adiciona à lista de detecções (incluindo material)
-                detections.append({
-                    'class': class_name,   # ou class_name_raw se preferir
-                    'material': material,
-                    'confidence': confidence,
-                    'bbox': [float(x1), float(y1), float(x2), float(y2)]
-                })
-                
-                # Verifica se esse material tem ângulo configurado
-                if material not in config['class_to_angle']:
-                    print("continuou pq nao achou material listado")
-                    continue
-                
-                # Calcula centro Y normalizado
-                cy = (y1 + y2) / 2.0
-                cy_norm = cy / H
-                
-                # Verifica ROI
-                if config['roi_y_min'] <= cy_norm <= config['roi_y_max']:
-                    # Só dispara se:
-                    # 1) não estamos processando um item agora
-                    # 2) já passou o cooldown desde a última detecção enviada
-                    if (not state.processing) and (now - state.last_detection_ts >= DETECTION_COOLDOWN):
-                        chosen_key = material  # grupo genérico
-                        angle = config['class_to_angle'][chosen_key]
-
-                        print(f"→ Disparando imediatamente: {class_name_raw} → {chosen_key} → {angle}°")
-                        send_angle(ser, angle)
-
-                        state.processing = True
-                        state.processing_started_at = now
-                        state.last_detection_ts = now
-                    print("detecção dentro da ROI")
-                print("detecção fora da ROI")
-        else:
-            print("Nenhuma detecção no frame atual.")
+            state.processing = True
+            state.processing_started_at = now
+            state.last_detection_ts = now
         
         state.current_detections = detections
         
-        # Finaliza processamento
+        # Finaliza processamento (o motor fica como o usuário deixou)
         if state.processing:
             elapsed_proc = time.time() - state.processing_started_at
             if elapsed_proc >= config['servo_actuation_seconds']:
-                if not state.motor_running:
-                    motor_on(ser)
-                    state.motor_running = True
                 state.processing = False
         
-        # Desenha bounding boxes no frame
-        for det in detections:
-            x1, y1, x2, y2 = det['bbox']
-            label_material = det.get('material', '?')
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (34, 197, 94), 2)
-            label = f"{det['class']} ({label_material}) {det['confidence']*100:.1f}%"
-            cv2.putText(frame, label, (int(x1), int(y1)-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (34, 197, 94), 2)
-        
+        # Sem clientes, não há por que codificar o quadro
+        if not (SERVER_LOOP and SERVER_LOOP.is_running() and state.websocket_clients):
+            continue
+
+        # Quadro vai limpo: as caixas são desenhadas pelo frontend a partir de 'detections'
         # Converte frame para base64
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         frame_b64 = base64.b64encode(buffer).decode('utf-8')
@@ -412,54 +338,46 @@ def process_yolo_stream():
             'frame': frame_b64,
             'detections': detections,
             'fps': state.fps,
-            'motor_running': state.motor_running
+            'motor_running': state.motor_running,
+            # None em modo demonstração (sem serial ou após falha de escrita)
+            'serial_port': config['serial_port'] if state.serial_port else None
         }
         
         # Envia para WebSocket (asyncio)
         try:
-            if SERVER_LOOP and SERVER_LOOP.is_running():
-                asyncio.run_coroutine_threadsafe(broadcast_frame(frame_data), SERVER_LOOP)
-        except Exception:
-            # Ignora erros se não houver clientes ou se o loop ainda não estiver
-            # pronto. O pool de conexões do frontend fará nova tentativa.
+            SERVER_LOOP.call_soon_threadsafe(broadcast_frame, json.dumps(frame_data))
+        except RuntimeError:
+            # Loop encerrando. O pool de conexões do frontend fará nova tentativa.
             pass
-    
-    # Cleanup
-    if ser:
-        motor_off(ser)
-        ser.close()
-    print("Stream YOLO finalizado")
 
 # ==== Main ====
 async def main():
     """Inicia WebSocket server e thread YOLO"""
-    print("=" * 50)
-    print("EcoVision - Sistema de Reciclagem com IA")
-    print("=" * 50)
-    print(f"Configuração: {CONFIG_FILE}")
-    print(f"Porta Serial: {config['serial_port']}")
-    print(f"Modelo YOLO: {config['model_path']}")
-    print(f"WebSocket: ws://localhost:8765")
-    print("=" * 50)
+    log.info("EcoVision - Sistema de Reciclagem com IA")
+    log.info("Configuração: %s", CONFIG_FILE)
+    log.info("Porta Serial: %s", config['serial_port'])
+    log.info("Modelo YOLO: %s", config['model_path'])
+    log.info("WebSocket: ws://localhost:8765")
     
     global SERVER_LOOP
     SERVER_LOOP = asyncio.get_running_loop()
 
     # Inicia thread YOLO
-    yolo_thread = Thread(target=process_yolo_stream, daemon=True)
+    yolo_thread = Thread(target=process_yolo_stream, name="yolo", daemon=True)
     yolo_thread.start()
     
     # Inicia WebSocket server
     async with websockets.serve(websocket_handler, "localhost", 8765):
-        print("✓ WebSocket server rodando!")
-        print("\nAtalhos: (o)=Motor ON  (p)=Motor OFF  (q)=Sair\n")
+        log.info("WebSocket server rodando!")
         await asyncio.Future()  # Roda forever
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n\nEncerrando EcoVision...")
-        if state.serial_port:
-            motor_off(state.serial_port)
-            state.serial_port.close()
+        log.info("Encerrando EcoVision...")
+        ser = state.serial_port
+        if ser:
+            state.serial_port = None  # encerra a thread de leitura
+            motor_off(ser)
+            ser.close()

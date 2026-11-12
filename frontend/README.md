@@ -19,18 +19,20 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 **Login:** "Google" e "Modo Demo" são simulados. Ambos só gravam um marcador no `localStorage`.
 
-**Monitor em Tempo Real:** vídeo da câmera com as caixas detectadas, lista de detecções, FPS, botões para ligar e parar a esteira e indicador de conexão com o backend.
+**Monitor em Tempo Real:** vídeo da câmera com as caixas detectadas, lista de detecções, FPS, botões para ligar e parar a esteira, indicador de conexão com o backend e status do sistema: câmera e YOLO ativos quando chegaram frames nos últimos 3 s; ESP32 com a porta serial em uso, ou "Demo" quando o backend roda sem serial.
 
 **Cancelas de Separação:** ângulo do servo para cada material (Plástico, Metal, Vidro, Papel). "Testar" move o servo para o ângulo escolhido, e "Salvar Configuração" grava `class_to_angle` em `backend/config.json`. Os ângulos passam a valer sem reiniciar o backend.
 
-**Configuração do Modelo:** modelo, confiança mínima, porta serial, baud rate e índice da câmera. "Salvar Configuração" grava no `backend/config.json`. Depois é preciso **reiniciar o backend** para valer. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
+**Configuração do Modelo:** modelo (os pesos TACO de `yolo_models/taco/`, com o `best.pt` como padrão; veja [`yolo_models/README.md`](../yolo_models/README.md)), confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. A confiança passa a valer na hora; modelo, câmera, porta serial e baud rate só depois de **reiniciar o backend**. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
 
 ## Problemas conhecidos
 
-- O painel de cancelas grava a chave `vidro`, mas o backend procura `glass`. Por isso, depois de salvar, vidro deixa de ser separado.
-- O seletor de modelo monta o caminho `../yolo_models/taco/<tipo>.pt`. "Small" aponta para o modelo COCO, "Nano" e "Medium" para os pesos TACO sem fine-tuning, e "Large" e "XLarge" para arquivos inexistentes. O modelo do projeto é o `best.pt` (veja [`yolo_models/README.md`](../yolo_models/README.md)).
-- Os painéis pedem `get_config`, mas o backend não responde a essa mensagem. Por isso mostram valores fixos, não a configuração atual.
+Veja [Limitações conhecidas](../README.md#limitações-conhecidas) no README principal.
 
 ## Troubleshooting
 
 **"Backend Offline":** confira se o backend está rodando e se a porta 8765 está livre (`python backend/test_connection.py`).
+
+**Configurações só com o backend rodando:** os painéis Modelo e Cancelas leem e gravam o `backend/config.json` pelo backend. Offline, ficam desabilitados na barra lateral; se o backend cair com um deles aberto, a interface volta para o Monitor.
+
+**Esteira só com o ESP32:** os botões Ligar/Parar do Monitor ficam desabilitados com o backend offline ou em modo demo (sem porta serial).

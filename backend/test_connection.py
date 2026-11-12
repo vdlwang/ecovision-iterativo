@@ -144,7 +144,7 @@ def main():
     
     if all_passed:
         print("\n✓ Todos os testes passaram! O sistema está pronto.")
-        print("\nExecute: python ecovision_local.py")
+        print("\nExecute: python ecovision_local_modf.py")
     else:
         print("\n✗ Alguns testes falharam. Corrija os problemas acima.")
     
