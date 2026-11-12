@@ -21,10 +21,13 @@ CLASSES = [
 ]
 
 
-def proposta(nome, caixas):
-    return {"anotador": "falso", "versao": "v1", "imagem": nome, "largura": 40, "altura": 20,
-            "caixas": [{"classe": c, "confianca": conf, "caixa": [4, 2, 20, 10]}
-                       for c, conf in caixas]}
+def proposta(nome, caixas, parametros=None):
+    """caixas: [(classe, confianca)] ou [(classe, confianca, caixa em pixels)]."""
+    return {"formato": 2, "anotador": "falso", "versao": "v1", "imagem": nome,
+            "largura": 40, "altura": 20, "parametros": parametros or {},
+            "caixas": [{"classe": c[0], "confianca": c[1],
+                        "caixa": list(c[2]) if len(c) > 2 else [4, 2, 20, 10]}
+                       for c in caixas]}
 
 
 @pytest.fixture
@@ -118,7 +121,7 @@ def test_detalhe_da_imagem(servidor):
     assert dados == {
         "nome": "b c.png", "status": "pendente", "final": None, "invalidas": 0,
         "propostas": {"falso": [{"id": 1, "nome": "Lata", "conf": 0.3,
-                                 "caixa": [0.1, 0.1, 0.5, 0.5]}]},
+                                 "caixa": [0.1, 0.1, 0.5, 0.5], "indice": 0}]},
         "candidatas": {"falso": []},
         "largura": 40, "altura": 20, "revisao": None}
     _, dados = pedir_json(servidor + "/api/imagens/e.jpg")
@@ -163,9 +166,9 @@ def enviar(url, corpo, tipo="application/json", host=None):
 def caixas_de(saida, nome, *trocas):
     """As propostas de 'falso' como a página as envia, com (índice, novo id) trocados."""
     dados = formato.ler_imagem(saida, nome, formato.nomes_classes(saida), ["falso"], None)
-    caixas = [{"id": c["id"], "caixa": c["caixa"], "proposta": k}
-              for k, c in enumerate(dados["propostas"]["falso"])]
-    for k, novo in trocas:
+    caixas = [{"id": c["id"], "caixa": c["caixa"], "proposta": c["indice"]}
+              for c in dados["propostas"]["falso"]]
+    for k, novo in trocas:  # k: posição na lista das visíveis
         caixas[k]["id"] = novo
     return caixas
 
@@ -181,7 +184,8 @@ def test_salvar_grava_rotulo_registro_e_status(servidor, saida):
     assert (saida / "labels" / "a.txt").read_text() == "1 0.300000 0.300000 0.400000 0.400000\n"
     revisao = dados["revisao"]
     assert revisao["acao"] == "salvar" and revisao["tempo_ativo_s"] == 7
-    assert revisao["base"] == {"anotador": "falso", "versao": "v1", "classes": None}
+    assert revisao["base"] == {"anotador": "falso", "versao": "v1", "classes": None,
+                               "limiares": {"confianca": 0.0, "confianca_classe": 0.0}}
     assert revisao["caixas"] == [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 1,
                                   "desfecho": "classe_corrigida"}]
     assert revisao["removidas"] == [0]
@@ -208,38 +212,45 @@ def test_aceitar_como_esta_e_fundo(servidor, saida):
     assert status == 200 and (saida / "labels" / "d.txt").read_text() == ""
 
 
-def test_classe_dada_a_proposta_sem_classe(servidor, saida):
-    formato.gravar_proposta(saida, proposta("a.jpg", [("Lata", 0.9), (None, 0.25)]))
-    # A página mostra a caixa sem classe e não deixa salvar com id nulo
-    _, dados = pedir_json(servidor + "/api/imagens/a.jpg")
-    assert dados["propostas"]["falso"][1]["id"] is None
-    assert dados["propostas"]["falso"][1]["nome"] is None
+def test_classe_escondida_abaixo_de_confianca_classe(servidor, saida):
+    formato.gravar_proposta(saida, proposta("a.jpg", [("Lata", 0.9), ("Garrafa", 0.25)],
+                                            {"confianca": 0.2, "confianca_classe": 0.5}))
+    # A página recebe a caixa sem a classe do anotador, nem pelo nome
+    status, tipo, corpo = pedir(servidor + "/api/imagens/a.jpg")
+    dados = json.loads(corpo)
+    assert dados["propostas"]["falso"][1] == {"id": None, "nome": None, "conf": 0.25,
+                                              "caixa": [0.1, 0.1, 0.5, 0.5], "indice": 1}
+    assert b"Garrafa" not in corpo
     caixas = caixas_de(saida, "a.jpg")
     status, erro = enviar(servidor + "/api/imagens/a.jpg",
                           {"acao": "salvar", "base": "falso", "caixas": caixas})
     assert status == 400 and "fora do data.yaml" in erro["erro"]
-    caixas[1]["id"] = 0
+    caixas[1]["id"] = 0  # a mesma classe do anotador: ainda assim, atribuída
     status, dados = enviar(servidor + "/api/imagens/a.jpg",
                            {"acao": "salvar", "base": "falso", "caixas": caixas})
     assert status == 200, dados
     assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["aceita", "classe_atribuida"]
+    assert dados["revisao"]["base"]["limiares"] == {"confianca": 0.2, "confianca_classe": 0.5}
 
 
 def test_caixa_de_candidata(servidor, saida):
-    dados = proposta("a.jpg", [("Lata", 0.9)])
-    dados["candidatas"] = [{"confianca": 0.12, "caixa": [20, 10, 36, 18]},
-                           {"confianca": 0.08, "caixa": [0, 0, 8, 8]}]
-    formato.gravar_proposta(saida, dados)
+    formato.gravar_proposta(saida, proposta(
+        "a.jpg", [("Lata", 0.9), ("Garrafa", 0.12, [20, 10, 36, 18]), ("Lata", 0.08, [0, 0, 8, 8])],
+        {"confianca": 0.2}))
     _, detalhe = pedir_json(servidor + "/api/imagens/a.jpg")
-    assert detalhe["candidatas"]["falso"] == [{"conf": 0.12, "caixa": [0.5, 0.5, 0.9, 0.9]},
-                                              {"conf": 0.08, "caixa": [0.0, 0.0, 0.2, 0.4]}]
+    assert [c["indice"] for c in detalhe["propostas"]["falso"]] == [0]
+    assert detalhe["candidatas"]["falso"] == [
+        {"indice": 1, "conf": 0.12, "caixa": [0.5, 0.5, 0.9, 0.9]},
+        {"indice": 2, "conf": 0.08, "caixa": [0.0, 0.0, 0.2, 0.4]}]
     url = servidor + "/api/imagens/a.jpg"
     base = caixas_de(saida, "a.jpg")
     nova = {"id": 0, "caixa": [0.5, 0.5, 0.9, 0.9], "proposta": None, "origem": "candidata"}
-    # origem desconhecida, candidata inexistente, origem em caixa de proposta
+    # origem desconhecida, candidata inexistente, origem em caixa de proposta, candidata
+    # citada como proposta (não é visível)
     for caixa, trecho in ((dict(nova, origem="desenho"), "desconhecida"),
                           (dict(nova, caixa=[0.5, 0.5, 0.8, 0.9]), "candidatas"),
-                          (dict(base[0], origem="candidata"), "não tem origem")):
+                          (dict(base[0], origem="candidata"), "não tem origem"),
+                          (dict(nova, proposta=1, origem=None), "não existe")):
         status, erro = enviar(url, {"acao": "salvar", "base": "falso", "caixas": [caixa]})
         assert status == 400 and trecho in erro["erro"], erro
     status, dados = enviar(url, {"acao": "salvar", "base": "falso", "caixas": base + [nova]})
@@ -247,6 +258,7 @@ def test_caixa_de_candidata(servidor, saida):
     assert dados["revisao"]["caixas"][1] == {"id": 0, "caixa": [0.5, 0.5, 0.9, 0.9],
                                              "proposta": None, "desfecho": "adicionada",
                                              "origem": "candidata"}
+    assert dados["revisao"]["removidas"] == []  # candidatas não contam como removidas
     assert (saida / "labels" / "a.txt").read_text().splitlines()[1] == \
         "0 0.700000 0.700000 0.400000 0.400000"
 
@@ -273,7 +285,7 @@ def test_descartar_apaga_o_rotulo(saida):
     ({"acao": "salvar", "base": "falso",
       "caixas": [{"id": 0, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 7}]}, "não existe"),
     ({"acao": "salvar", "base": "falso",
-      "caixas": [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.6], "proposta": 0}]}, "fase 4"),
+      "caixas": [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.6], "proposta": 0}]}, "decisão 12"),
     ({"acao": "salvar", "base": "falso",
       "caixas": [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 0},
                  {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 0}]}, "duas vezes"),

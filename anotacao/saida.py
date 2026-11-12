@@ -147,36 +147,25 @@ def caminho_proposta(saida, anotador, nome):
     return Path(saida) / "propostas" / anotador / f"{Path(nome).stem}.json"
 
 
-def montar_proposta(anotador, versao, parametros, classes, nome, tamanho, deteccoes,
-                    confianca_classe=0.0, candidatas=()):
+FORMATO_PROPOSTA = 2  # 2: lista única de caixas, limiares aplicados na leitura (decisão 16)
+
+
+def montar_proposta(anotador, versao, parametros, classes, nome, tamanho, deteccoes):
     """
-    deteccoes: [(id da classe, confianca, (x1, y1, x2, y2) normalizada)].
-    A caixa vai em pixels da imagem gravada; a classe, pelo nome. Abaixo de
-    confianca_classe, a caixa vai sem classe ("classe": null), para o revisor
-    dá-la sem ver a do anotador; esta fica em "sugerida", que as páginas não
-    mostram e as métricas (T10) podem usar. candidatas: [(confianca, caixa
-    normalizada)], para a caixa por clique na página; vão sem classe.
+    deteccoes: [(id da classe, confianca, (x1, y1, x2, y2) normalizada)], todas
+    as caixas do anotador a partir do piso dele, cada uma com a classe. A caixa
+    vai em pixels da imagem gravada; a classe, pelo nome. A proposta não
+    esconde nem separa nada: quem lê aplica os limiares gravados em parametros
+    (confianca, confianca_classe; ver separar()).
     """
     largura, altura = tamanho
-    caixas = []
-    for classe, conf, (x1, y1, x2, y2) in deteccoes:
-        caixa = {"classe": classes[classe]["nome"]}
-        if conf < confianca_classe:
-            caixa = {"classe": None, "sugerida": caixa["classe"]}
-        caixa["confianca"] = round(float(conf), 4)
-        caixa["caixa"] = [round(x1 * largura, 4), round(y1 * altura, 4),
-                          round(x2 * largura, 4), round(y2 * altura, 4)]
-        caixas.append(caixa)
-    proposta = {"anotador": anotador, "versao": versao, "parametros": parametros,
-                "classes": hash_classes(classes), "imagem": nome,
-                "largura": largura, "altura": altura, "caixas": caixas}
-    if candidatas:
-        proposta["candidatas"] = [
-            {"confianca": round(float(conf), 4),
-             "caixa": [round(x1 * largura, 4), round(y1 * altura, 4),
-                       round(x2 * largura, 4), round(y2 * altura, 4)]}
-            for conf, (x1, y1, x2, y2) in candidatas]
-    return proposta
+    caixas = [{"classe": classes[classe]["nome"], "confianca": round(float(conf), 4),
+               "caixa": [round(x1 * largura, 4), round(y1 * altura, 4),
+                         round(x2 * largura, 4), round(y2 * altura, 4)]}
+              for classe, conf, (x1, y1, x2, y2) in deteccoes]
+    return {"formato": FORMATO_PROPOSTA, "anotador": anotador, "versao": versao,
+            "parametros": parametros, "classes": hash_classes(classes), "imagem": nome,
+            "largura": largura, "altura": altura, "caixas": caixas}
 
 
 def gravar_proposta(saida, proposta):
@@ -191,14 +180,15 @@ def ler_proposta(caminho):
             proposta[campo]
     except (ValueError, KeyError, TypeError) as erro:
         raise ValueError(f"{caminho}: proposta inválida ({erro})") from None
+    if proposta.get("formato") != FORMATO_PROPOSTA:
+        raise ValueError(f"{caminho}: proposta no formato {proposta.get('formato', 1)}, "
+                         f"anterior ao {FORMATO_PROPOSTA} (caixas e candidatas numa lista "
+                         "só); anote de novo numa saída nova")
     return proposta
 
 
 def caixas_normalizadas(proposta):
-    """
-    [(nome da classe, confianca, (x1, y1, x2, y2) normalizada)] de uma
-    proposta; nome None para caixa proposta sem classe.
-    """
+    """[(nome da classe, confianca, (x1, y1, x2, y2) normalizada)] de uma proposta."""
     largura, altura = proposta["largura"], proposta["altura"]
     return [(c["classe"], c["confianca"],
              (c["caixa"][0] / largura, c["caixa"][1] / altura,
@@ -206,12 +196,32 @@ def caixas_normalizadas(proposta):
             for c in proposta["caixas"]]
 
 
-def candidatas_normalizadas(proposta):
-    """[(confianca, (x1, y1, x2, y2) normalizada)] das candidatas; [] se não houver."""
-    largura, altura = proposta["largura"], proposta["altura"]
-    return [(c["confianca"], (c["caixa"][0] / largura, c["caixa"][1] / altura,
-                              c["caixa"][2] / largura, c["caixa"][3] / altura))
-            for c in proposta.get("candidatas", [])]
+def limiares(proposta):
+    """(confianca, confianca_classe) de leitura, gravados pelo anotador; 0 se faltarem."""
+    parametros = proposta.get("parametros") or {}
+    return (float(parametros.get("confianca", 0.0)),
+            float(parametros.get("confianca_classe", 0.0)))
+
+
+def separar(proposta):
+    """
+    Aplica os limiares de leitura da proposta (decisão 16):
+    - visiveis: {índice na proposta: (classe, confianca, caixa, classe_visivel)},
+      as caixas com confianca >= confianca, que a página mostra; classe_visivel
+      é False abaixo de confianca_classe, e a página não recebe a classe (o
+      revisor a dá sem ver a do anotador);
+    - candidatas: [(índice, confianca, caixa)], as de baixo, para a caixa por
+      clique.
+    O índice é o da lista completa, estável qualquer que seja o limiar.
+    """
+    confianca, confianca_classe = limiares(proposta)
+    visiveis, candidatas = {}, []
+    for k, (classe, conf, caixa) in enumerate(caixas_normalizadas(proposta)):
+        if conf >= confianca:
+            visiveis[k] = (classe, conf, caixa, conf >= confianca_classe)
+        else:
+            candidatas.append((k, conf, caixa))
+    return visiveis, candidatas
 
 
 def anotadores(saida):
@@ -224,8 +234,9 @@ def aceitar(saida, anotador, nomes=None):
     """
     Copia as propostas do anotador para labels/, com os ids do data.yaml, e
     marca as imagens como revisadas: o comportamento antigo, proposta direto
-    como rótulo. Só mexe nas pendentes (nomes=None: todas). Imagem com caixa
-    sem classe fica pendente: a classe dela é do revisor. Devolve (quantas
+    como rótulo. Só as caixas visíveis (separar()); só mexe nas pendentes
+    (nomes=None: todas). Imagem com caixa de classe escondida fica pendente: a
+    classe dela é do revisor. Devolve (quantas
     aceitou, [imagens deixadas pendentes por caixa sem classe]).
     """
     ids = {n: i for i, n in nomes_classes(saida).items()}
@@ -237,12 +248,12 @@ def aceitar(saida, anotador, nomes=None):
         caminho = caminho_proposta(saida, anotador, nome)
         if not caminho.exists():
             continue
-        caixas = caixas_normalizadas(ler_proposta(caminho))
-        if any(classe is None for classe, _, _ in caixas):
+        visiveis, _ = separar(ler_proposta(caminho))
+        if not all(mostra for _, _, _, mostra in visiveis.values()):
             sem_classe.append(nome)
             continue
         texto = []
-        for classe, _, caixa in caixas:
+        for classe, _, caixa, _ in visiveis.values():
             if classe not in ids:
                 raise ValueError(f"{caminho}: classe '{classe}' fora do data.yaml")
             texto.append(linha_yolo(ids[classe], caixa) + "\n")
@@ -298,10 +309,11 @@ def caixa_json(id_classe, nome, confianca, caixa):
 def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado, com_candidatas=False):
     """
     O que as páginas mostram de uma imagem: status (None fora do imagens.csv),
-    caixas finais (None sem .txt), linhas inválidas do .txt e as propostas de
-    cada anotador, com as caixas no formato de caixa_json. com_candidatas: também
-    as candidatas de cada anotador, {"conf", "caixa"} (só a página de revisão
-    as usa; na estática, pesariam no HTML).
+    caixas finais (None sem .txt), linhas inválidas do .txt e as propostas
+    visíveis de cada anotador (separar()), no formato de caixa_json mais o
+    "indice" na proposta; a de classe escondida vem com id e nome None.
+    com_candidatas: também as candidatas de cada anotador, {"indice", "conf",
+    "caixa"} (só a página de revisão as usa; na estática, pesariam no HTML).
     """
     saida = Path(saida)
     ids = {n: i for i, n in nomes.items()}
@@ -310,11 +322,14 @@ def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado, com_candidata
     for anotador in anotadores_saida:
         caminho = caminho_proposta(saida, anotador, nome)
         if caminho.exists():
-            proposta = ler_proposta(caminho)
-            propostas[anotador] = [caixa_json(ids.get(classe), classe, conf, caixa)
-                                   for classe, conf, caixa in caixas_normalizadas(proposta)]
-            candidatas[anotador] = [{"conf": conf, "caixa": [round(v, 6) for v in caixa]}
-                                    for conf, caixa in candidatas_normalizadas(proposta)]
+            visiveis, abaixo = separar(ler_proposta(caminho))
+            propostas[anotador] = [
+                dict(caixa_json(ids.get(classe) if mostra else None,
+                                classe if mostra else None, conf, caixa), indice=k)
+                for k, (classe, conf, caixa, mostra) in visiveis.items()]
+            candidatas[anotador] = [{"indice": k, "conf": conf,
+                                     "caixa": [round(v, 6) for v in caixa]}
+                                    for k, conf, caixa in abaixo]
     dados = {
         "nome": nome,
         "status": linha_estado["status"] if linha_estado else None,
@@ -363,14 +378,14 @@ def ler_revisao(saida, nome):
         raise ValueError(f"{caminho}: registro inválido ({erro})") from None
 
 
-def validar_caixas(caixas, nomes, propostas, candidatas=()):
+def validar_caixas(caixas, nomes, visiveis, candidatas=()):
     """
     Confere as caixas finais vindas da página e devolve-as como
     [(id, (x1, y1, x2, y2), índice da proposta ou None, origem ou None)].
-    propostas: as caixas normalizadas do anotador de base; candidatas: as
-    candidatas dele. Enquanto a página não move caixas (fase 4), uma caixa que
-    vem de uma proposta tem de ter as coordenadas dela, e uma adicionada com
-    origem "candidata", as de uma candidata.
+    visiveis e candidatas: as do anotador de base, de separar(). Uma caixa que
+    vem de uma proposta cita o índice dela, que tem de ser de uma visível.
+    Enquanto a página não move caixas, ela tem de ter as coordenadas da
+    proposta, e uma adicionada com origem "candidata", as de uma candidata.
     """
     if not isinstance(caixas, list):
         raise RevisaoInvalida("'caixas' deve ser uma lista")
@@ -388,45 +403,45 @@ def validar_caixas(caixas, nomes, propostas, candidatas=()):
             raise RevisaoInvalida(f"caixa {i}: coordenadas fora de [0, 1] ou invertidas: {caixa}")
         if proposta is not None:
             if (not isinstance(proposta, int) or isinstance(proposta, bool)
-                    or not 0 <= proposta < len(propostas)):
+                    or proposta not in visiveis):
                 raise RevisaoInvalida(f"caixa {i}: proposta {proposta!r} não existe")
             if proposta in usadas:
                 raise RevisaoInvalida(f"caixa {i}: proposta {proposta} usada duas vezes")
             usadas.add(proposta)
-            original = propostas[proposta][2]
+            original = visiveis[proposta][2]
             if any(abs(a - b) > TOLERANCIA_CAIXA for a, b in zip(caixa, original)):
                 raise RevisaoInvalida(f"caixa {i}: coordenadas diferentes das da proposta "
-                                      f"{proposta} (mover caixas é a fase 4)")
+                                      f"{proposta} (mover caixas está adiado, decisão 12)")
             caixa = original  # sem o arredondamento da página
             if origem is not None:
                 raise RevisaoInvalida(f"caixa {i}: caixa de proposta não tem origem")
         elif origem is not None:
             if origem not in ORIGENS:
                 raise RevisaoInvalida(f"caixa {i}: origem {origem!r} desconhecida")
-            iguais = [c for _, c in candidatas
+            iguais = [c for _, _, c in candidatas
                       if all(abs(a - b) <= TOLERANCIA_CAIXA for a, b in zip(caixa, c))]
             if not iguais:
                 raise RevisaoInvalida(f"caixa {i}: não é nenhuma das candidatas do anotador "
-                                      "de base (mover caixas é a fase 4)")
+                                      "de base (mover caixas está adiado, decisão 12)")
             caixa = iguais[0]
         resultado.append((id_classe, caixa, proposta, origem))
     return resultado
 
 
-def desfechos(caixas, propostas, ids):
+def desfechos(caixas, visiveis, ids):
     """
     Desfecho de cada caixa final frente à proposta de origem: 'aceita',
-    'classe_corrigida', 'classe_atribuida' (proposta sem classe) ou
-    'adicionada' (sem proposta); e os índices das propostas removidas.
-    ids: {nome da classe: id}.
+    'classe_corrigida', 'classe_atribuida' (a classe da proposta estava
+    escondida do revisor) ou 'adicionada' (sem proposta); e os índices das
+    propostas visíveis removidas. ids: {nome da classe: id}.
     """
     registro = []
     for id_classe, caixa, proposta, origem in caixas:
         if proposta is None:
             desfecho = "adicionada"
-        elif propostas[proposta][0] is None:
+        elif not visiveis[proposta][3]:
             desfecho = "classe_atribuida"
-        elif ids.get(propostas[proposta][0]) == id_classe:
+        elif ids.get(visiveis[proposta][0]) == id_classe:
             desfecho = "aceita"
         else:
             desfecho = "classe_corrigida"
@@ -436,7 +451,7 @@ def desfechos(caixas, propostas, ids):
             item["origem"] = origem
         registro.append(item)
     usadas = {p for _, _, p, _ in caixas if p is not None}
-    return registro, [i for i in range(len(propostas)) if i not in usadas]
+    return registro, [k for k in visiveis if k not in usadas]
 
 
 def revisar(saida, nome, pedido, agora):
@@ -461,23 +476,22 @@ def revisar(saida, nome, pedido, agora):
 
     nomes = nomes_classes(saida)
     base = pedido.get("base")
-    proposta, propostas, candidatas = None, [], []
+    proposta, visiveis, candidatas = None, {}, []
     if base is not None:
         caminho = caminho_proposta(saida, str(base), nome) if base in anotadores(saida) else None
         if caminho is None or not caminho.exists():
             raise RevisaoInvalida(f"'{nome}' não tem proposta de '{base}'")
         proposta = ler_proposta(caminho)
-        propostas = caixas_normalizadas(proposta)
-        candidatas = candidatas_normalizadas(proposta)
+        visiveis, candidatas = separar(proposta)
 
     rotulo = saida / "labels" / f"{Path(nome).stem}.txt"
     if pedido["acao"] == "salvar":
-        caixas = validar_caixas(pedido.get("caixas", []), nomes, propostas, candidatas)
-        registro_caixas, removidas = desfechos(caixas, propostas, {n: i for i, n in nomes.items()})
+        caixas = validar_caixas(pedido.get("caixas", []), nomes, visiveis, candidatas)
+        registro_caixas, removidas = desfechos(caixas, visiveis, {n: i for i, n in nomes.items()})
         gravar_atomico(rotulo, "".join(linha_yolo(i, c) + "\n" for i, c, _, _ in caixas))
         status = "revisada"
     else:
-        registro_caixas, removidas = [], list(range(len(propostas)))
+        registro_caixas, removidas = [], list(visiveis)
         rotulo.unlink(missing_ok=True)
         status = "descartada"
 
@@ -486,7 +500,8 @@ def revisar(saida, nome, pedido, agora):
         "tempo_ativo_s": round(float(tempo), 1), "revisor": None,
         "base": None if proposta is None else {
             "anotador": proposta["anotador"], "versao": proposta.get("versao"),
-            "classes": proposta.get("classes")},
+            "classes": proposta.get("classes"),
+            "limiares": dict(zip(("confianca", "confianca_classe"), limiares(proposta)))},
         "caixas": registro_caixas, "removidas": removidas,
     }
     gravar_atomico(caminho_revisao(saida, nome),

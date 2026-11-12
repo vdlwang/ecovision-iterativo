@@ -35,15 +35,16 @@ from visualizar import gerar_pagina
 
 DIR_SCRIPT = Path(__file__).resolve().parent
 MODELO_PADRAO = "IDEA-Research/grounding-dino-tiny"
-CONFIANCA_PADRAO = 0.20  # pela cobertura sem classe (OBJETIVO.md, 2026-11-11)
-# Abaixo dela, a caixa é proposta sem classe e o revisor tem de dá-la (OBJETIVO.md, 2026-11-11)
-CONFIANCA_CLASSE_PADRAO = 0.35
-# Caixa contida nessa fração numa maior e mais confiante é removida (OBJETIVO.md, 2026-11-11)
-CONTENCAO_PADRAO = 0.9
-# Candidatas da caixa por clique na revisão (OBJETIVO.md, 2026-11-11): caixas
-# brutas com confiança >= piso, sem classe, depois de um NMS frouxo
-PISO_CANDIDATAS_PADRAO = 0.05
-NMS_CANDIDATAS = 0.8
+# Limiares de detecção (OBJETIVO.md, seções 5 e 6). A proposta guarda todas as
+# caixas a partir do piso; os outros dois são de leitura (decisão 16): a página
+# mostra a partir de CONFIANCA, oferece as de baixo como candidatas do clique e
+# esconde a classe abaixo de CONFIANCA_CLASSE.
+PISO_PADRAO = 0.05            # caixa por clique: 81% dos objetos sem caixa (2026-11-11)
+CONFIANCA_PADRAO = 0.20       # pela cobertura sem classe (2026-11-11)
+CONFIANCA_CLASSE_PADRAO = 0.35  # viés de automação (2026-11-11)
+IOU_PADRAO = 0.5
+AREA_MAXIMA_PADRAO = 0.5      # o Grounding DINO costuma propor a esteira inteira
+CONTENCAO_PADRAO = 0.9        # caixa contida numa maior e mais confiante sai (2026-11-11)
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
@@ -198,69 +199,113 @@ def abrir_imagem(caminho):
     return ImageOps.exif_transpose(imagem).convert("RGB"), girada
 
 
-class GroundingDino:
+class Detector:
     """
-    Grounding DINO carregado uma vez, com o prompt das classes já tokenizado.
+    Base dos anotadores que detectam: o que não depende do modelo. Uma
+    subclasse define nome (a pasta das propostas) e MODELO_PADRAO, e implementa
+    só carregar() e pontuar(imagem); a base escolhe a classe de cada caixa
+    (com a classe de reserva), descarta as fora da área máxima e abaixo do piso,
+    e aplica o NMS sem classe e a remoção das contidas.
 
-    Interface de todo anotador (ver ANOTADORES): o atributo nome, que é a pasta
-    das propostas; opcoes(parser), que acrescenta as opções de linha de comando
-    dele; criar(classes, args); e, na instância, versao, parametros e
-    anotar(imagem) -> [(id da classe, confianca, (x1, y1, x2, y2) normalizada)].
-    Opcional: propor(imagem) -> (as mesmas detecções, [(confianca, caixa)]), com
-    as candidatas para a caixa por clique na página de revisão.
+    Interface de todo anotador (ver ANOTADORES), detector ou não: o atributo
+    nome; opcoes(parser), com as opções próprias dele (as comuns de detecção
+    estão em main()); criar(classes, args); e, na instância, versao, parametros
+    e anotar(imagem) -> [(id da classe, confianca, (x1, y1, x2, y2) normalizada)],
+    todas as caixas a partir do piso. parametros traz confianca e
+    confianca_classe, os limiares de leitura (saida.separar()).
     """
 
-    nome = "grounding-dino"
+    nome = None
+    MODELO_PADRAO = None
 
-    @staticmethod
-    def opcoes(parser):
-        grupo = parser.add_argument_group("grounding-dino")
-        grupo.add_argument("--modelo", default=MODELO_PADRAO,
-                           help=f"modelo do Hugging Face (padrão: {MODELO_PADRAO})")
-        grupo.add_argument("--confianca", type=float, default=CONFIANCA_PADRAO,
-                           help=f"confiança mínima por caixa (padrão: {CONFIANCA_PADRAO})")
-        grupo.add_argument("--iou", type=float, default=0.5,
-                           help="IoU acima do qual caixas sobrepostas viram uma (padrão: 0.5)")
-        grupo.add_argument("--area-maxima", type=float, default=0.5,
-                           help="descarta caixas maiores que essa fração da imagem "
-                                "(padrão: 0.5)")
-        grupo.add_argument("--candidatas", type=float, default=PISO_CANDIDATAS_PADRAO,
-                           help="confiança mínima das candidatas gravadas para a caixa por "
-                                f"clique; 1 desliga (padrão: {PISO_CANDIDATAS_PADRAO})")
-        grupo.add_argument("--contencao", type=float, default=CONTENCAO_PADRAO,
-                           help="remove a caixa contida nessa fração numa maior e mais "
-                                f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
+    @classmethod
+    def opcoes(cls, parser):
+        """Opções próprias do detector; as comuns (main()) servem a todos."""
 
     @classmethod
     def criar(cls, classes, args):
-        return cls(classes, args.modelo, args.dispositivo, args.confianca, args.iou,
-                   args.area_maxima, args.contencao, args.candidatas)
+        return cls(classes, modelo=args.modelo, dispositivo=args.dispositivo,
+                   piso=args.piso, confianca=args.confianca,
+                   confianca_classe=args.confianca_classe, limiar_iou=args.iou,
+                   area_maxima=args.area_maxima, contencao=args.contencao)
 
-    def __init__(self, classes, modelo, dispositivo, confianca, limiar_iou, area_maxima,
-                 contencao=CONTENCAO_PADRAO, piso_candidatas=PISO_CANDIDATAS_PADRAO):
-        import torch
-        from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
-
-        self.torch = torch
-        self.dispositivo = dispositivo or ("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, classes, modelo=None, dispositivo=None, piso=PISO_PADRAO,
+                 confianca=CONFIANCA_PADRAO, confianca_classe=CONFIANCA_CLASSE_PADRAO,
+                 limiar_iou=IOU_PADRAO, area_maxima=AREA_MAXIMA_PADRAO,
+                 contencao=CONTENCAO_PADRAO):
+        if not 0 <= piso <= confianca <= 1:
+            raise ValueError(f"limiares inválidos: piso {piso} e confiança {confianca} "
+                             "(0 <= piso <= confiança <= 1)")
+        self.classes = classes
+        self.n_classes = len(classes)
+        self.reservas = frozenset(i for i, c in enumerate(classes) if c.get("reserva"))
+        self.versao = modelo or self.MODELO_PADRAO
+        self.dispositivo = dispositivo
+        self.piso = piso
         self.confianca = confianca
         self.limiar_iou = limiar_iou
         self.area_maxima = area_maxima
         self.contencao = contencao
-        self.piso_candidatas = piso_candidatas
-        self.n_classes = len(classes)
-        self.reservas = frozenset(i for i, c in enumerate(classes) if c.get("reserva"))
-        self.versao = modelo
-        self.parametros = {"confianca": confianca, "iou": limiar_iou,
-                           "area_maxima": area_maxima, "contencao": contencao,
-                           "candidatas": piso_candidatas}
+        self.parametros = {"piso": piso, "confianca": confianca,
+                           "confianca_classe": confianca_classe, "iou": limiar_iou,
+                           "area_maxima": area_maxima, "contencao": contencao}
+        self.carregar()
 
-        print(f"Carregando {modelo} em {self.dispositivo}...")
-        self.processador = AutoProcessor.from_pretrained(modelo)
-        self.modelo = AutoModelForZeroShotObjectDetection.from_pretrained(modelo)
+    def carregar(self):
+        """Carrega o modelo (self.versao) em self.dispositivo, se dado."""
+        raise NotImplementedError
+
+    def pontuar(self, imagem):
+        """
+        Saída bruta do modelo para uma imagem PIL em RGB: (pontuacoes, caixas).
+        pontuacoes: a pontuação de cada classe (na ordem de classes) em cada
+        caixa, lista de listas ou tensor (caixas, classes); caixas: (x1, y1,
+        x2, y2) normalizadas de 0 a 1, uma por linha de pontuacoes.
+        """
+        raise NotImplementedError
+
+    def filtrar(self, pontuacoes, caixas, piso=None):
+        """
+        Saída de pontuar() -> [(classe, confianca, (x1, y1, x2, y2))], da mais
+        confiante para a menos, após o piso, a área máxima, o NMS e a remoção
+        das contidas. piso substitui o do construtor (avaliar.py).
+        """
+        piso = self.piso if piso is None else piso
+        linhas = pontuacoes.tolist() if hasattr(pontuacoes, "tolist") else pontuacoes
+        deteccoes = []
+        for linha, caixa in zip(linhas, caixas):
+            # A reserva compete pelo limiar de leitura, não pelo piso: é o que
+            # decide se alguma classe comum "chegou"
+            classe, conf = escolher_classe(linha, self.reservas, self.confianca)
+            if conf < piso:
+                continue
+            area = (caixa[2] - caixa[0]) * (caixa[3] - caixa[1])
+            if caixa[2] > caixa[0] and caixa[3] > caixa[1] and area <= self.area_maxima:
+                deteccoes.append((classe, conf, caixa))
+        return sem_contidas(nms(deteccoes, self.limiar_iou), self.contencao)
+
+    def anotar(self, imagem):
+        return self.filtrar(*self.pontuar(imagem))
+
+
+class GroundingDino(Detector):
+    """Grounding DINO, com o prompt das classes já tokenizado."""
+
+    nome = "grounding-dino"
+    MODELO_PADRAO = MODELO_PADRAO
+
+    def carregar(self):
+        import torch
+        from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+
+        self.torch = torch
+        self.dispositivo = self.dispositivo or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Carregando {self.versao} em {self.dispositivo}...")
+        self.processador = AutoProcessor.from_pretrained(self.versao)
+        self.modelo = AutoModelForZeroShotObjectDetection.from_pretrained(self.versao)
         self.modelo.to(self.dispositivo).eval()
 
-        self.texto, intervalos = montar_prompt(classes)
+        self.texto, intervalos = montar_prompt(self.classes)
         tokens = self.processador.tokenizer(self.texto, return_offsets_mapping=True)
         limite = getattr(self.modelo.config, "max_text_len", 256)
         if len(tokens["input_ids"]) > limite:
@@ -271,9 +316,9 @@ class GroundingDino:
 
     def pontuar(self, imagem):
         """
-        Saída bruta do modelo, sem filtro: a pontuação de cada classe em cada
-        consulta, tensor (consultas, classes), e as caixas (x1, y1, x2, y2)
-        normalizadas e recortadas à imagem, lista com uma por consulta.
+        As 900 consultas do modelo: tensor (consultas, classes) e as caixas
+        recortadas à imagem. A pontuação de uma classe numa consulta é a maior
+        entre os tokens do prompt dela.
         """
         torch = self.torch
         entradas = self.processador(images=imagem, text=self.texto, return_tensors="pt")
@@ -283,8 +328,6 @@ class GroundingDino:
         with torch.no_grad():
             saida = self.modelo(**entradas)
 
-        # logits: (consultas, tokens); a confiança de uma classe numa caixa é
-        # a maior entre os tokens do prompt dela
         logits = saida.logits[0, :, :len(self.token_classe)].sigmoid().cpu()
         por_classe = torch.zeros(logits.shape[0], self.n_classes)
         for t, c in enumerate(self.token_classe):
@@ -296,46 +339,6 @@ class GroundingDino:
                    min(1.0, cx + w / 2), min(1.0, cy + h / 2))
                   for cx, cy, w, h in saida.pred_boxes[0].cpu().tolist()]
         return por_classe, caixas
-
-    def filtrar(self, por_classe, caixas, confianca=None):
-        """
-        Saída de pontuar() -> [(classe, confianca, (x1, y1, x2, y2))] após os
-        filtros, o NMS e a remoção das caixas contidas. confianca substitui a do construtor (para o avaliar.py).
-        """
-        if confianca is None:
-            confianca = self.confianca
-        deteccoes = []
-        for pontuacoes, caixa in zip(por_classe.tolist(), caixas):
-            classe, conf = escolher_classe(pontuacoes, self.reservas, confianca)
-            if conf < confianca:
-                continue
-            area = (caixa[2] - caixa[0]) * (caixa[3] - caixa[1])
-            # O Grounding DINO costuma propor uma caixa para a esteira inteira
-            if caixa[2] > caixa[0] and caixa[3] > caixa[1] and area <= self.area_maxima:
-                deteccoes.append((classe, conf, caixa))
-        return sem_contidas(nms(deteccoes, self.limiar_iou), self.contencao)
-
-    def candidatas(self, por_classe, caixas):
-        """
-        Saída de pontuar() -> [(confianca, (x1, y1, x2, y2))]: as caixas brutas
-        com a maior pontuação entre as classes >= piso_candidatas, dentro da
-        área máxima, depois de um NMS frouxo (só junta quase iguais), da mais
-        confiante para a menos. Sem classe: o revisor dá a classe.
-        """
-        conf = por_classe.max(dim=1).values.tolist()
-        brutas = [(None, s, c) for s, c in zip(conf, caixas)
-                  if s >= self.piso_candidatas and c[2] > c[0] and c[3] > c[1]
-                  and (c[2] - c[0]) * (c[3] - c[1]) <= self.area_maxima]
-        return [(s, c) for _, s, c in nms(brutas, NMS_CANDIDATAS)]
-
-    def propor(self, imagem):
-        """(detecções como em anotar(), candidatas como em candidatas())."""
-        por_classe, caixas = self.pontuar(imagem)
-        return self.filtrar(por_classe, caixas), self.candidatas(por_classe, caixas)
-
-    def anotar(self, imagem):
-        """Devolve [(classe, confianca, (x1, y1, x2, y2) normalizada)] após o NMS."""
-        return self.filtrar(*self.pontuar(imagem))
 
 
 # Anotadores disponíveis em --anotador, pelo nome
@@ -385,13 +388,16 @@ def preparar_saida(saida, nomes):
         formato.gravar_estado(saida, list(formato.COLUNAS), {})
 
 
-def desenhar_previa(imagem, deteccoes, classes, destino, confianca_classe=0.0):
+def desenhar_previa(imagem, deteccoes, classes, destino, confianca=0.0, confianca_classe=0.0):
+    """As caixas que a página mostraria (a partir de confianca), "sem classe" abaixo de confianca_classe."""
     previa = imagem.copy()
     desenho = ImageDraw.Draw(previa)
     largura, altura = previa.size
     espessura = max(2, round(min(largura, altura) / 300))
     fonte = ImageFont.load_default(size=max(12, round(min(largura, altura) / 50)))
     for classe, conf, (x1, y1, x2, y2) in deteccoes:
+        if conf < confianca:
+            continue
         caixa = (x1 * largura, y1 * altura, x2 * largura, y2 * altura)
         desenho.rectangle(caixa, outline=(34, 197, 94), width=espessura)
         nome = classes[classe]["nome"] if conf >= confianca_classe else "sem classe"
@@ -447,19 +453,40 @@ def main(argv=None):
     parser.add_argument("--dispositivo", help="cuda ou cpu (padrão: cuda se houver)")
     parser.add_argument("--previa", action="store_true",
                         help="grava também previa/<anotador>/<nome>.jpg com as caixas desenhadas")
-    parser.add_argument("--confianca-classe", type=float, default=CONFIANCA_CLASSE_PADRAO,
-                        help="caixas com confiança abaixo dessa são propostas sem classe, e o "
-                             "revisor tem de dá-la; 0 desliga "
-                             f"(padrão: {CONFIANCA_CLASSE_PADRAO})")
     parser.add_argument("--sobrescrever", action="store_true",
                         help="anota de novo imagens pendentes que já têm proposta deste anotador")
     parser.add_argument("--aceitar", action="store_true",
                         help="copia as propostas do anotador para labels/ como rótulos finais "
                              "e marca as imagens como revisadas (só as pendentes; sem "
                              "imagens na linha de comando, todas)")
+    deteccao = parser.add_argument_group(
+        "detecção", "a proposta guarda todas as caixas a partir do piso; --confianca e "
+                    "--confianca-classe são gravados nela e aplicados por quem lê")
+    deteccao.add_argument("--modelo", help="modelo do anotador (padrão: o do anotador; "
+                                           f"grounding-dino: {MODELO_PADRAO})")
+    deteccao.add_argument("--piso", type=float, default=PISO_PADRAO,
+                          help="confiança mínima gravada; as caixas entre o piso e --confianca "
+                               f"são as candidatas da caixa por clique (padrão: {PISO_PADRAO})")
+    deteccao.add_argument("--confianca", type=float, default=CONFIANCA_PADRAO,
+                          help="a página mostra as caixas a partir dessa confiança "
+                               f"(padrão: {CONFIANCA_PADRAO})")
+    deteccao.add_argument("--confianca-classe", type=float, default=CONFIANCA_CLASSE_PADRAO,
+                          help="abaixo dessa, a página mostra a caixa sem classe, e o revisor "
+                               f"tem de dá-la; 0 desliga (padrão: {CONFIANCA_CLASSE_PADRAO})")
+    deteccao.add_argument("--iou", type=float, default=IOU_PADRAO,
+                          help="IoU acima do qual caixas sobrepostas viram uma, qualquer que "
+                               f"seja a classe (padrão: {IOU_PADRAO})")
+    deteccao.add_argument("--area-maxima", type=float, default=AREA_MAXIMA_PADRAO,
+                          help="descarta caixas maiores que essa fração da imagem "
+                               f"(padrão: {AREA_MAXIMA_PADRAO})")
+    deteccao.add_argument("--contencao", type=float, default=CONTENCAO_PADRAO,
+                          help="remove a caixa contida nessa fração numa maior e mais "
+                               f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
     for anotador in ANOTADORES.values():
         anotador.opcoes(parser)
     args = parser.parse_args(argv)
+    if not 0 <= args.piso <= args.confianca <= 1:
+        parser.error("os limiares têm de valer 0 <= --piso <= --confianca <= 1")
 
     if not (args.saida / "imagens.csv").exists():
         parser.error(f"{args.saida} não tem imagens importadas (use o importar.py antes)")
@@ -478,28 +505,28 @@ def main(argv=None):
 
     for nome in alvo:
         imagem, _ = abrir_imagem(args.saida / "images" / nome)
-        if hasattr(anotador, "propor"):
-            deteccoes, candidatas = anotador.propor(imagem)
-        else:
-            deteccoes, candidatas = anotador.anotar(imagem), []
+        deteccoes = anotador.anotar(imagem)
         # Região de interesse do lote: fora dela (pelo centro da caixa), é fundo fixo
         regiao = lotes.get(linhas[nome].get("lote"), {}).get("regiao")
         deteccoes = [d for d in deteccoes if formato.dentro_da_regiao(d[2], regiao)]
-        candidatas = [c for c in candidatas if formato.dentro_da_regiao(c[1], regiao)]
 
+        # Os limiares de leitura vão na proposta; um anotador que não os define
+        # recebe os da linha de comando
+        parametros = {"confianca": args.confianca, "confianca_classe": args.confianca_classe,
+                      **anotador.parametros}
         formato.gravar_proposta(args.saida, formato.montar_proposta(
-            anotador.nome, anotador.versao,
-            dict(anotador.parametros, confianca_classe=args.confianca_classe), classes,
-            nome, imagem.size, deteccoes, args.confianca_classe, candidatas))
+            anotador.nome, anotador.versao, parametros, classes, nome, imagem.size, deteccoes))
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
                             args.saida / "previa" / args.anotador / f"{Path(nome).stem}.jpg",
-                            args.confianca_classe)
+                            parametros["confianca"], parametros["confianca_classe"])
 
+        visiveis = [(c, conf) for c, conf, _ in deteccoes if conf >= parametros["confianca"]]
         resumo = ", ".join(
-            f"{classes[c]['nome'] if conf >= args.confianca_classe else 'sem classe'} {conf:.2f}"
-            for c, conf, _ in deteccoes)
-        print(f"{nome}: {len(deteccoes)} objeto(s){': ' + resumo if resumo else ''}")
+            f"{classes[c]['nome'] if conf >= parametros['confianca_classe'] else 'sem classe'} "
+            f"{conf:.2f}" for c, conf in visiveis)
+        print(f"{nome}: {len(visiveis)} objeto(s){': ' + resumo if resumo else ''} "
+              f"(+{len(deteccoes) - len(visiveis)} candidata(s))")
 
     if args.aceitar:
         escolhidas = set(alvo) if args.imagens else None

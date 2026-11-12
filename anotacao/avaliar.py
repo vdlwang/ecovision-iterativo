@@ -218,8 +218,10 @@ def main(argv=None):
     print(f"{corrigidas} rótulo(s) corrigido(s) por "
           f"{'nenhum arquivo' if args.sem_correcoes else args.correcoes.name}")
 
-    anotador = anotar.GroundingDino(classes, args.modelo, args.dispositivo, min(args.limiares),
-                                    args.iou, args.area_maxima)
+    piso = min(args.limiares)
+    anotador = anotar.GroundingDino(classes, modelo=args.modelo, dispositivo=args.dispositivo,
+                                    piso=piso, confianca=max(piso, anotar.CONFIANCA_PADRAO),
+                                    limiar_iou=args.iou, area_maxima=args.area_maxima)
     matriz = Counter()
     contagens = {limiar: [0, 0, 0] for limiar in args.limiares}
     fora = Counter()
@@ -239,7 +241,7 @@ def main(argv=None):
             matriz[(classe, prevista)] += 1
 
         for limiar in args.limiares:
-            resultado = casar(anotador.filtrar(por_classe, caixas, limiar), verdade)
+            resultado = casar(anotador.filtrar(por_classe, caixas, piso=limiar), verdade)
             contagens[limiar] = [a + b for a, b in zip(contagens[limiar], resultado)]
         print(f"\r{i}/{len(itens)}", end="", flush=True)
     print()

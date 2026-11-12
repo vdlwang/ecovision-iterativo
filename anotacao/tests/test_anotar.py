@@ -92,6 +92,42 @@ def test_sem_contidas_remove_a_interna_menos_confiante():
     assert anotar.sem_contidas(deteccoes, 1.01) == deteccoes  # desligado
 
 
+class DetectorFalso(anotar.Detector):
+    """Só implementa o que é do modelo: tudo o mais vem da base."""
+    nome = "detector-falso"
+    MODELO_PADRAO = "falso-v1"
+
+    def carregar(self):
+        self.carregado = True
+
+    def pontuar(self, imagem):
+        # 3 classes (Garrafa, Tampa, Lata); pontuações por caixa
+        return [[0.10, 0.02, 0.90],   # Lata 0,90
+                [0.30, 0.01, 0.05],   # Garrafa 0,30, dentro da Lata: contida, sai
+                [0.04, 0.03, 0.01],   # abaixo do piso
+                [0.20, 0.06, 0.02],   # Garrafa 0,20, grande demais
+                [0.02, 0.08, 0.03]], [  # Tampa 0,08, isolada
+            (0.1, 0.1, 0.5, 0.5), (0.2, 0.2, 0.3, 0.3), (0.6, 0.6, 0.7, 0.7),
+            (0.0, 0.0, 1.0, 0.9), (0.8, 0.0, 0.9, 0.1)]
+
+
+def test_detector_base_filtra_o_que_o_modelo_pontua():
+    detector = DetectorFalso(CLASSES)
+    assert detector.carregado and detector.versao == "falso-v1"
+    assert detector.parametros == {"piso": anotar.PISO_PADRAO, "confianca": anotar.CONFIANCA_PADRAO,
+                                   "confianca_classe": anotar.CONFIANCA_CLASSE_PADRAO,
+                                   "iou": 0.5, "area_maxima": 0.5, "contencao": 0.9}
+    assert detector.anotar(None) == [(2, 0.90, (0.1, 0.1, 0.5, 0.5)),
+                                     (1, 0.08, (0.8, 0.0, 0.9, 0.1))]
+    # piso mais alto (avaliar.py), e sem contenção a Garrafa contida volta
+    assert [c for c, _, _ in detector.filtrar(*detector.pontuar(None), piso=0.5)] == [2]
+    sem = DetectorFalso(CLASSES, modelo="outro", contencao=1.01)
+    assert sem.versao == "outro"
+    assert [c for c, _, _ in sem.anotar(None)] == [2, 0, 1]
+    with pytest.raises(ValueError, match="piso"):
+        DetectorFalso(CLASSES, piso=0.3, confianca=0.2)
+
+
 def test_linha_yolo():
     assert anotar.linha_yolo(3, (0.2, 0.4, 0.6, 0.5)) == "3 0.400000 0.450000 0.400000 0.100000"
 
@@ -299,27 +335,27 @@ def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
     assert (saida / "revisadas.txt").read_text() == "./images/l1_a.jpg\n./images/l1_b.png\n"
 
 
-def test_main_grava_candidatas_de_quem_tem_propor(ambiente, monkeypatch):
+def test_main_grava_tudo_e_os_limiares_de_leitura(ambiente):
     _, saida, base = ambiente
-    monkeypatch.setattr(AnotadorFalso, "propor", lambda self, imagem: (
-        self.anotar(imagem), [(0.07, (0.0, 0.0, 0.5, 0.5))]), raising=False)
-    anotar.main(["l1_a.jpg"] + base)
+    anotar.main(["l1_a.jpg"] + base + ["--confianca", "0.5", "--confianca-classe", "0.95",
+                                       "--previa"])
     proposta = proposta_de(saida, "l1_a")
-    assert proposta["candidatas"] == [{"confianca": 0.07, "caixa": [0.0, 0.0, 100.0, 50.0]}]
-    assert len(proposta["caixas"]) == 2
-
-
-def test_main_confianca_classe(ambiente):
-    _, saida, base = ambiente
-    anotar.main(["l1_a.jpg"] + base + ["--confianca-classe", "0.5", "--previa"])
-    proposta = proposta_de(saida, "l1_a")
-    # Garrafa (0.42) fica sem classe; Lata (0.91) mantém
-    assert [c["classe"] for c in proposta["caixas"]] == ["Lata", None]
-    assert proposta["caixas"][1]["sugerida"] == "Garrafa"
-    assert proposta["parametros"]["confianca_classe"] == 0.5
-    anotar.main(base + ["--aceitar"])  # l1_a tem caixa sem classe: continua pendente
+    # A proposta guarda todas as caixas, com a classe; os limiares vão em parametros
+    assert [(c["classe"], c["confianca"]) for c in proposta["caixas"]] == [
+        ("Lata", 0.91), ("Garrafa", 0.42)]
+    assert proposta["parametros"] == {"confianca": 0.5, "confianca_classe": 0.95}
+    visiveis, candidatas = formato.separar(proposta)
+    assert list(visiveis) == [0] and visiveis[0][3] is False  # 0,91 < 0,95: sem classe
+    assert [k for k, _, _ in candidatas] == [1]
+    anotar.main(base + ["--aceitar"])  # l1_a tem caixa de classe escondida: continua pendente
     _, linhas = formato.ler_estado(saida)
     assert linhas["l1_a.jpg"]["status"] == "pendente"
+
+
+def test_main_recusa_limiares_invertidos(ambiente):
+    _, _, base = ambiente
+    with pytest.raises(SystemExit):
+        anotar.main(base + ["--piso", "0.3", "--confianca", "0.2"])
 
 
 def test_main_recusa_saida_sem_importacao(tmp_path, ambiente):

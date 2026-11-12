@@ -50,19 +50,19 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
-| `--confianca-classe` | `0.35` | Caixas com confiança abaixo dessa são propostas **sem classe**: o revisor tem de dar a classe ou remover a caixa. `0` desliga |
 | `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
-| `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`, e deixa pendentes as que têm caixa sem classe. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
+| `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`, só as caixas visíveis (a partir de `--confianca`), e deixa pendentes as que têm caixa de classe escondida. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
-Opções do `grounding-dino`:
+Opções de detecção, comuns a todo detector. A proposta guarda **todas** as caixas a partir de `--piso`, sempre com a classe; `--confianca` e `--confianca-classe` são gravados nela e aplicados por quem lê (a página, o `aceitar`, depois o voto), então dá para mudá-los sem rodar o modelo de novo (decisão 16 do `OBJETIVO.md`).
 
 | Opção | Padrão | |
 |---|---|---|
-| `--modelo` | `IDEA-Research/grounding-dino-tiny` | Também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento |
-| `--confianca` | `0.2` | Confiança mínima por caixa. Baixa de propósito: cobre 92% dos objetos e sobram ~4 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
+| `--modelo` | o do anotador | `grounding-dino`: `IDEA-Research/grounding-dino-tiny`; também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento |
+| `--piso` | `0.05` | Confiança mínima gravada. As caixas entre o piso e `--confianca` são as **candidatas** da caixa por clique (cerca de 11 por foto) |
+| `--confianca` | `0.2` | A página mostra as caixas a partir dessa confiança. Baixa de propósito: cobre 92% dos objetos e sobram ~2 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
+| `--confianca-classe` | `0.35` | Abaixo dessa, a página mostra a caixa **sem classe**: o revisor tem de dar a classe ou remover a caixa. A classe do anotador fica gravada, só não chega à página. `0` desliga |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
-| `--candidatas` | `0.05` | Grava também, sem classe, as caixas brutas do modelo com confiança a partir dessa, para a caixa por clique na página de revisão (cerca de 50 por foto, ~6 KB). `1` desliga |
 | `--contencao` | `0.9` | Remove a caixa que tem ao menos essa fração dentro de outra maior e mais confiante (partes do objeto, como o topo da lata proposto como tampa, e duplicatas menores, que o NMS não pega). A caixa grande que envolve uma menor mais confiante fica: em geral é o objeto inteiro. Acima de `1` desliga |
 
 ## Google Colab
@@ -90,16 +90,16 @@ As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata 
 Cada proposta é um JSON:
 
 ```json
-{"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny",
- "parametros": {"confianca": 0.2, "iou": 0.5, "area_maxima": 0.5, "contencao": 0.9,
-                "confianca_classe": 0.35},
- "classes": "<hash da lista de classes>", "imagem": "foto.jpg", "largura": 4032, "altura": 3024,
+{"formato": 2, "anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny",
+ "parametros": {"piso": 0.05, "confianca": 0.2, "confianca_classe": 0.35, "iou": 0.5,
+                "area_maxima": 0.5, "contencao": 0.9},
+ "classes": "<hash da lista de classes>", "imagem": "lote_foto.jpg", "largura": 4032, "altura": 3024,
  "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]},
-            {"classe": null, "sugerida": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]}],
- "candidatas": [{"confianca": 0.12, "caixa": [x1, y1, x2, y2]}]}
+            {"classe": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]},
+            {"classe": "Normal paper", "confianca": 0.12, "caixa": [x1, y1, x2, y2]}]}
 ```
 
-A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`. Abaixo de `--confianca-classe`, a caixa vai sem classe (`null`); a classe do anotador fica em `sugerida`, que as páginas não mostram (serve às métricas). Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
+A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`, da mais confiante para a menos. Quem lê aplica os limiares de `parametros`: no exemplo, a página mostra a lata e o copo (este sem classe, abaixo de 0,35) e oferece o papel como candidata. O registro da revisão cita cada caixa pelo índice nessa lista, que não muda com os limiares. Propostas do formato anterior (sem `formato`, com `candidatas` e `sugerida` à parte) são recusadas: anote de novo numa saída nova. Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
 Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos.
 
@@ -158,7 +158,7 @@ A confirmação do `Enter` resume o que vai ser gravado: as classes das caixas, 
 
 Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava `labels/<nome>.txt` e marca a imagem como `revisada`; descartar apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
 
-**Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as gravadas pelo `anotar.py` (`--candidatas`); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto. Propostas gravadas antes das candidatas não têm nenhuma: anote de novo.
+**Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as caixas da proposta abaixo de `--confianca` (de `--piso` para cima); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto.
 
 Desfazer tudo volta às propostas como chegaram, e a imagem deixa de contar como alterada. Ainda não dá para desenhar à mão, mover ou redimensionar caixas: um objeto que nenhuma candidata cobre leva ao descarte da imagem (decisão 12 do `PLANO-REVISAO.md`). Também não dá para reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
 
@@ -172,7 +172,7 @@ Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for r
  "removidas": [1]}
 ```
 
-O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` para proposta sem classe, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` quando a classe da proposta estava escondida do revisor, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 
@@ -190,14 +190,14 @@ As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de
 
 ## Novo anotador
 
-Um anotador é uma classe em `anotar.py`, registrada no dicionário `ANOTADORES`, com:
+Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dicionário `ANOTADORES`. Ela define `nome` (o valor de `--anotador` e a pasta em `propostas/`) e `MODELO_PADRAO`, e implementa só:
 
-- `nome`: o valor de `--anotador` e a pasta em `propostas/`;
-- `opcoes(parser)`: acrescenta as opções de linha de comando dele (de preferência num grupo com o nome dele);
-- `criar(classes, args)`: constrói o anotador a partir das classes de `classes.yaml` e das opções;
-- na instância, `versao` e `parametros`, gravados em cada proposta, e `anotar(imagem)`, que recebe a imagem PIL em RGB e devolve `[(id da classe, confiança, (x1, y1, x2, y2) normalizada de 0 a 1)]`.
+- `carregar()`: carrega o modelo `self.versao` em `self.dispositivo` (se `None`, o detector escolhe);
+- `pontuar(imagem)`: recebe a imagem PIL em RGB e devolve `(pontuacoes, caixas)`, a pontuação de cada classe (na ordem de `classes.yaml`) em cada caixa bruta, como lista de listas ou tensor, e as caixas `(x1, y1, x2, y2)` normalizadas de 0 a 1.
 
-O que cada um faz com o `prompt` das classes é dele. `GroundingDino` é o exemplo.
+A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. O que cada um faz com o `prompt` das classes é dele. `GroundingDino` é o exemplo.
+
+Um anotador que não detecta (por exemplo, um que só reclassifica as caixas de outro) pode implementar a interface direto: `nome`, `opcoes(parser)`, `criar(classes, args)` e, na instância, `versao`, `parametros` e `anotar(imagem) -> [(id da classe, confiança, caixa normalizada)]`.
 
 ## Classes
 

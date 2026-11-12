@@ -122,43 +122,51 @@ def test_aceitar_recusa_classe_desconhecida(tmp_path):
         formato.aceitar(tmp_path, "falso")
 
 
-def test_proposta_sem_classe_abaixo_do_limiar():
-    deteccoes = [(1, 0.5, (0.1, 0.2, 0.5, 0.6)), (0, 0.2, (0.6, 0.2, 0.9, 0.6))]
-    proposta = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50),
-                                       deteccoes, confianca_classe=0.35)
-    assert proposta["caixas"][0]["classe"] == "Lata" and "sugerida" not in proposta["caixas"][0]
-    assert proposta["caixas"][1] == {"classe": None, "sugerida": "Garrafa", "confianca": 0.2,
-                                     "caixa": [60.0, 10.0, 90.0, 30.0]}
-    assert [c[0] for c in formato.caixas_normalizadas(proposta)] == ["Lata", None]
-    # sem limiar, todas com classe
-    assert formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50),
-                                   deteccoes)["caixas"][1]["classe"] == "Garrafa"
+def test_separar_aplica_os_limiares_da_proposta():
+    deteccoes = [(1, 0.9, (0.1, 0.2, 0.5, 0.6)), (0, 0.3, (0.6, 0.2, 0.9, 0.6)),
+                 (1, 0.1, (0.0, 0.0, 0.2, 0.2))]
+    proposta = formato.montar_proposta("falso", "v1", {"confianca": 0.2, "confianca_classe": 0.35},
+                                       CLASSES, "foto.jpg", (100, 50), deteccoes)
+    # A proposta guarda tudo, sempre com a classe
+    assert proposta["formato"] == formato.FORMATO_PROPOSTA
+    assert [c["classe"] for c in proposta["caixas"]] == ["Lata", "Garrafa", "Lata"]
+    visiveis, candidatas = formato.separar(proposta)
+    assert list(visiveis) == [0, 1]
+    assert visiveis[0][0] == "Lata" and visiveis[0][3] is True
+    assert visiveis[1][0] == "Garrafa" and visiveis[1][3] is False  # classe escondida
+    assert [(k, conf) for k, conf, _ in candidatas] == [(2, 0.1)]
+    assert candidatas[0][2] == pytest.approx((0.0, 0.0, 0.2, 0.2))
+    # Sem limiares gravados: tudo visível, com classe
+    proposta["parametros"] = {}
+    visiveis, candidatas = formato.separar(proposta)
+    assert list(visiveis) == [0, 1, 2] and not candidatas
+    assert all(v[3] for v in visiveis.values())
 
 
-def test_candidatas_em_pixels_e_de_volta():
-    proposta = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50), [],
-                                       candidatas=[(0.0812345, (0.1, 0.2, 0.5, 0.6))])
-    assert proposta["candidatas"] == [{"confianca": 0.0812, "caixa": [10.0, 10.0, 50.0, 30.0]}]
-    assert formato.candidatas_normalizadas(proposta) == [
-        (0.0812, pytest.approx((0.1, 0.2, 0.5, 0.6)))]
-    # sem candidatas, o campo não aparece (anotadores sem propor())
-    sem = formato.montar_proposta("falso", "v1", {}, CLASSES, "foto.jpg", (100, 50), [])
-    assert "candidatas" not in sem and formato.candidatas_normalizadas(sem) == []
+def test_ler_proposta_recusa_formato_antigo(tmp_path):
+    caminho = tmp_path / "x.json"
+    caminho.write_text(json.dumps({"anotador": "a", "largura": 1, "altura": 1, "caixas": []}))
+    with pytest.raises(ValueError, match="formato 1"):
+        formato.ler_proposta(caminho)
 
 
-def test_aceitar_deixa_pendente_imagem_com_caixa_sem_classe(tmp_path):
+def test_aceitar_so_as_visiveis_e_deixa_pendente_a_de_classe_escondida(tmp_path):
     (tmp_path / "labels").mkdir()
     formato.gravar_estado(tmp_path, ["nome", "status"], {
         n: {"nome": n, "status": "pendente"} for n in ("a.jpg", "b.jpg")})
     escrever_data_yaml(tmp_path, ["Garrafa", "Lata"])
-    for nome, conf in (("a.jpg", 0.9), ("b.jpg", 0.2)):
+    limiares = {"confianca": 0.2, "confianca_classe": 0.35}
+    for nome, conf in (("a.jpg", 0.9), ("b.jpg", 0.25)):
         formato.gravar_proposta(tmp_path, formato.montar_proposta(
-            "falso", "v1", {}, CLASSES, nome, (100, 50),
-            [(1, 0.9, (0.1, 0.2, 0.5, 0.6)), (0, conf, (0.6, 0.2, 0.9, 0.6))], 0.35))
+            "falso", "v1", limiares, CLASSES, nome, (100, 50),
+            [(1, 0.9, (0.1, 0.2, 0.5, 0.6)), (0, conf, (0.6, 0.2, 0.9, 0.6)),
+             (0, 0.1, (0.0, 0.0, 0.1, 0.1))]))
     assert formato.aceitar(tmp_path, "falso") == (1, ["b.jpg"])
     _, estado = formato.ler_estado(tmp_path)
     assert estado["b.jpg"]["status"] == "pendente"
     assert not (tmp_path / "labels" / "b.txt").exists()
+    # a candidata (0,1) não vira rótulo
+    assert len((tmp_path / "labels" / "a.txt").read_text().splitlines()) == 2
 
 
 def test_gravar_atomico_usa_o_modo_de_um_open_comum(tmp_path):

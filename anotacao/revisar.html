@@ -271,8 +271,9 @@ async function mostrar(i) {
       // o seletor de anotador é a fase 5
       const base = Object.keys(dados.propostas).sort()[0] ?? null;
       edicao = { base, sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
-        caixas: (base ? dados.propostas[base] : []).map((c, k) =>
-          ({ id: c.id, caixa: c.caixa, proposta: k, tocada: false })) };
+        // proposta: o índice da caixa na proposta gravada, não a posição na lista
+        caixas: (base ? dados.propostas[base] : []).map(c =>
+          ({ id: c.id, caixa: c.caixa, proposta: c.indice, tocada: false })) };
       tempo.ativo = 0;
       tempo.ultima = Date.now();
     }
@@ -362,14 +363,15 @@ function desenhar() {
 
 function desenharEdicao() {
   const quadro = $("quadro");
-  const propostas = edicao.base ? detalhe.propostas[edicao.base] : [];
+  const propostas = new Map((edicao.base ? detalhe.propostas[edicao.base] : [])
+    .map(p => [p.indice, p]));
   // As maiores primeiro, para as pequenas ficarem por cima e clicáveis
   const ordem = edicao.caixas.map((c, k) => k).sort((a, b) => area(edicao.caixas[b].caixa)
                                                        - area(edicao.caixas[a].caixa));
   for (const k of ordem) {
     const c = edicao.caixas[k];
-    const conf = c.proposta === null ? null : propostas[c.proposta].conf;
-    const nome = nomeClasse(c.id) ?? semId(propostas[c.proposta]?.nome);
+    const conf = c.proposta === null ? null : propostas.get(c.proposta).conf;
+    const nome = nomeClasse(c.id) ?? semId(propostas.get(c.proposta)?.nome);
     const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
                          c.caixa, !c.tocada);
     div.classList.toggle("selecionada", edicao.sel === k);
@@ -445,8 +447,8 @@ function selecionar(k) {
 }
 
 // --- nova caixa por clique ---------------------------------------------------
-// O anotar.py grava, com a proposta, as caixas brutas do modelo acima de um piso
-// baixo (candidatas). Um clique no objeto mostra a mais confiante que contém o
+// A proposta guarda as caixas do anotador desde um piso baixo; as abaixo do
+// limiar de exibição chegam à página como candidatas. Um clique no objeto mostra a mais confiante que contém o
 // ponto; Tab ou a roda passam às seguintes. A caixa confirmada nasce sem classe.
 
 const candidatasBase = () => (edicao.base ? detalhe.candidatas?.[edicao.base] ?? [] : []);
@@ -499,7 +501,7 @@ function confirmarNova() {
 function textoNova() {
   const novo = edicao.novo;
   if (!candidatasBase().length)
-    return "Esta proposta não tem candidatas (anote de novo com o anotar.py atual). Esc sai.";
+    return "O anotador não propôs nenhuma caixa abaixo das mostradas (candidatas). Esc sai.";
   if (!novo.lista) return "Nova caixa: clique no objeto. Esc cancela.";
   if (!novo.lista.length)
     return "Nenhuma candidata nova contém esse ponto: clique em outra parte do objeto "

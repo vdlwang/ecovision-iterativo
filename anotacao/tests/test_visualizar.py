@@ -47,17 +47,24 @@ def test_coletar_propostas_e_status(saida):
         "a.jpg": {"nome": "a.jpg", "status": "revisada"},
         "sem.jpg": {"nome": "sem.jpg", "status": "pendente"}})
     formato.gravar_proposta(saida, {
-        "anotador": "falso", "imagem": "sem.jpg", "largura": 8, "altura": 4,
+        "formato": 2, "anotador": "falso", "imagem": "sem.jpg", "largura": 8, "altura": 4,
+        "parametros": {"confianca": 0.2, "confianca_classe": 0.5},
         "caixas": [{"classe": "Lata", "confianca": 0.7, "caixa": [2, 1, 6, 3]},
-                   {"classe": "Pneu", "confianca": 0.3, "caixa": [0, 0, 8, 4]}]})
+                   {"classe": "Pneu", "confianca": 0.6, "caixa": [0, 0, 8, 4]},
+                   {"classe": "Lata", "confianca": 0.3, "caixa": [0, 0, 4, 4]},
+                   {"classe": "Lata", "confianca": 0.1, "caixa": [4, 0, 8, 4]}]})
     _, anotadores, imagens = visualizar.coletar(saida)
     por_nome = {im["nome"]: im for im in imagens}
     assert anotadores == ["falso"]
     assert por_nome["a.jpg"]["status"] == "revisada"
     assert por_nome["b c.png"]["status"] is None
+    # Só as visíveis (>= 0,2); abaixo de 0,5, sem classe; Pneu: fora do data.yaml.
+    # A página estática não recebe as candidatas.
     assert por_nome["sem.jpg"]["propostas"] == {"falso": [
-        {"id": 1, "nome": "Lata", "conf": 0.7, "caixa": [0.25, 0.25, 0.75, 0.75]},
-        {"id": None, "nome": "Pneu", "conf": 0.3, "caixa": [0, 0, 1, 1]}]}
+        {"id": 1, "nome": "Lata", "conf": 0.7, "caixa": [0.25, 0.25, 0.75, 0.75], "indice": 0},
+        {"id": None, "nome": "Pneu", "conf": 0.6, "caixa": [0, 0, 1, 1], "indice": 1},
+        {"id": None, "nome": None, "conf": 0.3, "caixa": [0, 0, 0.5, 1], "indice": 2}]}
+    assert "candidatas" not in por_nome["sem.jpg"]
 
 
 def test_coletar_sem_data_yaml(tmp_path):
