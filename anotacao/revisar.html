@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisão</title>
+<!-- Servida pelo revisar.py; os dados vêm da API em /api. -->
+<style>
+  :root { --fundo: #111418; --painel: #1b2027; --borda: #2c333d; --texto: #e6e9ee;
+          --suave: #9aa4b2; --destaque: #22c55e; --alerta: #f59e0b; --perigo: #ef4444; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--fundo);
+         color: var(--texto); display: flex; height: 100vh; }
+  aside { width: 280px; flex: none; background: var(--painel); border-right: 1px solid var(--borda);
+          display: flex; flex-direction: column; }
+  aside header { padding: 12px 14px; border-bottom: 1px solid var(--borda); display: grid; gap: 8px; }
+  aside h1 { font-size: 15px; margin: 0; }
+  aside small { color: var(--suave); }
+  .filtros { display: flex; gap: 8px; }
+  .filtros label { flex: 1; display: grid; gap: 2px; color: var(--suave); font-size: 12px; }
+  select { background: var(--fundo); color: var(--texto); border: 1px solid var(--borda);
+           border-radius: 6px; padding: 3px 6px; }
+  #fila { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  #fila li { padding: 8px 14px; cursor: pointer; display: flex; justify-content: space-between;
+             gap: 8px; border-bottom: 1px solid var(--borda); }
+  #fila li:hover { background: #232a33; }
+  #fila li.atual { background: #263445; }
+  #fila .nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fila .info { color: var(--suave); flex: none; font-variant-numeric: tabular-nums; }
+  #fila .vazia { color: var(--suave); cursor: default; }
+  .st-pendente { color: var(--alerta); } .st-revisada { color: var(--destaque); }
+  .st-descartada { color: var(--suave); text-decoration: line-through; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .barra { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+           border-bottom: 1px solid var(--borda); flex-wrap: wrap; }
+  button { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+           border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.salvar { background: #15532e; border-color: var(--destaque); }
+  button.descartar { border-color: var(--perigo); }
+  .barra label { color: var(--suave); display: flex; gap: 6px; align-items: center; }
+  #titulo { font-weight: 600; margin-right: auto; }
+  .area { flex: 1; display: flex; align-items: center; justify-content: center;
+          padding: 14px; min-height: 0; overflow: hidden; }
+  .quadro { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
+  /* max-height vem do espaço livre da .area (ajustarImagem) */
+  .quadro img { display: block; max-width: 100%; }
+  .caixa { position: absolute; border: 2px solid; }
+  .caixa.proposta { border-style: dashed; }
+  .editando .caixa { cursor: pointer; }
+  .caixa.selecionada { border-width: 3px; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,.6); }
+  .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
+                color: #000; white-space: nowrap; }
+  .caixa.sem-classe { border-color: var(--perigo) !important; }
+  .sem-rotulos .caixa span { display: none; }
+  /* Nova caixa por clique: os cliques atravessam as caixas e vão para a imagem */
+  .novo { cursor: crosshair; }
+  .novo .caixa { pointer-events: none; }
+  .caixa.candidata { border: 2px dashed #fff !important; box-shadow: 0 0 0 1px #000; }
+  .caixa.candidata span { background: #fff !important; }
+  .ponto { position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px; border-radius: 50%;
+           background: #fff; border: 2px solid #000; pointer-events: none; }
+  .rodape { border-top: 1px solid var(--borda); padding: 8px 14px; display: grid; gap: 6px; }
+  .legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--suave); min-height: 21px; }
+  .legenda i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; }
+  .acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .acoes kbd, #opcoes kbd { font: 11px ui-monospace, monospace; color: var(--suave); }
+  .busca { position: relative; flex: 1 1 260px; max-width: 440px; }
+  .busca input { width: 100%; background: var(--fundo); color: var(--texto); font: inherit;
+                 border: 1px solid var(--borda); border-radius: 6px; padding: 4px 8px; }
+  .busca input:focus { outline: none; border-color: var(--destaque); }
+  .busca input:disabled { opacity: .45; }
+  #opcoes { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 10;
+            list-style: none; margin: 0; padding: 4px; max-height: 60vh; overflow-y: auto;
+            background: var(--painel); border: 1px solid var(--borda); border-radius: 6px;
+            box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  #opcoes li { display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+               border-radius: 4px; cursor: pointer; }
+  #opcoes li.ativa { background: #263445; }
+  #opcoes li.vazia { color: var(--suave); cursor: default; }
+  #opcoes i { flex: none; display: inline-block; width: 10px; height: 10px; }
+  #opcoes b { color: var(--destaque); font-weight: 600; }
+  dialog { background: var(--painel); color: var(--texto); border: 1px solid var(--borda);
+           border-radius: 8px; padding: 16px 18px; max-width: min(480px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  dialog p { margin: 0 0 14px; white-space: pre-line; }
+  dialog .acoes { justify-content: flex-end; }
+  #opcoes .material { margin-left: auto; color: var(--suave); font-size: 12px; }
+  .dica { color: var(--suave); font-size: 12px; }
+  .erro { color: var(--perigo); }
+  @media (max-width: 700px) {
+    body { flex-direction: column; height: auto; min-height: 100vh; }
+    aside { width: auto; max-height: 35vh; border-right: 0; border-bottom: 1px solid var(--borda); }
+    .area { padding: 14px 4px; }
+    .quadro img { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>Revisão</h1>
+    <small id="resumo">carregando…</small>
+    <div class="filtros">
+      <label>status
+        <select id="status">
+          <option value="pendente">pendentes</option>
+          <option value="revisada">revisadas</option>
+          <option value="descartada">descartadas</option>
+          <option value="todas">todas</option>
+        </select>
+      </label>
+      <label>ordem
+        <select id="ordem">
+          <option value="incerteza">mais incertas antes</option>
+          <option value="nome">nome</option>
+        </select>
+      </label>
+    </div>
+  </header>
+  <ul id="fila"></ul>
+</aside>
+<main>
+  <div class="barra">
+    <span id="titulo"></span>
+    <label>mostrar <select id="camada"></select></label>
+    <label><input type="checkbox" id="mostrar-rotulos" checked> nomes</label>
+    <label><input type="checkbox" id="mostrar-caixas" checked> caixas</label>
+    <button id="anterior" title="Seta para a esquerda">&larr;</button>
+    <button id="proxima" title="Seta para a direita">&rarr;</button>
+  </div>
+  <div class="area" id="area"><div class="quadro" id="quadro"><img id="imagem" alt=""></div></div>
+  <div class="rodape">
+    <div class="legenda" id="legenda"></div>
+    <div class="acoes" id="acoes" hidden>
+      <div class="busca">
+        <input id="busca" autocomplete="off" spellcheck="false" aria-label="classe da caixa">
+        <ul id="opcoes" hidden></ul>
+      </div>
+      <button class="salvar" id="salvar" title="Enter (pede confirmação) ou Ctrl+S (direto)">Salvar e próxima <kbd>Enter</kbd></button>
+      <button class="descartar" id="descartar" title="D">Descartar imagem <kbd>D</kbd></button>
+      <button id="remover" title="Del" disabled>Remover caixa <kbd>Del</kbd></button>
+      <button id="nova" title="N, sem caixa selecionada">Nova caixa <kbd>N</kbd></button>
+      <span class="dica">Selecione uma caixa (clique ou <kbd>Tab</kbd>) e escreva a classe;
+        <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
+        confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
+        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.
+        <kbd>Ctrl+Z</kbd> desfaz; <kbd>Ctrl+Shift+Z</kbd>, refaz.</span>
+    </div>
+  </div>
+</main>
+<dialog id="confirmar">
+  <form method="dialog">
+    <p id="confirmar-texto"></p>
+    <div class="acoes">
+      <button value="sim" id="confirmar-sim"></button>
+      <button value="nao">Cancelar <kbd>Esc</kbd></button>
+    </div>
+  </form>
+</dialog>
+<script>
+const CORES = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#14b8a6",
+               "#ec4899", "#eab308", "#6366f1", "#f97316"];
+const cor = id => CORES[(id ?? 0) % CORES.length];
+const $ = id => document.getElementById(id);
+
+let classes = [];     // /api/classes
+let fila = [];        // linhas de /api/imagens
+let atual = -1;       // índice na fila
+let detalhe = null;   // /api/imagens/<nome> da atual
+// {base, caixas: [{id, caixa, proposta, tocada, origem}], sel, sujo, novo, desfazer,
+// refazer} se editável; novo: modo "nova caixa", {ponto, lista de candidatas no
+// ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel} desta imagem
+let edicao = null;
+let pedido = 0;       // descarta respostas de pedidos já superados
+let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
+const nomeClasse = id => classes.find(c => c.id === id)?.nome;
+// Rótulo de uma caixa sem id: proposta sem classe (nome null) ou classe fora do data.yaml
+const semId = nome => nome == null ? "sem classe" : `${nome} (fora do data.yaml)`;
+const AVISO_SEM_ID = "Há caixa sem classe ou com classe fora do data.yaml: dê a classe ou remova.";
+
+async function api(rota, opcoes) {
+  const resposta = await fetch(rota, opcoes);
+  const dados = await resposta.json();
+  if (!resposta.ok) throw new Error(dados.erro || resposta.statusText);
+  return dados;
+}
+
+function erro(e) {
+  $("legenda").replaceChildren(Object.assign(document.createElement("span"),
+    { className: "erro", textContent: `Erro: ${e.message}` }));
+}
+
+// --- tempo ativo (RF13): conta só com a aba visível e em foco, e pausa
+// depois de 60 s sem interação
+const tempo = { ativo: 0, ultima: Date.now() };
+for (const evento of ["keydown", "mousedown", "mousemove", "wheel"])
+  document.addEventListener(evento, () => { tempo.ultima = Date.now(); }, { passive: true });
+setInterval(() => {
+  if (document.visibilityState === "visible" && document.hasFocus()
+      && Date.now() - tempo.ultima < 60000) tempo.ativo += 1;
+}, 1000);
+
+function podeSair() {
+  return !edicao?.sujo || confirm("Há alterações não salvas nesta imagem. Sair mesmo assim?");
+}
+window.addEventListener("beforeunload", e => { if (edicao?.sujo) e.preventDefault(); });
+
+// --- fila -------------------------------------------------------------------
+
+async function carregarFila(manter) {
+  const parametros = new URLSearchParams({ status: $("status").value, ordem: $("ordem").value });
+  const dados = await api(`/api/imagens?${parametros}`);
+  fila = dados.imagens;
+
+  const seletor = $("camada"), escolhida = seletor.value;
+  seletor.replaceChildren();
+  for (const [valor, texto] of [["auto", "automático (edição)"], ["final", "anotação final"],
+                                ...dados.anotadores.map(a => [a, `propostas: ${a}`])])
+    seletor.add(new Option(texto, valor));
+  if ([...seletor.options].some(o => o.value === escolhida)) seletor.value = escolhida;
+
+  $("resumo").textContent = Object.entries(dados.contagem)
+    .map(([s, n]) => `${n} ${s}${n === 1 ? "" : "s"}`).join(", ");
+
+  const lista = $("fila");
+  lista.replaceChildren();
+  if (!fila.length) {
+    lista.append(Object.assign(document.createElement("li"),
+      { className: "vazia", textContent: "Nenhuma imagem com esse status." }));
+  }
+  fila.forEach((im, i) => {
+    const li = document.createElement("li");
+    const nome = Object.assign(document.createElement("span"),
+      { className: "nome", textContent: im.nome });
+    const info = document.createElement("span");
+    info.className = "info";
+    const total = Object.values(im.n_caixas).reduce((a, b) => a + b, 0);
+    info.textContent = im.anotadores.length
+      ? `${total} cx · ${im.confianca_min === null ? "—" : im.confianca_min.toFixed(2)} `
+      : "sem proposta ";
+    info.append(Object.assign(document.createElement("span"),
+      { className: `st-${im.status}`, textContent: im.status }));
+    li.title = im.nome + (im.anotadores.length
+      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
+    li.append(nome, info);
+    li.onclick = () => { if (podeSair()) mostrar(i); };
+    lista.append(li);
+  });
+
+  const i = fila.findIndex(im => im.nome === manter);
+  if (fila.length) await mostrar(i >= 0 ? i : Math.min(Math.max(atual, 0), fila.length - 1));
+  else { atual = -1; detalhe = null; edicao = null; desenhar(); }
+}
+
+async function mostrar(i) {
+  if (!fila.length) return;
+  atual = (i + fila.length) % fila.length;
+  const nome = fila[atual].nome;
+  [...$("fila").children].forEach((li, j) => li.classList.toggle("atual", j === atual));
+  $("fila").children[atual].scrollIntoView({ block: "nearest" });
+  history.replaceState(null, "", `#${encodeURIComponent(nome)}`);
+  const meu = ++pedido;
+  try {
+    const dados = await api(`/api/imagens/${encodeURIComponent(nome)}`);
+    if (meu !== pedido) return;
+    detalhe = dados;
+    edicao = null;
+    if (dados.status === "pendente") {
+      // Base da edição: o primeiro anotador (em ordem alfabética) com proposta;
+      // o seletor de anotador é a fase 5
+      const base = Object.keys(dados.propostas).sort()[0] ?? null;
+      edicao = { base, sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
+        caixas: (base ? dados.propostas[base] : []).map((c, k) =>
+          ({ id: c.id, caixa: c.caixa, proposta: k, tocada: false })) };
+      tempo.ativo = 0;
+      tempo.ultima = Date.now();
+    }
+    $("imagem").src = `/images/${encodeURIComponent(nome)}`;
+    desenhar();
+  } catch (e) { if (meu === pedido) erro(e); }
+}
+
+// --- desenho ----------------------------------------------------------------
+
+const editando = () => edicao && $("camada").value === "auto";
+
+// "auto": a edição se a imagem é pendente; senão a anotação final, ou a
+// proposta do primeiro anotador se não houver .txt
+function camada(im) {
+  const escolhida = $("camada").value;
+  if (escolhida === "final") return { tipo: "final", caixas: im.final };
+  if (escolhida !== "auto") return { tipo: escolhida, caixas: im.propostas[escolhida] ?? null };
+  const anotadores = Object.keys(im.propostas).sort();
+  if (im.final || !anotadores.length) return { tipo: "final", caixas: im.final };
+  return { tipo: anotadores[0], caixas: im.propostas[anotadores[0]] };
+}
+
+function caixaDiv(id, rotulo, [x1, y1, x2, y2], tracejada) {
+  const div = document.createElement("div");
+  div.className = "caixa" + (tracejada ? " proposta" : "") + (id === null ? " sem-classe" : "");
+  Object.assign(div.style, {
+    left: `${x1 * 100}%`, top: `${y1 * 100}%`,
+    width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, borderColor: cor(id),
+  });
+  const span = document.createElement("span");
+  span.textContent = rotulo;
+  span.style.background = id === null ? "var(--perigo)" : cor(id);
+  div.append(span);
+  return div;
+}
+
+function desenhar() {
+  const quadro = $("quadro"), legenda = $("legenda");
+  quadro.querySelectorAll(".caixa").forEach(c => c.remove());
+  quadro.querySelectorAll(".ponto").forEach(c => c.remove());
+  quadro.classList.toggle("editando", !!editando());
+  quadro.classList.toggle("novo", !!(editando() && edicao.novo));
+  $("acoes").hidden = !editando();
+  if (!detalhe) {
+    $("titulo").textContent = "";
+    $("imagem").removeAttribute("src");
+    legenda.replaceChildren();
+    return;
+  }
+  const im = detalhe;
+  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · ${im.status}`
+    + (edicao?.sujo ? " · alterada" : "");
+
+  if (editando()) return desenharEdicao();
+
+  const { tipo, caixas } = camada(im);
+  for (const { id, nome, conf, caixa } of caixas ?? [])
+    quadro.append(caixaDiv(id, `${id === null ? semId(nome) : nome}`
+                             + (conf === null ? "" : ` ${conf.toFixed(2)}`), caixa, conf !== null));
+  atualizarVisibilidade();
+
+  legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
+  const contagem = new Map();
+  for (const { id, nome } of caixas ?? []) {
+    const chave = `${id}\u0000${nome}`;
+    contagem.set(chave, (contagem.get(chave) || 0) + 1);
+  }
+  for (const [chave, n] of contagem) {
+    const [id, nome] = chave.split("\u0000");
+    const item = document.createElement("span");
+    const amostra = document.createElement("i");
+    amostra.style.background = cor(id === "null" ? null : Number(id));
+    item.append(amostra, `${id === "null" ? semId(nome === "null" ? null : nome) : nome}: ${n}`);
+    legenda.append(item);
+  }
+  if (caixas === null) legenda.append(tipo === "final"
+    ? "Sem rótulos em labels/ (não revisada)." : "Sem proposta deste anotador.");
+  else if (!caixas.length) legenda.append("Nenhum objeto.");
+  if (tipo === "final" && im.invalidas)
+    legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
+  if (im.status !== "pendente")
+    legenda.append(` Só pendentes são editáveis (reabrir: fase 5).`);
+  else if (!editando())
+    legenda.append(" Só visualização; escolha \"automático\" para editar.");
+}
+
+function desenharEdicao() {
+  const quadro = $("quadro");
+  const propostas = edicao.base ? detalhe.propostas[edicao.base] : [];
+  // As maiores primeiro, para as pequenas ficarem por cima e clicáveis
+  const ordem = edicao.caixas.map((c, k) => k).sort((a, b) => area(edicao.caixas[b].caixa)
+                                                       - area(edicao.caixas[a].caixa));
+  for (const k of ordem) {
+    const c = edicao.caixas[k];
+    const conf = c.proposta === null ? null : propostas[c.proposta].conf;
+    const nome = nomeClasse(c.id) ?? semId(propostas[c.proposta]?.nome);
+    const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
+                         c.caixa, !c.tocada);
+    div.classList.toggle("selecionada", edicao.sel === k);
+    // preventDefault: o clique não tira o foco da busca, que abre em seguida
+    div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); selecionar(k); abrirBusca(); };
+    quadro.append(div);
+  }
+  const novo = edicao.novo;
+  if (novo?.lista?.length) {
+    const c = novo.lista[novo.i];
+    const div = caixaDiv(0, `candidata ${novo.i + 1}/${novo.lista.length} · ${c.conf.toFixed(2)}`,
+                         c.caixa, true);
+    div.classList.add("candidata");
+    quadro.append(div);
+  }
+  if (novo?.ponto) quadro.append(Object.assign(document.createElement("div"), { className: "ponto",
+    style: `left: ${novo.ponto[0] * 100}%; top: ${novo.ponto[1] * 100}%` }));
+  atualizarVisibilidade();
+
+  const legenda = $("legenda");
+  if (novo) return legenda.replaceChildren(textoNova());
+  const { corrigidas, adicionadas, removidas } = contarAlteracoes();
+  legenda.replaceChildren(edicao.base
+    ? `Editando as propostas de ${edicao.base}: ${edicao.caixas.length} caixa(s), `
+      + `${corrigidas} corrigida(s), ${adicionadas} adicionada(s), ${removidas} removida(s).`
+    : "Sem propostas: salve para marcar como fundo (sem objetos) ou descarte.");
+  if (edicao.caixas.some(c => c.id === null))
+    legenda.append(Object.assign(document.createElement("span"), { className: "erro",
+      textContent: " " + AVISO_SEM_ID }));
+  $("remover").disabled = edicao.sel === null;
+  const campo = $("busca");
+  campo.disabled = edicao.sel === null;
+  campo.placeholder = edicao.sel === null ? "selecione uma caixa para trocar a classe"
+    : `classe da caixa ${ordemLeitura(edicao.caixas).indexOf(edicao.sel) + 1} de `
+      + `${edicao.caixas.length}: escreva o nome`;
+  if (campo.disabled) fecharBusca();
+}
+
+const area = ([x1, y1, x2, y2]) => (x2 - x1) * (y2 - y1);
+const iou = (a, b) => {
+  const inter = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
+              * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  return inter ? inter / (area(a) + area(b) - inter) : 0;
+};
+
+function contarAlteracoes() {
+  const propostas = edicao.base ? detalhe.propostas[edicao.base].length : 0;
+  const daProposta = edicao.caixas.filter(c => c.proposta !== null);
+  return { corrigidas: daProposta.filter(c => c.tocada).length,
+           adicionadas: edicao.caixas.length - daProposta.length,
+           removidas: propostas - daProposta.length };
+}
+
+// A imagem ocupa o espaço livre da .area, qualquer que seja a altura do rodapé
+function ajustarImagem() {
+  const estreita = matchMedia("(max-width: 700px)").matches;
+  $("imagem").style.maxHeight = estreita ? "" : `${Math.max(100, $("area").clientHeight - 28)}px`;
+}
+new ResizeObserver(ajustarImagem).observe($("area"));
+
+function atualizarVisibilidade() {
+  const caixas = $("mostrar-caixas").checked;
+  $("quadro").querySelectorAll(".caixa").forEach(c => c.style.display = caixas ? "" : "none");
+  $("quadro").classList.toggle("sem-rotulos", !$("mostrar-rotulos").checked);
+}
+
+// --- edição -----------------------------------------------------------------
+
+function selecionar(k) {
+  if (!editando()) return;
+  edicao.sel = k;
+  desenhar();
+}
+
+// --- nova caixa por clique ---------------------------------------------------
+// O anotar.py grava, com a proposta, as caixas brutas do modelo acima de um piso
+// baixo (candidatas). Um clique no objeto mostra a mais confiante que contém o
+// ponto; Tab ou a roda passam às seguintes. A caixa confirmada nasce sem classe.
+
+const candidatasBase = () => (edicao.base ? detalhe.candidatas?.[edicao.base] ?? [] : []);
+
+function iniciarNova() {
+  if (!editando()) return;
+  fecharBusca();
+  edicao.sel = null;
+  edicao.novo = { ponto: null, lista: null, i: 0 };
+  desenhar();
+}
+
+function cancelarNova() {
+  edicao.novo = null;
+  desenhar();
+}
+
+// Candidatas que contêm o ponto, menos as quase iguais a uma caixa já presente
+function escolherPonto(e) {
+  const r = $("imagem").getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  const presentes = edicao.caixas.map(c => c.caixa);
+  const lista = candidatasBase()
+    .filter(({ caixa: [x1, y1, x2, y2] }) => x1 <= x && x <= x2 && y1 <= y && y <= y2)
+    .filter(c => !presentes.some(p => iou(p, c.caixa) >= 0.9))
+    .sort((a, b) => b.conf - a.conf);
+  edicao.novo = { ponto: [x, y], lista, i: 0 };
+  desenhar();
+}
+
+function trocarCandidata(passo) {
+  const n = edicao.novo?.lista?.length;
+  if (!n) return;
+  edicao.novo.i = (edicao.novo.i + passo + n) % n;
+  desenhar();
+}
+
+function confirmarNova() {
+  const c = edicao.novo?.lista?.[edicao.novo.i];
+  if (!c) return;
+  guardar();
+  edicao.caixas.push({ id: null, caixa: c.caixa, proposta: null, tocada: true, origem: "candidata" });
+  edicao.sel = edicao.caixas.length - 1;
+  edicao.novo = null;
+  desenhar();
+  abrirBusca();
+}
+
+function textoNova() {
+  const novo = edicao.novo;
+  if (!candidatasBase().length)
+    return "Esta proposta não tem candidatas (anote de novo com o anotar.py atual). Esc sai.";
+  if (!novo.lista) return "Nova caixa: clique no objeto. Esc cancela.";
+  if (!novo.lista.length)
+    return "Nenhuma candidata nova contém esse ponto: clique em outra parte do objeto "
+      + "(desenhar à mão é a fase 4). Esc cancela.";
+  return `Candidata ${novo.i + 1} de ${novo.lista.length} (confiança `
+    + `${novo.lista[novo.i].conf.toFixed(2)}): Tab ou a roda do mouse trocam, Enter confirma, `
+    + "Esc cancela.";
+}
+
+function trocarClasse(id) {
+  if (!editando() || edicao.sel === null) return;
+  const c = edicao.caixas[edicao.sel];
+  if (c.id !== id) { guardar(); c.id = id; c.tocada = true; }
+  recentes = [id, ...recentes.filter(r => r !== id)].slice(0, 20);
+  desenhar();
+}
+
+// Ordem de leitura pelos centros das caixas: linhas de cima para baixo e, em
+// cada linha, da esquerda para a direita. Uma caixa entra na linha atual se o
+// centro dela cai na faixa vertical da primeira caixa da linha (a mais alta).
+function ordemLeitura(caixas) {
+  const cx = k => (caixas[k].caixa[0] + caixas[k].caixa[2]) / 2;
+  const cy = k => (caixas[k].caixa[1] + caixas[k].caixa[3]) / 2;
+  const linhas = [];
+  for (const k of caixas.map((_, k) => k).sort((a, b) => cy(a) - cy(b))) {
+    const linha = linhas.at(-1);
+    if (linha && cy(k) <= caixas[linha[0]].caixa[3]) linha.push(k);
+    else linhas.push([k]);
+  }
+  return linhas.flatMap(linha => linha.sort((a, b) => cx(a) - cx(b)));
+}
+
+function selecionarVizinha(passo) {
+  const ordem = ordemLeitura(edicao.caixas), n = ordem.length;
+  if (!n) return;
+  const i = ordem.indexOf(edicao.sel);
+  selecionar(i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]);
+}
+
+// --- busca da classe ----------------------------------------------------------
+// Casa sem diferenciar maiúsculas nem acentos: início do nome, início de uma
+// palavra, iniciais ("cpb" -> Clear plastic bottle), trecho qualquer e, por
+// último, o material (em português ou inglês). Empates: as usadas há pouco,
+// depois as do anotador, depois o id.
+
+const MAX_OPCOES = 9;
+const MATERIAIS = { plastic: ["plastico", "plastic"], metal: ["metal"], glass: ["vidro", "glass"],
+                    paper: ["papel", "paper"], other: ["outro", "other"] };
+const normalizar = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const busca = { opcoes: [], ativa: 0 };
+
+// [nível, início, fim do trecho casado] ou null; início null: sem destaque
+function casarClasse(consulta, c) {
+  const nome = normalizar(c.nome);
+  if (nome.startsWith(consulta)) return [0, 0, consulta.length];
+  const palavras = [...nome.matchAll(/[a-z0-9]+/g)];
+  const palavra = palavras.find(p => p[0].startsWith(consulta));
+  if (palavra) return [1, palavra.index, palavra.index + consulta.length];
+  if (consulta.length > 1 && palavras.map(p => p[0][0]).join("").startsWith(consulta))
+    return [2, null, null];
+  const i = nome.indexOf(consulta);
+  if (i >= 0) return [3, i, i + consulta.length];
+  if ((MATERIAIS[c.material] ?? []).some(m => m.startsWith(consulta))) return [4, null, null];
+  return null;
+}
+
+function opcoesPara(texto) {
+  const consulta = normalizar(texto.trim());
+  const lista = consulta
+    ? classes.map(c => [c, casarClasse(consulta, c)]).filter(([, m]) => m)
+        .map(([c, [nivel, inicio, fim]]) => ({ c, nivel, inicio, fim }))
+    : classes.filter(c => c.atalho !== null || recentes.includes(c.id))
+        .map(c => ({ c, nivel: 0, inicio: null }));
+  const chave = o => {
+    const r = recentes.indexOf(o.c.id);
+    return [o.nivel, r < 0 ? Infinity : r, o.c.atalho ?? Infinity, o.c.id];
+  };
+  const comparar = (a, b) => {
+    const [ka, kb] = [chave(a), chave(b)];
+    const i = ka.findIndex((v, j) => v !== kb[j]);
+    return i < 0 ? 0 : ka[i] < kb[i] ? -1 : 1;
+  };
+  return lista.sort(comparar).slice(0, MAX_OPCOES);
+}
+
+function abrirBusca() {
+  if (!editando() || edicao.sel === null) return;
+  $("busca").focus();
+  $("busca").select();
+  mostrarOpcoes();
+}
+
+function fecharBusca() {
+  $("busca").value = "";
+  $("opcoes").hidden = true;
+  if (document.activeElement === $("busca")) $("busca").blur();
+}
+
+function mostrarOpcoes() {
+  const lista = $("opcoes");
+  if (document.activeElement !== $("busca") || !editando() || edicao.sel === null) {
+    lista.hidden = true;
+    return;
+  }
+  busca.opcoes = opcoesPara($("busca").value);
+  busca.ativa = Math.min(busca.ativa, Math.max(busca.opcoes.length - 1, 0));
+  lista.replaceChildren();
+  if (!busca.opcoes.length) lista.append(Object.assign(document.createElement("li"),
+    { className: "vazia", textContent: "Nenhuma classe com esse nome." }));
+  busca.opcoes.forEach(({ c, inicio, fim }, k) => {
+    const li = document.createElement("li");
+    li.classList.toggle("ativa", k === busca.ativa);
+    const amostra = document.createElement("i");
+    amostra.style.background = cor(c.id);
+    const nome = document.createElement("span");
+    // Destaque só se normalizar não mudou o tamanho do nome (sem acentos)
+    if (inicio !== null && normalizar(c.nome).length === c.nome.length)
+      nome.append(c.nome.slice(0, inicio),
+                  Object.assign(document.createElement("b"), { textContent: c.nome.slice(inicio, fim) }),
+                  c.nome.slice(fim));
+    else nome.textContent = c.nome;
+    const material = Object.assign(document.createElement("span"),
+      { className: "material", textContent: c.material ?? "" });
+    li.append(amostra, nome, material);
+    if (c.atalho !== null && c.atalho <= 9)
+      li.append(Object.assign(document.createElement("kbd"), { textContent: c.atalho }));
+    li.title = `id ${c.id}`;
+    // mousedown com preventDefault: escolhe antes de a busca perder o foco
+    li.onmousedown = e => { e.preventDefault(); escolherOpcao(k); };
+    lista.append(li);
+  });
+  lista.hidden = false;
+  lista.querySelector(".ativa")?.scrollIntoView({ block: "nearest" });
+}
+
+function escolherOpcao(k) {
+  const opcao = busca.opcoes[k];
+  if (!opcao) return;
+  fecharBusca();
+  trocarClasse(opcao.c.id);
+}
+
+function remover() {
+  if (!editando() || edicao.sel === null) return;
+  guardar();
+  edicao.caixas.splice(edicao.sel, 1);
+  edicao.sel = edicao.caixas.length ? Math.min(edicao.sel, edicao.caixas.length - 1) : null;
+  desenhar();
+}
+
+// --- desfazer ----------------------------------------------------------------
+// Toda alteração das caixas chama guardar() antes: o estado anterior vai para a
+// pilha de desfazer, e a de refazer se esvazia. As pilhas são da imagem atual.
+
+function guardar() {
+  edicao.desfazer.push({ caixas: structuredClone(edicao.caixas), sel: edicao.sel });
+  edicao.refazer = [];
+  edicao.sujo = true;
+}
+
+// passo -1: desfaz; +1: refaz
+function voltar(passo) {
+  if (!editando()) return;
+  const [de, para] = passo < 0 ? ["desfazer", "refazer"] : ["refazer", "desfazer"];
+  const estado = edicao[de].pop();
+  if (!estado) return;
+  edicao[para].push({ caixas: edicao.caixas, sel: edicao.sel });
+  edicao.caixas = estado.caixas;
+  edicao.sel = estado.sel !== null && estado.sel < edicao.caixas.length ? estado.sel : null;
+  edicao.novo = null;
+  // Sem nada a desfazer, as caixas são as propostas como chegaram
+  edicao.sujo = edicao.desfazer.length > 0;
+  fecharBusca();
+  desenhar();
+}
+
+// Janela de confirmação: Enter (o botão de confirmar tem o foco) confirma,
+// Esc cancela. Resolve true se confirmou.
+function confirmar(texto, rotulo, perigo) {
+  const janela = $("confirmar"), sim = $("confirmar-sim");
+  $("confirmar-texto").textContent = texto;
+  sim.replaceChildren(`${rotulo} `, Object.assign(document.createElement("kbd"), { textContent: "Enter" }));
+  sim.className = perigo ? "descartar" : "salvar";
+  janela.returnValue = "";
+  janela.showModal();
+  sim.focus();
+  return new Promise(ok => janela.addEventListener("close", () => ok(janela.returnValue === "sim"),
+                                                    { once: true }));
+}
+
+function resumoSalvar() {
+  const caixas = edicao.caixas;
+  const { corrigidas, adicionadas, removidas } = contarAlteracoes();
+  const contagem = new Map();
+  for (const c of caixas) contagem.set(nomeClasse(c.id), (contagem.get(nomeClasse(c.id)) || 0) + 1);
+  const classes = [...contagem].map(([nome, n]) => n > 1 ? `${nome} ×${n}` : nome).join(", ");
+  return `Salvar ${detalhe.nome}?\n`
+    + (caixas.length ? `${caixas.length} caixa(s): ${classes}.`
+                     : "Nenhuma caixa: a imagem vai para o treino como fundo (sem objetos).")
+    + `\n${corrigidas} corrigida(s), ${adicionadas} adicionada(s), ${removidas} removida(s).`;
+}
+
+// confirmar: pede confirmação antes de salvar (o Enter); descartar sempre pede
+async function enviar(acao, pedirConfirmacao = false) {
+  if (!editando() || $("confirmar").open) return;
+  if (acao === "salvar" && edicao.caixas.some(c => c.id === null))
+    return alert(AVISO_SEM_ID);
+  if (acao === "descartar" && !await confirmar(
+      `Descartar ${detalhe.nome}?\nEla não vai para o treino.`, "Descartar", true)) return;
+  if (acao === "salvar" && pedirConfirmacao && !await confirmar(resumoSalvar(), "Salvar e próxima"))
+    return;
+  const corpo = { acao, base: edicao.base, tempo_ativo_s: tempo.ativo,
+    caixas: edicao.caixas.map(({ id, caixa, proposta, origem }) =>
+      ({ id, caixa, proposta, origem: origem ?? null })) };
+  $("salvar").disabled = $("descartar").disabled = true;
+  try {
+    await api(`/api/imagens/${encodeURIComponent(detalhe.nome)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpo) });
+    edicao.sujo = false;
+    const proxima = fila[atual + 1]?.nome ?? fila[atual - 1]?.nome;
+    await carregarFila($("status").value === "pendente" ? proxima : detalhe.nome);
+  } catch (e) { erro(e); }
+  finally { $("salvar").disabled = $("descartar").disabled = false; }
+}
+
+// --- eventos ----------------------------------------------------------------
+
+const nomeAtual = () => (atual >= 0 ? fila[atual].nome : null);
+$("status").onchange = () => { if (podeSair()) carregarFila(nomeAtual()).catch(erro); };
+$("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
+$("camada").onchange = desenhar;
+$("mostrar-caixas").onchange = atualizarVisibilidade;
+$("mostrar-rotulos").onchange = atualizarVisibilidade;
+$("anterior").onclick = () => { if (podeSair()) mostrar(atual - 1); };
+$("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
+$("salvar").onclick = () => enviar("salvar");
+// Enter e Esc tratados aqui, sem depender do foco nem do Esc nativo do
+// <dialog>; stopPropagation: a tecla não chega aos atalhos da página
+$("confirmar").onkeydown = e => {
+  if (e.key !== "Escape" && e.key !== "Enter") return;
+  e.preventDefault();
+  e.stopPropagation();
+  $("confirmar").close(e.key === "Enter" && e.target.value !== "nao" ? "sim" : "nao");
+};
+$("descartar").onclick = () => enviar("descartar");
+$("remover").onclick = remover;
+$("nova").onclick = () => (edicao?.novo ? cancelarNova() : iniciarNova());
+$("busca").oninput = () => { busca.ativa = 0; mostrarOpcoes(); };
+$("busca").onfocus = mostrarOpcoes;
+$("busca").onblur = () => { $("opcoes").hidden = true; };
+$("busca").onkeydown = e => {
+  const n = busca.opcoes.length;
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
+    e.preventDefault();
+    busca.ativa = (busca.ativa + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
+    mostrarOpcoes();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    escolherOpcao(busca.ativa);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    fecharBusca();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    fecharBusca();
+    selecionarVizinha(e.shiftKey ? -1 : 1);
+  }
+};
+$("area").onmousedown = e => {
+  if (!editando()) return;
+  if (edicao.novo) { e.preventDefault(); escolherPonto(e); }
+  else if (edicao.sel !== null) selecionar(null);
+};
+$("area").addEventListener("wheel", e => {
+  if (!editando() || !edicao.novo?.lista?.length) return;
+  e.preventDefault();
+  trocarCandidata(e.deltaY > 0 ? 1 : -1);
+}, { passive: false });
+
+// Ctrl+S (Cmd+S no Mac) salva de qualquer lugar da página, inclusive da busca;
+// nunca abre o "salvar página" do navegador
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (editando() && !$("confirmar").open) { fecharBusca(); enviar("salvar"); }
+  }
+});
+
+// Ctrl+Z desfaz; Ctrl+Shift+Z e Ctrl+Y refazem (Cmd no Mac). Na busca com texto,
+// ficam com o campo, como em qualquer caixa de texto.
+document.addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || $("confirmar").open) return;
+  const tecla = e.key.toLowerCase();
+  if (tecla !== "z" && tecla !== "y") return;
+  if (e.target === $("busca") && $("busca").value) return;
+  e.preventDefault();
+  voltar(tecla === "y" || e.shiftKey ? 1 : -1);
+});
+
+document.addEventListener("keydown", e => {
+  if (["SELECT", "INPUT"].includes(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if ($("confirmar").open) return;  // a janela trata Enter e Esc
+  // Enter num botão em foco é o clique dele, não um atalho
+  if (e.key === "Enter" && e.target.tagName === "BUTTON") return;
+  if (e.key === "ArrowLeft") { if (podeSair()) mostrar(atual - 1); return; }
+  if (e.key === "ArrowRight") { if (podeSair()) mostrar(atual + 1); return; }
+  if (!editando()) return;
+  if (edicao.novo) {  // modo nova caixa: Tab troca a candidata, Enter confirma
+    if (e.key === "Tab") { e.preventDefault(); trocarCandidata(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Enter") { e.preventDefault(); confirmarNova(); }
+    else if (["Escape", "n", "N"].includes(e.key)) { e.preventDefault(); cancelarNova(); }
+    return;
+  }
+  if ((e.key === "n" || e.key === "N") && edicao.sel === null) {
+    e.preventDefault();
+    iniciarNova();
+  } else if (e.key === "Tab" && edicao.caixas.length) {
+    e.preventDefault();
+    selecionarVizinha(e.shiftKey ? -1 : 1);
+  } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && edicao.sel !== null) {
+    // Com uma caixa selecionada, uma letra já começa a busca (inclusive o d)
+    e.preventDefault();
+    abrirBusca();
+    $("busca").value = e.key;
+    busca.ativa = 0;
+    mostrarOpcoes();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    enviar("salvar", true);
+  } else if (/^[1-9]$/.test(e.key) && classes.some(c => c.atalho === Number(e.key))) {
+    trocarClasse(classes.find(c => c.atalho === Number(e.key)).id);
+  } else if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    remover();
+  } else if (e.key === "Escape") {
+    selecionar(null);
+  } else if (e.key === "d" || e.key === "D") {
+    enviar("descartar");
+  }
+});
+
+// #<nome> no endereço abre essa imagem; se ela não estiver entre as
+// pendentes, a fila passa a mostrar todas
+async function iniciar() {
+  classes = await api("/api/classes");
+  const pedida = decodeURIComponent(location.hash.slice(1));
+  await carregarFila(pedida);
+  if (pedida && nomeAtual() !== pedida) {
+    $("status").value = "todas";
+    await carregarFila(pedida);
+  }
+}
+iniciar().catch(erro);
+</script>
+</body>
+</html>

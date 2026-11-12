@@ -1,0 +1,109 @@
+# Classes da anotação (nível 2 da taxonomia, monografia 5.3.2).
+#
+# nomes: o espaço de ids dos rótulos. O índice na lista é o id da classe nos
+#   .txt e no data.yaml de cada saída. São as 60 classes TACO mais Background,
+#   na ordem de legado/database/tcc-*/YOLO_dataset/data.yaml e do
+#   yolo_models/taco/best.pt (conferido em 2026-11-10), para que as anotações
+#   sirvam direto ao fine-tuning dele. Não reordene; só acrescente no fim.
+#
+# classes: o que o anotador automático procura, um subconjunto de nomes. A
+#   ordem aqui não muda os ids. Lista inicial: as seis classes TACO que
+#   aparecem nas fotos da equipe, mais o vidro em três (decisão 8).
+#
+#   nome:     nome da classe, um dos de nomes
+#   prompt:   descrição em inglês enviada ao Grounding DINO
+#   material: classe-pai (nível 1): plastic, metal, glass, paper ou other
+#   reserva:  opcional; true faz a classe só vencer quando nenhuma outra chega
+#             ao limiar (classe genérica; medição no OBJETIVO.md, seção 5)
+
+nomes:
+- Aluminium foil
+- Battery
+- Aluminium blister pack
+- Carded blister pack
+- Other plastic bottle
+- Clear plastic bottle
+- Glass bottle
+- Plastic bottle cap
+- Metal bottle cap
+- Broken glass
+- Food Can
+- Aerosol
+- Drink can
+- Toilet tube
+- Other carton
+- Egg carton
+- Drink carton
+- Corrugated carton
+- Meal carton
+- Pizza box
+- Paper cup
+- Disposable plastic cup
+- Foam cup
+- Glass cup
+- Other plastic cup
+- Food waste
+- Glass jar
+- Plastic lid
+- Metal lid
+- Other plastic
+- Magazine paper
+- Tissues
+- Wrapping paper
+- Normal paper
+- Paper bag
+- Plastified paper bag
+- Plastic film
+- Six pack rings
+- Garbage bag
+- Other plastic wrapper
+- Single-use carrier bag
+- Polypropylene bag
+- Crisp packet
+- Spread tub
+- Tupperware
+- Disposable food container
+- Foam food container
+- Other plastic container
+- Plastic gloves
+- Plastic utensils
+- Pop tab
+- Rope & strings
+- Scrap metal
+- Shoe
+- Squeezable tube
+- Plastic straw
+- Paper straw
+- Styrofoam piece
+- Unlabeled litter
+- Cigarette
+- Background
+
+classes:
+  - nome: Clear plastic bottle
+    prompt: plastic bottle
+    material: plastic
+  - nome: Plastic bottle cap
+    prompt: plastic bottle cap
+    material: plastic
+  - nome: Drink can
+    prompt: aluminium drink can
+    material: metal
+  - nome: Glass bottle
+    prompt: glass bottle
+    material: glass
+  - nome: Corrugated carton
+    prompt: cardboard box
+    material: paper
+  - nome: Normal paper
+    prompt: sheet of paper
+    material: paper
+  # Decisão 8 do OBJETIVO.md (2026-11-09): vidro em três classes. O prompt
+  # descreve o objeto das fotos, não o nome TACO: no teste de 2026-10-27,
+  # "drinking glass" foi o termo que mais reconheceu esses copos.
+  - nome: Glass jar
+    prompt: glass jar
+    material: glass
+  - nome: Glass cup
+    prompt: drinking glass
+    material: glass

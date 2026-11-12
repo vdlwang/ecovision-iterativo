@@ -8,12 +8,13 @@ EcoVision (a.k.a. CyberReciclagem): the 2025 undergraduate thesis (TCC, Engenhar
 
 The repo merges two histories from the thesis: its final version (`vitor-scosta/Ecovision`), which is the root and the base for all new work, and its preliminary version (`vitor-scosta/tcc-testes`) under `legado/`, kept only as reference. "Iterativo" in the repo name refers to the current work iterating on the thesis, not to `legado/`. Both upstreams are frozen. `origin` is `vdlwang/ecovision-iterativo`, a standalone repo (not a fork). `vdlwang/ecovision-fork` is the retired old fork, kept for reference. Never push to or open PRs against `vitor-scosta/tcc-testes`: it happened once by mistake (PR #3, reverted in #4).
 
-There is no test suite, linter or TypeScript type-check (no `tsconfig.json`; Vite only transpiles). The available checks are:
+There is no linter or TypeScript type-check (no `tsconfig.json`; Vite only transpiles), and the only tests are pytest unit tests for `anotacao/` (`anotar.py`, `avaliar.py`, `saida.py`, `visualizar.py`, `revisar.py`; they don't load the model). The available checks are:
 
 ```bash
 cd frontend && npm run build               # bundles the frontend; catches import/syntax errors
 python -m py_compile backend/*.py
 cd firmware && pio run                     # compile only, no upload
+python -m pytest anotacao/tests            # needs anotacao/requirements.txt (pyyaml, pillow, pytest)
 ```
 
 ## Running things
@@ -60,7 +61,7 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 ## Documentation layout
 
-The root `README.md` stays short (overview, install, run, limitations) and links to `PROBLEMAS.md` and to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints). Put details in the matching one.
+The root `README.md` stays short (overview, install, run, limitations) and links to `PROBLEMAS.md`, `OBJETIVO.md` (the full target system: belt images → three annotators → 3oo3 vote → human review → train/test bases → YOLO fine-tuning, with decisions and a task list T1..T14; the current scope is T1 and then the multi-annotator pipeline of its section 6: T5 importar.py, a generic detector interface, avaliar.py over saved proposals, more annotators, the vote) and to per-directory READMEs: `backend/README.md` (config.json fields, WebSocket protocol, test scripts), `frontend/README.md` (UI usage), `firmware/README.md` (pinout, serial commands), `yolo_models/README.md` (what each weight file is, with metrics read from the checkpoints), `anotacao/README.md` (assisted annotation: `importar.py` copies a batch (lote) into the shared `images/` store and registers it in `imagens.csv` with its train/test set and region of interest (`lotes.yaml`); `anotar.py` runs an annotator over imported pending images from its `ANOTADORES` registry (only Grounding DINO so far, with the prompts in `classes.yaml`) and writes proposals to `propostas/<anotador>/*.json` plus status in `imagens.csv`, never to `labels/`; `--aceitar` copies proposals into YOLO labels; the output format lives in `saida.py`; output `anotacoes/` is gitignored; `revisar.py` serves `revisar.html` plus a JSON API on 127.0.0.1; pending images can be edited (change class, remove, add a box by clicking one of the annotator's stored candidates, undo/redo, save, discard) and each review is logged in `revisoes/` (drawing/moving boxes by hand is deferred, decision 12; reopening is phase 5); `visualizar.py` stays as the static `file://` page; `avaliar.py` scores it against the team labels in `legado/database`, after applying `correcoes_rotulos.yaml` (the team labelled all glass as `Glass bottle`; corrections are by .txt line, legado/ stays untouched); `anotar_colab.ipynb` runs it on Colab; `PLANO-REVISAO.md` plans T1, the generic annotation framework and the review/edit page). Put details in the matching one.
 
 ## legado/
 
