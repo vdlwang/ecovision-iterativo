@@ -216,15 +216,28 @@ Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por toke
 
 ## Avaliação
 
-`avaliar.py` mede o anotador nas fotos rotuladas pela equipe (por padrão, as 88 imagens das quatro validações de `legado/database`, 375 caixas nas classes de `classes.yaml`):
+`avaliar.py` mede as **propostas gravadas** de um anotador contra as fotos rotuladas pela equipe (por padrão, as 88 imagens das quatro validações de `legado/database`, 375 caixas nas classes de `classes.yaml`). Ele não roda modelo: a validação é importada e anotada como qualquer lote, uma vez por anotador, e a avaliação leva menos de um segundo, quantas vezes for preciso.
 
 ```bash
-python anotacao/avaliar.py                                   # Grounding DINO tiny
-python anotacao/avaliar.py --modelo IDEA-Research/grounding-dino-base
-python anotacao/avaliar.py legado/database/tcc-0CF/YOLO_dataset/validation
+for c in 0CF 0SF 45CF 45SF; do
+  python anotacao/importar.py legado/database/tcc-$c/YOLO_dataset/validation/images \
+    -o validacao --lote tcc-$c --link
+done
+python anotacao/anotar.py -o validacao --anotador grounding-dino          # GPU, ~2 min
+python anotacao/avaliar.py validacao --anotador grounding-dino --json gdino.json
 ```
 
-São duas medidas. A **classificação** pega, para cada caixa verdadeira, a caixa do modelo que mais se sobrepõe a ela e compara as classes: mostra a matriz de confusão, a taxa de acerto da classe e a do material, sem misturar com erros de localização. A **detecção** roda o `anotar.py` completo em vários limiares de confiança (`--limiares`) e dá precisão e recall, contando como acerto IoU ≥ 0,5 com a mesma classe.
+Cada imagem é casada com o rótulo da equipe pelo nome original (sem o prefixo `<lote>_`); um nome em duas pastas de rótulos é recusado. Imagens sem rótulo são ignoradas e contadas. As medidas (IoU ≥ 0,5 como acerto de posição):
+
+| Medida | Para quê |
+|---|---|
+| **Cobertura sem classe**, por limiar de leitura: objetos com alguma caixa, imagens completas, caixas e sobra por imagem, e classe e material certos entre as caixas que cobrem um objeto | Escolher `--confianca` |
+| **Classificação** no limiar de leitura gravado na proposta: matriz de confusão, com "sem caixa visível" e "outra" (classe fora de `classes.yaml`) | Ver quais classes se trocam |
+| **Classe por faixa de confiança**, sobre todas as caixas gravadas | Escolher `--confianca-classe` |
+| **Detecção** com classe, por limiar: precisão e recall | Comparar com a linha de base |
+| **Caixa por clique**: nos objetos sem caixa visível, se a 1ª (ou uma das 3 primeiras) candidata no centro do objeto tem IoU ≥ 0,75 | Escolher `--piso` |
+
+Os limiares abaixo do `piso` das propostas não são medidos (faltariam caixas ali). `--json` grava todas as medidas, para registrar a medição e comparar anotadores. Os números ficam no `OBJETIVO.md` (seção 5).
 
 Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `classes.yaml`, casadas pelo nome, e os polígonos viram a caixa que os contém. Antes disso, o `avaliar.py` aplica [`correcoes_rotulos.yaml`](correcoes_rotulos.yaml): a equipe rotulou todo vidro como `Glass bottle`, e as 97 caixas são, na verdade, potes, copos, taças, tigelas e 3 latas. O arquivo indica a linha de cada `.txt` e confere a classe original; `legado/` não é editado. `--sem-correcoes` usa os rótulos como estão, e `--correcoes` aponta para outro arquivo. As quatro validações são as mesmas cenas fotografadas de jeitos diferentes, então somá-las não equivale a quatro vezes mais dados; serve para comparar anotadores, que não treinaram nelas.
 

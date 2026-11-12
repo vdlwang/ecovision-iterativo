@@ -1,27 +1,32 @@
 """
-Avalia o anotador automático nas fotos rotuladas pela equipe.
+Avalia as propostas gravadas de um anotador contra as fotos rotuladas pela
+equipe (OBJETIVO.md, seção 6). Não roda modelo: lê o que o anotar.py gravou
+numa saída e casa cada imagem com o rótulo dela pelo nome original (sem o
+prefixo <lote>_ do importar.py).
 
-Duas medidas, sobre um ou mais datasets no formato YOLO (padrão: as quatro
-validações de legado/database):
+    python anotacao/importar.py legado/database/tcc-0CF/YOLO_dataset/validation/images \
+        -o validacao --lote tcc-0CF --link              # e os outros cenários
+    python anotacao/anotar.py -o validacao --anotador grounding-dino
+    python anotacao/avaliar.py validacao --anotador grounding-dino [--json resultado.json]
 
-1. Classificação: para cada caixa verdadeira, a consulta do modelo que mais se
-   sobrepõe a ela e a classe que o modelo dá a essa consulta. Separa o erro de
-   classe do erro de localização.
-2. Detecção: o anotar.py completo (filtros e NMS) em vários limiares de
-   confiança; acerto é IoU >= 0,5 com uma caixa verdadeira da mesma classe.
+Medidas, com IoU >= 0,5 como acerto de posição:
+1. Cobertura sem classe, por limiar de leitura: objetos com alguma caixa,
+   imagens completas, caixas por imagem e caixas que sobram (a remover).
+2. Classe e material das caixas que cobrem um objeto, no limiar de leitura
+   gravado na proposta, com a matriz de confusão.
+3. Acerto de classe por faixa de confiança (para escolher confianca_classe).
+4. Precisão e recall com classe, por limiar.
+5. Caixa por clique: nos objetos sem caixa visível, se a 1ª (ou uma das 3
+   primeiras) candidata no centro do objeto tem IoU >= 0,75.
 
 Os rótulos da equipe usam os nomes TACO; só entram as classes de classes.yaml,
-casadas pelo nome. Polígonos (formato de segmentação) viram a caixa que os
-contém. Antes, valem as correções de correcoes_rotulos.yaml (a equipe rotulou
-todo vidro como Glass bottle), sem editar legado/.
-
-Uso:
-    python anotacao/avaliar.py
-    python anotacao/avaliar.py legado/database/tcc-0CF/YOLO_dataset/validation \\
-        --modelo IDEA-Research/grounding-dino-base
+casadas pelo nome. Polígonos viram a caixa que os contém. Antes, valem as
+correções de correcoes_rotulos.yaml (a equipe rotulou todo vidro como Glass
+bottle), sem editar legado/.
 """
 
 import argparse
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -29,12 +34,16 @@ from pathlib import Path
 import yaml
 
 import anotar
+import saida as formato
 
 DIR_REPO = anotar.DIR_SCRIPT.parent
 DATASETS_PADRAO = sorted((DIR_REPO / "legado" / "database").glob("tcc-*/YOLO_dataset/validation"))
 CORRECOES_PADRAO = anotar.DIR_SCRIPT / "correcoes_rotulos.yaml"
-LIMIARES_PADRAO = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5]
+LIMIARES_PADRAO = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5]
+FAIXAS = [0.05, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 1.01]
 IOU_ACERTO = 0.5
+IOU_CLIQUE = 0.75   # candidata "certa" no clique
+IOU_PRESENTE = 0.9  # a página esconde candidatas quase iguais a uma caixa já presente
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -124,13 +133,6 @@ def listar_imagens(pastas):
     return itens
 
 
-def consulta_mais_proxima(caixas, caixa):
-    """Índice e IoU da caixa de caixas que mais se sobrepõe a caixa."""
-    ious = [anotar.iou(caixa, c) for c in caixas]
-    melhor = max(range(len(ious)), key=ious.__getitem__)
-    return melhor, ious[melhor]
-
-
 def casar(deteccoes, verdade, limiar_iou=IOU_ACERTO):
     """
     Casamento guloso, da detecção mais confiante para a menos; cada caixa
@@ -149,109 +151,325 @@ def casar(deteccoes, verdade, limiar_iou=IOU_ACERTO):
     return acertos, len(deteccoes) - acertos, len(verdade) - acertos
 
 
-def imprimir_classificacao(matriz, classes):
-    """matriz: Counter de (verdadeira, prevista ou None se não localizada)."""
+def casar_sem_classe(deteccoes, verdade, limiar_iou=IOU_ACERTO):
+    """
+    Casamento guloso pelo IoU, sem olhar a classe: cada detecção e cada caixa
+    verdadeira entram em um par só. Devolve [(índice da detecção, índice da
+    verdadeira)] com IoU >= limiar_iou.
+    """
+    pares = sorted(((anotar.iou(d[2], v[1]), di, vi) for di, d in enumerate(deteccoes)
+                    for vi, v in enumerate(verdade)), reverse=True)
+    usadas_d, usadas_v, casados = set(), set(), []
+    for iou, di, vi in pares:
+        if iou < limiar_iou:
+            break
+        if di not in usadas_d and vi not in usadas_v:
+            usadas_d.add(di)
+            usadas_v.add(vi)
+            casados.append((di, vi))
+    return casados
+
+
+def indexar_verdade(pastas):
+    """
+    {nome original da imagem: (.txt, nomes do dataset)} das pastas de rótulos.
+    Um nome em duas pastas é recusado: não daria para saber qual rótulo vale.
+    """
+    indice = {}
+    for imagem, rotulo, nomes_dataset in listar_imagens(pastas):
+        if imagem.name in indice:
+            raise ValueError(f"imagem {imagem.name} em mais de uma pasta de rótulos: "
+                             f"{indice[imagem.name][0]} e {rotulo}")
+        indice[imagem.name] = (rotulo, nomes_dataset)
+    return indice
+
+
+def nome_original(nome, lote):
+    """O nome antes do importar.py, que prefixa <lote>_."""
+    prefixo = f"{lote}_" if lote else ""
+    return nome[len(prefixo):] if prefixo and nome.startswith(prefixo) else nome
+
+
+def carregar_pares(saida, anotador, indice_verdade, nomes, correcoes):
+    """
+    [(nome, proposta, deteccoes, verdade)] das imagens da saída com proposta do
+    anotador e rótulo da equipe. deteccoes: [(classe em nomes ou None se fora,
+    confianca, caixa)], da mais confiante para a menos. Devolve também os nomes
+    sem rótulo e o Counter das classes da equipe fora de nomes.
+    """
+    _, linhas = formato.ler_estado(saida)
+    pares, sem_rotulo, fora = [], [], Counter()
+    for nome, linha in linhas.items():
+        caminho = formato.caminho_proposta(saida, anotador, nome)
+        if not caminho.exists():
+            continue
+        original = nome_original(nome, linha.get("lote"))
+        if original not in indice_verdade:
+            sem_rotulo.append(nome)
+            continue
+        rotulo, nomes_dataset = indice_verdade[original]
+        verdade, fora_imagem = ler_verdade(rotulo, nomes_dataset, nomes,
+                                           correcoes.get(rotulo.resolve()))
+        fora += fora_imagem
+        proposta = formato.ler_proposta(caminho)
+        deteccoes = sorted(((nomes.index(c) if c in nomes else None, conf, caixa)
+                            for c, conf, caixa in formato.caixas_normalizadas(proposta)),
+                           key=lambda d: d[1], reverse=True)
+        pares.append((nome, proposta, deteccoes, verdade))
+    return pares, sem_rotulo, fora
+
+
+def medir_cobertura(pares, limiares, materiais):
+    """
+    Por limiar: objetos cobertos (alguma caixa com IoU >= 0,5, qualquer classe),
+    imagens completas, caixas, sobra, e classe e material certos entre as
+    caixas que cobrem um objeto.
+    """
+    resultado = {}
+    for limiar in limiares:
+        c = Counter()
+        for _, _, deteccoes, verdade in pares:
+            dets = [d for d in deteccoes if d[1] >= limiar]
+            casados = casar_sem_classe(dets, verdade)
+            c["objetos"] += len(verdade)
+            c["cobertos"] += len(casados)
+            c["completas"] += len(casados) == len(verdade)
+            c["caixas"] += len(dets)
+            c["sobra"] += len(dets) - len(casados)
+            for di, vi in casados:
+                prevista, real = dets[di][0], verdade[vi][0]
+                c["classe_certa"] += prevista == real
+                c["material_certo"] += (prevista is not None
+                                        and materiais[prevista] == materiais[real])
+        n = len(pares)
+        resultado[limiar] = {
+            "cobertura": c["cobertos"] / c["objetos"] if c["objetos"] else 0.0,
+            "completas": c["completas"] / n if n else 0.0,
+            "caixas_por_imagem": c["caixas"] / n if n else 0.0,
+            "sobra_por_imagem": c["sobra"] / n if n else 0.0,
+            "classe_certa": c["classe_certa"] / c["cobertos"] if c["cobertos"] else 0.0,
+            "material_certo": c["material_certo"] / c["cobertos"] if c["cobertos"] else 0.0,
+        }
+    return resultado
+
+
+def medir_deteccao(pares, limiares):
+    """Por limiar: acertos (IoU >= 0,5 e mesma classe), falsos positivos e negativos."""
+    resultado = {}
+    for limiar in limiares:
+        tp = fp = fn = 0
+        for _, _, deteccoes, verdade in pares:
+            a, b, c = casar([d for d in deteccoes if d[1] >= limiar], verdade)
+            tp, fp, fn = tp + a, fp + b, fn + c
+        resultado[limiar] = {"acertos": tp, "falsos_positivos": fp, "falsos_negativos": fn,
+                             "precisao": tp / (tp + fp) if tp + fp else 0.0,
+                             "recall": tp / (tp + fn) if tp + fn else 0.0}
+    return resultado
+
+
+def medir_confusao(pares):
+    """
+    Counter de (classe verdadeira, prevista), no limiar de leitura gravado em
+    cada proposta. prevista: o índice da classe; "outra" se a caixa que cobre
+    o objeto tem classe fora de classes.yaml; None se nenhuma caixa visível o
+    cobre.
+    """
+    matriz = Counter()
+    for _, proposta, deteccoes, verdade in pares:
+        confianca, _ = formato.limiares(proposta)
+        dets = [d for d in deteccoes if d[1] >= confianca]
+        cobertas = {vi: "outra" if dets[di][0] is None else dets[di][0]
+                    for di, vi in casar_sem_classe(dets, verdade)}
+        for vi, (real, _) in enumerate(verdade):
+            matriz[(real, cobertas.get(vi))] += 1
+    return matriz
+
+
+def medir_faixas(pares, faixas=FAIXAS):
+    """
+    Por faixa de confiança [a, b): caixas, as que cobrem um objeto e, destas, as
+    de classe certa. Casamento sobre todas as caixas gravadas.
+    """
+    c = {(a, b): Counter() for a, b in zip(faixas, faixas[1:])}
+    for _, _, deteccoes, verdade in pares:
+        casados = dict(casar_sem_classe(deteccoes, verdade))
+        for di, (prevista, conf, _) in enumerate(deteccoes):
+            faixa = next((f for f in c if f[0] <= conf < f[1]), None)
+            if faixa is None:
+                continue
+            c[faixa]["caixas"] += 1
+            if di in casados:
+                c[faixa]["cobrem"] += 1
+                c[faixa]["classe_certa"] += prevista == verdade[casados[di]][0]
+    return {f: dict(v) for f, v in c.items()}
+
+
+def medir_clique(pares):
+    """
+    Caixa por clique, como a página a oferece: nos objetos que nenhuma caixa
+    visível cobre, as candidatas (abaixo do limiar de leitura) que contêm o
+    centro do objeto, menos as quase iguais a uma visível, da mais confiante
+    para a menos. Conta se a 1ª e se uma das 3 primeiras têm IoU >= 0,75.
+    """
+    c = Counter()
+    for _, proposta, deteccoes, verdade in pares:
+        confianca, _ = formato.limiares(proposta)
+        visiveis = [d for d in deteccoes if d[1] >= confianca]
+        candidatas = [d for d in deteccoes if d[1] < confianca]
+        c["candidatas"] += len(candidatas)
+        cobertas = {vi for _, vi in casar_sem_classe(visiveis, verdade)}
+        for vi, (_, caixa) in enumerate(verdade):
+            if vi in cobertas:
+                continue
+            c["sem_caixa"] += 1
+            cx, cy = (caixa[0] + caixa[2]) / 2, (caixa[1] + caixa[3]) / 2
+            no_ponto = [d for d in candidatas
+                        if d[2][0] <= cx <= d[2][2] and d[2][1] <= cy <= d[2][3]
+                        and not any(anotar.iou(v[2], d[2]) >= IOU_PRESENTE for v in visiveis)]
+            ious = [anotar.iou(d[2], caixa) for d in no_ponto]
+            c["primeira"] += any(i >= IOU_CLIQUE for i in ious[:1])
+            c["tres_primeiras"] += any(i >= IOU_CLIQUE for i in ious[:3])
+    n = len(pares)
+    return {"sem_caixa": c["sem_caixa"], "primeira": c["primeira"],
+            "tres_primeiras": c["tres_primeiras"],
+            "candidatas_por_imagem": c["candidatas"] / n if n else 0.0}
+
+
+def pct(v):
+    return f"{v:4.0%}"
+
+
+def imprimir(resultado, classes):
     nomes = [c["nome"] for c in classes]
-    materiais = [c["material"] for c in classes]
+    print("\nCobertura sem classe (objeto com alguma caixa de IoU >= 0,5, qualquer classe)")
+    print("limiar  cobertos  completas  caixas/img  sobra/img  classe certa  material certo")
+    for limiar, r in resultado["cobertura"].items():
+        print(f"{limiar:5.2f}   {pct(r['cobertura']):>8}  {pct(r['completas']):>9}  "
+              f"{r['caixas_por_imagem']:10.1f}  {r['sobra_por_imagem']:9.1f}  "
+              f"{pct(r['classe_certa']):>12}  {pct(r['material_certo']):>14}")
+
+    matriz = resultado["_matriz"]
     largura = max(len(n) for n in nomes)
-    print("\nClassificação (linhas: classe verdadeira; colunas: prevista)")
+    print("\nClassificação no limiar de leitura da proposta (linhas: verdadeira; colunas: "
+          "prevista; s.cx: sem caixa visível; outra: fora de classes.yaml)")
     print(" " * (largura + 4) + "".join(f"{i:>5}" for i in range(len(nomes)))
-          + "  n.loc  acerto")
+          + "  outra  s.cx  acerto")
     for v, nome in enumerate(nomes):
         linha = [matriz[(v, p)] for p in range(len(nomes))]
-        total = sum(linha)
-        acerto = f"{linha[v] / total:6.0%}" if total else "     -"
+        outra = sum(n for (r, p), n in matriz.items() if r == v and p == "outra")
+        cobertas = sum(linha) + outra
+        acerto = f"{linha[v] / cobertas:6.0%}" if cobertas else "     -"
         print(f"{v:>2}  {nome:<{largura}}" + "".join(f"{n:>5}" for n in linha)
-              + f"{matriz[(v, None)]:>7}  {acerto}")
+              + f"{outra:>7}{matriz[(v, None)]:>6}  {acerto}")
 
-    localizadas = sum(n for (v, p), n in matriz.items() if p is not None)
-    classe_certa = sum(n for (v, p), n in matriz.items() if p == v)
-    material_certo = sum(n for (v, p), n in matriz.items()
-                         if p is not None and materiais[p] == materiais[v])
-    nao_localizadas = sum(n for (v, p), n in matriz.items() if p is None)
-    if localizadas:
-        print(f"\nClasse certa: {classe_certa}/{localizadas} ({classe_certa / localizadas:.0%}); "
-              f"material certo: {material_certo}/{localizadas} "
-              f"({material_certo / localizadas:.0%}); "
-              f"não localizadas (IoU < {IOU_ACERTO}): {nao_localizadas}")
+    print("\nClasse por faixa de confiança (todas as caixas gravadas)")
+    print("faixa        caixas  cobrem objeto  classe certa (das que cobrem)")
+    for (a, b), r in resultado["faixas"].items():
+        caixas, cobrem, certa = r.get("caixas", 0), r.get("cobrem", 0), r.get("classe_certa", 0)
+        print(f"{a:.2f}-{min(b, 1):.2f}   {caixas:6d}   {cobrem:5d} ({pct(cobrem / caixas) if caixas else '   -'})"
+              f"   {certa:5d} ({pct(certa / cobrem) if cobrem else '   -'})")
 
-
-def imprimir_deteccao(contagens):
-    """contagens: {limiar: [acertos, falsos positivos, falsos negativos]}."""
-    print(f"\nDetecção (acerto: IoU >= {IOU_ACERTO} e mesma classe)")
+    print("\nDetecção (acerto: IoU >= 0,5 e mesma classe)")
     print("limiar  acertos  FP     FN    precisão  recall")
-    for limiar, (tp, fp, fn) in sorted(contagens.items()):
-        precisao = tp / (tp + fp) if tp + fp else 0.0
-        recall = tp / (tp + fn) if tp + fn else 0.0
-        print(f"{limiar:5.2f}   {tp:6d}  {fp:5d}  {fn:5d}  {precisao:8.2f}  {recall:6.2f}")
+    for limiar, r in resultado["deteccao"].items():
+        print(f"{limiar:5.2f}   {r['acertos']:6d}  {r['falsos_positivos']:5d}  "
+              f"{r['falsos_negativos']:5d}  {r['precisao']:8.2f}  {r['recall']:6.2f}")
+
+    c = resultado["clique"]
+    if c["sem_caixa"]:
+        print(f"\nCaixa por clique: {c['sem_caixa']} objeto(s) sem caixa visível; a 1ª candidata "
+              f"no centro acerta (IoU >= {IOU_CLIQUE}) {c['primeira']} ({c['primeira'] / c['sem_caixa']:.0%}), "
+              f"uma das 3 primeiras {c['tres_primeiras']} ({c['tres_primeiras'] / c['sem_caixa']:.0%}); "
+              f"{c['candidatas_por_imagem']:.1f} candidata(s) por imagem")
+    else:
+        print("\nCaixa por clique: todo objeto tem caixa visível")
+
+
+def avaliar(saida, anotador, classes, pastas_verdade, correcoes, limiares):
+    """Todas as medidas, num dicionário (o --json grava este dicionário)."""
+    nomes = [c["nome"] for c in classes]
+    materiais = [c["material"] for c in classes]
+    pares, sem_rotulo, fora = carregar_pares(saida, anotador, indexar_verdade(pastas_verdade),
+                                             nomes, correcoes)
+    if not pares:
+        raise ValueError(f"nenhuma imagem de {saida} tem proposta de {anotador} e rótulo da "
+                         "equipe")
+    # Abaixo do piso de alguma proposta, faltariam caixas: o limiar não é medido
+    piso = max(float((proposta.get("parametros") or {}).get("piso", 0.0))
+               for _, proposta, _, _ in pares)
+    abaixo = [l for l in limiares if l < piso]
+    limiares = sorted(l for l in limiares if l >= piso)
+    return {
+        "anotador": anotador,
+        "imagens": len(pares),
+        "objetos": sum(len(v) for _, _, _, v in pares),
+        "sem_rotulo": sem_rotulo,
+        "fora_das_classes": dict(fora),
+        "limiares_abaixo_do_piso": abaixo,
+        "cobertura": medir_cobertura(pares, limiares, materiais),
+        "deteccao": medir_deteccao(pares, limiares),
+        "faixas": medir_faixas(pares),
+        "clique": medir_clique(pares),
+        "_matriz": medir_confusao(pares),
+    }
+
+
+def para_json(resultado, classes):
+    """O resultado sem tuplas nas chaves, para gravar em JSON."""
+    nomes = [c["nome"] for c in classes]
+    nome = lambda i: "sem caixa" if i is None else i if i == "outra" else nomes[i]  # noqa: E731
+    dados = {k: v for k, v in resultado.items() if k != "_matriz"}
+    dados["cobertura"] = {str(k): v for k, v in resultado["cobertura"].items()}
+    dados["deteccao"] = {str(k): v for k, v in resultado["deteccao"].items()}
+    dados["faixas"] = {f"{a}-{b}": v for (a, b), v in resultado["faixas"].items()}
+    dados["confusao"] = [{"verdadeira": nomes[r], "prevista": nome(p), "n": n}
+                         for (r, p), n in sorted(resultado["_matriz"].items(),
+                                                 key=lambda x: (x[0][0], str(x[0][1])))]
+    return dados
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Avalia o anotador nas fotos rotuladas.")
-    parser.add_argument("datasets", nargs="*", type=Path, default=DATASETS_PADRAO,
-                        help="pastas com images/ e labels/ (padrão: validações de "
-                             "legado/database)")
+    parser = argparse.ArgumentParser(
+        description="Avalia as propostas gravadas de um anotador contra os rótulos da equipe.")
+    parser.add_argument("saida", type=Path, help="saída anotada (importar.py e anotar.py)")
+    parser.add_argument("--anotador", default=anotar.GroundingDino.nome,
+                        help=f"anotador avaliado (padrão: {anotar.GroundingDino.nome})")
+    parser.add_argument("--verdade", type=Path, nargs="+", default=DATASETS_PADRAO,
+                        help="pastas com images/ e labels/ da equipe (padrão: as quatro "
+                             "validações de legado/database)")
     parser.add_argument("--classes", type=Path, default=anotar.DIR_SCRIPT / "classes.yaml",
-                        help="lista de classes (padrão: anotacao/classes.yaml)")
+                        help="classes avaliadas (padrão: anotacao/classes.yaml)")
     parser.add_argument("--correcoes", type=Path, default=CORRECOES_PADRAO,
                         help="correções dos rótulos (padrão: anotacao/correcoes_rotulos.yaml)")
     parser.add_argument("--sem-correcoes", action="store_true",
                         help="usa os rótulos da equipe como estão")
-    parser.add_argument("--modelo", default=anotar.MODELO_PADRAO,
-                        help=f"modelo do Hugging Face (padrão: {anotar.MODELO_PADRAO})")
     parser.add_argument("--limiares", type=float, nargs="+", default=LIMIARES_PADRAO,
-                        help="limiares de confiança da detecção")
-    parser.add_argument("--iou", type=float, default=0.5, help="IoU do NMS (padrão: 0.5)")
-    parser.add_argument("--area-maxima", type=float, default=0.5,
-                        help="fração máxima da imagem por caixa (padrão: 0.5)")
-    parser.add_argument("--dispositivo", help="cuda ou cpu (padrão: cuda se houver)")
+                        help="limiares de leitura da cobertura e da detecção")
+    parser.add_argument("--json", type=Path, help="grava também as medidas neste arquivo")
     args = parser.parse_args(argv)
 
-    if not args.datasets:
-        parser.error("nenhum dataset informado nem encontrado em legado/database")
+    if not args.verdade:
+        parser.error("nenhuma pasta de rótulos informada nem encontrada em legado/database")
     classes = anotar.carregar_classes(args.classes)
-    nomes = [c["nome"] for c in classes]
-    itens = listar_imagens(args.datasets)
-    print(f"{len(itens)} imagem(ns) rotulada(s) em {len(args.datasets)} dataset(s)")
     correcoes = {} if args.sem_correcoes else carregar_correcoes(args.correcoes)
-    corrigidas = sum(len(correcoes.get(r.resolve(), {})) for _, r, _ in itens)
-    print(f"{corrigidas} rótulo(s) corrigido(s) por "
-          f"{'nenhum arquivo' if args.sem_correcoes else args.correcoes.name}")
+    resultado = avaliar(args.saida, args.anotador, classes, args.verdade, correcoes,
+                        args.limiares)
 
-    piso = min(args.limiares)
-    anotador = anotar.GroundingDino(classes, modelo=args.modelo, dispositivo=args.dispositivo,
-                                    piso=piso, confianca=max(piso, anotar.CONFIANCA_PADRAO),
-                                    limiar_iou=args.iou, area_maxima=args.area_maxima)
-    matriz = Counter()
-    contagens = {limiar: [0, 0, 0] for limiar in args.limiares}
-    fora = Counter()
-    for i, (imagem, rotulo, nomes_dataset) in enumerate(itens, 1):
-        verdade, fora_imagem = ler_verdade(rotulo, nomes_dataset, nomes,
-                                           correcoes.get(rotulo.resolve()))
-        fora += fora_imagem
-        por_classe, caixas = anotador.pontuar(anotar.abrir_imagem(imagem)[0])
-
-        for classe, caixa in verdade:
-            consulta, iou = consulta_mais_proxima(caixas, caixa)
-            # A classe que o anotar.py daria a essa consulta no limiar padrão;
-            # sem classe de reserva, é a de maior pontuação
-            prevista = anotar.escolher_classe(por_classe[consulta].tolist(), anotador.reservas,
-                                              anotar.CONFIANCA_PADRAO)[0] \
-                if iou >= IOU_ACERTO else None
-            matriz[(classe, prevista)] += 1
-
-        for limiar in args.limiares:
-            resultado = casar(anotador.filtrar(por_classe, caixas, piso=limiar), verdade)
-            contagens[limiar] = [a + b for a, b in zip(contagens[limiar], resultado)]
-        print(f"\r{i}/{len(itens)}", end="", flush=True)
-    print()
-
-    print(f"Caixas verdadeiras nas classes de {args.classes.name}: {sum(matriz.values())}")
-    if fora:
-        print("Ignoradas (fora das classes): "
-              + ", ".join(f"{n} {q}" for n, q in fora.most_common()))
-    imprimir_classificacao(matriz, classes)
-    imprimir_deteccao(contagens)
+    print(f"{args.anotador}: {resultado['imagens']} imagem(ns) com rótulo, "
+          f"{resultado['objetos']} caixa(s) verdadeira(s) nas classes de {args.classes.name}")
+    if resultado["sem_rotulo"]:
+        print(f"Sem rótulo da equipe (ignoradas): {len(resultado['sem_rotulo'])}")
+    if resultado["fora_das_classes"]:
+        print("Rótulos fora das classes (ignorados): "
+              + ", ".join(f"{n} {q}" for n, q in Counter(resultado["fora_das_classes"]).most_common()))
+    if resultado["limiares_abaixo_do_piso"]:
+        print("Limiares abaixo do piso das propostas (sem caixas gravadas ali), ignorados: "
+              + ", ".join(map(str, resultado["limiares_abaixo_do_piso"])))
+    imprimir(resultado, classes)
+    if args.json:
+        formato.gravar_atomico(args.json, json.dumps(para_json(resultado, classes),
+                                                     ensure_ascii=False, indent=1) + "\n")
+        print(f"\nMedidas gravadas em {args.json}")
 
 
 if __name__ == "__main__":

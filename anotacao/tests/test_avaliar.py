@@ -4,10 +4,16 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import json
+
 import pytest
+import yaml
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import avaliar  # noqa: E402
+import importar  # noqa: E402
+import saida as formato  # noqa: E402
 
 NOMES_DATASET = ["Battery", "Clear plastic bottle", "Drink can"]
 NOMES = ["Drink can", "Clear plastic bottle"]
@@ -40,12 +46,6 @@ def test_nomes_do_dataset_na_pasta_de_cima_e_como_dicionario(tmp_path):
     assert avaliar.nomes_do_dataset(split) == ["a", "b"]
     with pytest.raises(ValueError, match="data.yaml"):
         avaliar.nomes_do_dataset(tmp_path / "outra" / "validation")
-
-
-def test_consulta_mais_proxima():
-    caixas = [(0, 0, 0.1, 0.1), (0.4, 0.4, 0.6, 0.6), (0.45, 0.4, 0.6, 0.6)]
-    indice, iou = avaliar.consulta_mais_proxima(caixas, (0.4, 0.4, 0.6, 0.6))
-    assert indice == 1 and iou == pytest.approx(1)
 
 
 def test_casar_exige_classe_e_casa_cada_verdadeira_uma_vez():
@@ -88,3 +88,99 @@ def test_correcoes_do_repositorio_batem_com_os_rotulos():
         assert rotulo.exists(), rotulo
         nomes_dataset = avaliar.nomes_do_dataset(rotulo.parent.parent)
         avaliar.ler_verdade(rotulo, nomes_dataset, nomes_dataset, por_linha)
+
+
+def test_casar_sem_classe_um_par_por_caixa():
+    verdade = [(0, (0.1, 0.1, 0.3, 0.3)), (1, (0.5, 0.5, 0.9, 0.9))]
+    deteccoes = [(1, 0.9, (0.1, 0.1, 0.3, 0.3)),     # classe errada: casa mesmo assim
+                 (0, 0.8, (0.1, 0.1, 0.31, 0.3)),    # a mesma verdadeira: não casa de novo
+                 (1, 0.7, (0.0, 0.0, 0.05, 0.05))]   # longe
+    assert avaliar.casar_sem_classe(deteccoes, verdade) == [(0, 0)]
+    assert avaliar.casar_sem_classe(deteccoes[1:], verdade) == [(0, 0)]
+
+
+def test_nome_original_tira_so_o_prefixo_do_lote():
+    assert avaliar.nome_original("tcc-0CF_20250503_140329.jpg", "tcc-0CF") == "20250503_140329.jpg"
+    assert avaliar.nome_original("20250503_140329.jpg", "") == "20250503_140329.jpg"
+    assert avaliar.nome_original("outro_a.jpg", "l1") == "outro_a.jpg"
+
+
+def dataset(pasta, rotulos):
+    """Pasta no formato YOLO: images/, labels/ e data.yaml com Garrafa, Lata, Pilha."""
+    (pasta / "images").mkdir(parents=True)
+    (pasta / "labels").mkdir()
+    (pasta / "data.yaml").write_text(yaml.safe_dump({"names": ["Garrafa", "Lata", "Pilha"]}))
+    for nome, linhas in rotulos.items():
+        Image.new("RGB", (100, 100)).save(pasta / "images" / nome)
+        if linhas is not None:
+            (pasta / "labels" / f"{Path(nome).stem}.txt").write_text("".join(
+                f"{c} {(x1 + x2) / 2} {(y1 + y2) / 2} {x2 - x1} {y2 - y1}\n"
+                for c, (x1, y1, x2, y2) in linhas))
+
+
+def test_indexar_verdade_recusa_nome_em_duas_pastas(tmp_path):
+    dataset(tmp_path / "v1", {"a.jpg": []})
+    dataset(tmp_path / "v2", {"a.jpg": []})
+    assert set(avaliar.indexar_verdade([tmp_path / "v1"])) == {"a.jpg"}
+    with pytest.raises(ValueError, match="mais de uma pasta"):
+        avaliar.indexar_verdade([tmp_path / "v1", tmp_path / "v2"])
+
+
+A, B, C = (0.1, 0.1, 0.3, 0.3), (0.6, 0.6, 0.8, 0.8), (0.4, 0.4, 0.6, 0.6)
+CLASSES = [{"nome": "Garrafa", "prompt": "bottle", "material": "plastic"},
+           {"nome": "Lata", "prompt": "can", "material": "metal"}]
+
+
+def test_avaliar_de_ponta_a_ponta_sem_modelo(tmp_path):
+    verdade = tmp_path / "validacao-equipe"
+    dataset(verdade, {"a.jpg": [(0, A), (1, B), (2, (0.0, 0.0, 0.05, 0.05))],  # Pilha: fora
+                      "b.jpg": [(1, C)], "c.jpg": None})                       # c: sem rótulo
+    saida = tmp_path / "saida"
+    importar.importar(saida, sorted((verdade / "images").iterdir()), "val", ["Garrafa", "Lata"],
+                      conjunto="teste")
+    parametros = {"piso": 0.05, "confianca": 0.2, "confianca_classe": 0.35}
+    propostas = {
+        "a.jpg": [(0, 0.9, A),                      # certa
+                  (0, 0.3, B),                      # cobre a Lata com a classe errada
+                  (1, 0.1, (0.0, 0.6, 0.1, 0.7))],  # candidata que sobra
+        "b.jpg": [(1, 0.12, C)],                    # só uma candidata cobre a Lata
+        "c.jpg": []}
+    for nome, deteccoes in propostas.items():
+        formato.gravar_proposta(saida, formato.montar_proposta(
+            "falso", "v1", parametros, CLASSES, f"val_{nome}", (100, 100), deteccoes))
+
+    destino = tmp_path / "r.json"
+    classes = tmp_path / "classes.yaml"
+    classes.write_text(yaml.safe_dump({"classes": CLASSES}), encoding="utf-8")
+    avaliar.main([str(saida), "--anotador", "falso", "--verdade", str(verdade),
+                  "--classes", str(classes),
+                  "--sem-correcoes", "--limiares", "0.01", "0.05", "0.2", "--json", str(destino)])
+    r = json.loads(destino.read_text())
+    assert (r["imagens"], r["objetos"]) == (2, 3)
+    assert r["sem_rotulo"] == ["val_c.jpg"] and r["fora_das_classes"] == {"Pilha": 1}
+    assert r["limiares_abaixo_do_piso"] == [0.01]
+    assert r["cobertura"]["0.2"] == pytest.approx({
+        "cobertura": 2 / 3, "completas": 0.5, "caixas_por_imagem": 1.0,
+        "sobra_por_imagem": 0.0, "classe_certa": 0.5, "material_certo": 0.5})
+    assert r["cobertura"]["0.05"] == pytest.approx({
+        "cobertura": 1.0, "completas": 1.0, "caixas_por_imagem": 2.0,
+        "sobra_por_imagem": 0.5, "classe_certa": 2 / 3, "material_certo": 2 / 3})
+    assert r["deteccao"]["0.2"] == pytest.approx({
+        "acertos": 1, "falsos_positivos": 1, "falsos_negativos": 2,
+        "precisao": 0.5, "recall": 1 / 3})
+    assert r["confusao"] == [{"verdadeira": "Garrafa", "prevista": "Garrafa", "n": 1},
+                             {"verdadeira": "Lata", "prevista": "Garrafa", "n": 1},
+                             {"verdadeira": "Lata", "prevista": "sem caixa", "n": 1}]
+    assert r["faixas"]["0.05-0.15"] == {"caixas": 2, "cobrem": 1, "classe_certa": 1}
+    assert r["faixas"]["0.3-0.35"] == {"caixas": 1, "cobrem": 1, "classe_certa": 0}
+    assert r["clique"] == {"sem_caixa": 1, "primeira": 1, "tres_primeiras": 1,
+                           "candidatas_por_imagem": 1.0}
+
+
+def test_avaliar_sem_nenhuma_imagem_com_rotulo(tmp_path):
+    verdade = tmp_path / "v"
+    dataset(verdade, {"a.jpg": []})
+    saida = tmp_path / "saida"
+    importar.importar(saida, [verdade / "images" / "a.jpg"], "val", ["Garrafa"])
+    with pytest.raises(ValueError, match="nenhuma imagem"):
+        avaliar.avaliar(saida, "falso", CLASSES, [verdade], {}, [0.2])
