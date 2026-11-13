@@ -214,3 +214,56 @@ def test_medir_erro_conjunto_compara_com_o_esperado_por_classe():
     assert avaliar.medir_erro_conjunto(a, b, ["metal", "plastic"], 0.2, 0.05)["objetos"] == 5
     # imagens sem proposta do outro anotador não entram
     assert avaliar.medir_erro_conjunto(a, [], ["metal", "plastic"])["objetos"] == 0
+
+
+def test_votar_3oo3_estrito():
+    a = (0, 0.9, (0.1, 0.1, 0.3, 0.3))
+    b = (1, 0.8, (0.5, 0.5, 0.7, 0.7))
+    perto = lambda d, k: (d[0], d[1] - 0.1, tuple(v + k for v in d[2]))  # noqa: E731
+    # três concordam: consenso com a mediana das coordenadas e a menor confiança
+    motivo, consenso = avaliar.votar([[a, b], [perto(b, 0.01), perto(a, 0.01)],
+                                      [perto(a, 0.02), perto(b, 0.02)]])
+    assert motivo is None
+    assert consenso[0][0] == 0 and consenso[0][1] == pytest.approx(0.8)
+    assert consenso[0][2] == pytest.approx((0.11, 0.11, 0.31, 0.31))
+    # um anotador acha um objeto a menos
+    assert avaliar.votar([[a, b], [a, b], [a]])[0] == "quantidade"
+    # mesma quantidade, classe diferente
+    assert avaliar.votar([[a], [a], [(1, 0.9, a[2])]])[0] == "caixas"
+    # ninguém acha nada
+    assert avaliar.votar([[], [], []]) == ("vazia", [])
+    # b e c casam com a, mas não entre si (IoU entre eles < 0,5)
+    esq = (0, 0.9, (0.0, 0.0, 0.3, 0.2))
+    dir_ = (0, 0.9, (0.08, 0.0, 0.38, 0.2))
+    meio = (0, 0.9, (0.05, 0.0, 0.35, 0.2))
+    assert avaliar.votar([[meio], [esq], [dir_]])[0] is None
+    longe = (0, 0.9, (0.12, 0.0, 0.42, 0.2))
+    assert anotar_iou(meio, longe) >= 0.5 and anotar_iou(esq, longe) < 0.5
+    assert avaliar.votar([[meio], [esq], [longe]])[0] == "caixas"
+
+
+def anotar_iou(a, b):
+    return avaliar.anotar.iou(a[2], b[2])
+
+
+def test_medir_voto_corretas_por_inteiro():
+    caixa = [(0.1, 0.1, 0.3, 0.3), (0.5, 0.5, 0.7, 0.7)]
+    verdade = [(0, caixa[0]), (1, caixa[1])]
+    proposta = {"parametros": {"confianca": 0.2}}
+
+    def pares(nome, classes, conf=0.9):
+        return (nome, proposta, [(k, conf, c) for k, c in zip(classes, caixa)], verdade)
+
+    a = [pares("ok.jpg", [0, 1]), pares("errada.jpg", [0, 0]), pares("baixa.jpg", [0, 1], 0.1)]
+    b = [pares("ok.jpg", [0, 1]), pares("errada.jpg", [0, 0]), pares("baixa.jpg", [0, 1])]
+    r = avaliar.medir_voto([a, b], [None, None], ["metal", "metal"])
+    # baixa.jpg: a está abaixo do limiar gravado (0,2), não acha nada
+    assert (r["imagens"], r["aprovadas"], r["reprovada_quantidade"]) == (3, 2, 1)
+    assert (r["corretas"], r["corretas_material"]) == (1, 2)
+    assert (r["caixas_aprovadas"], r["caixas_certas"]) == (4, 3)
+    assert r["_erros"] == Counter({(1, 0): 1})
+    # por caixa: ok (2 certas), errada (2, uma certa), baixa (a sem caixa: nenhuma)
+    assert (r["caixas_consenso"], r["caixas_consenso_certas"]) == (4, 3)
+    assert r["objetos_com_consenso"] == 4
+    # com o limiar de a em 0,05, baixa.jpg passa
+    assert avaliar.medir_voto([a, b], [0.05, None], ["metal", "metal"])["aprovadas"] == 3

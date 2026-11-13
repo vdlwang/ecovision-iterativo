@@ -21,6 +21,8 @@ Medidas, com IoU >= 0,5 como acerto de posição:
 6. Com --comparar OUTRO: erro conjunto de classe dos dois anotadores, nos
    objetos que ambos cobrem, contra o esperado com erros independentes dada a
    classe verdadeira (dependência entre anotadores, para o voto).
+7. Com --voto A B C: só o voto 3oo3 estrito (seção 3) entre os anotadores,
+   com a taxa de aprovação e a fração das aprovadas corretas por inteiro.
 
 Os rótulos da equipe usam os nomes TACO; só entram as classes de classes.yaml,
 casadas pelo nome. Polígonos viram a caixa que os contém. Antes, valem as
@@ -33,6 +35,7 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
+from statistics import median
 
 import yaml
 
@@ -436,6 +439,143 @@ def imprimir_erro_conjunto(r, a, b, classes):
         print(f"    {nomes[real]} -> {prevista if prevista == 'outra' else nomes[prevista]}: {q}")
 
 
+def casar_mesma_classe(a, b, limiar_iou=IOU_ACERTO):
+    """
+    Casamento guloso pelo IoU entre as detecções de dois anotadores, só entre
+    caixas da mesma classe: {índice em a: índice em b} com IoU >= limiar_iou.
+    """
+    pares = sorted(((anotar.iou(da[2], db[2]), i, j) for i, da in enumerate(a)
+                    for j, db in enumerate(b) if da[0] == db[0]), reverse=True)
+    usadas_a, usadas_b, casados = set(), set(), {}
+    for iou, i, j in pares:
+        if iou < limiar_iou:
+            break
+        if i not in usadas_a and j not in usadas_b:
+            usadas_a.add(i)
+            usadas_b.add(j)
+            casados[i] = j
+    return casados
+
+
+def consenso_por_caixa(listas, limiar_iou=IOU_ACERTO):
+    """
+    As caixas em que os N anotadores concordam, sem exigir a imagem inteira:
+    cada caixa do primeiro que casa (mesma classe, IoU >= limiar_iou) com uma
+    de cada um dos outros, e essas entre si. [(classe, menor confiança,
+    mediana de cada coordenada)].
+    """
+    base = listas[0]
+    casamentos = [casar_mesma_classe(base, outra, limiar_iou) for outra in listas[1:]]
+    consenso = []
+    for i, (classe, conf, caixa) in enumerate(base):
+        if not all(i in c for c in casamentos):
+            continue
+        grupo = [(conf, caixa)] + [(l[c[i]][1], l[c[i]][2]) for l, c in zip(listas[1:], casamentos)]
+        caixas = [g[1] for g in grupo]
+        if any(anotar.iou(x, y) < limiar_iou for k, x in enumerate(caixas) for y in caixas[k + 1:]):
+            continue
+        consenso.append((classe, min(g[0] for g in grupo),
+                         tuple(median(c[k] for c in caixas) for k in range(4))))
+    return consenso
+
+
+def votar(listas, limiar_iou=IOU_ACERTO):
+    """
+    Voto NooN estrito (OBJETIVO.md, seção 3) sobre as detecções de N
+    anotadores numa imagem, cada lista já no limiar de leitura do seu
+    anotador. Passa se todos propõem o mesmo número de caixas e cada caixa do
+    primeiro casa (mesma classe, IoU >= limiar_iou) com uma de cada um dos
+    outros, e essas também casam entre si. Imagem sem caixa não passa.
+    Devolve (motivo, consenso): motivo None se passou, senão "vazia",
+    "quantidade" ou "caixas"; consenso, [(classe, menor confiança, mediana
+    de cada coordenada)] quando passa.
+    """
+    if not any(listas):
+        return "vazia", []
+    if len({len(l) for l in listas}) > 1:
+        return "quantidade", []
+    consenso = consenso_por_caixa(listas, limiar_iou)
+    if len(consenso) != len(listas[0]):
+        return "caixas", []
+    return None, consenso
+
+
+def medir_voto(pares_por_anotador, limiares, materiais, limiar_iou=IOU_ACERTO):
+    """
+    O voto sobre as imagens com proposta de todos os anotadores e rótulo da
+    equipe. limiares: um por anotador (None: o gravado na proposta). Mede a
+    taxa de aprovação, os motivos de reprovação e, nas aprovadas, quantas
+    estão corretas por inteiro (cada objeto com uma caixa de consenso de IoU
+    >= 0,5 e mesma classe, sem caixa a mais), e o mesmo só com o material.
+    """
+    por_nome = [{nome: (proposta, dets) for nome, proposta, dets, _ in pares}
+                for pares in pares_por_anotador]
+    c = Counter()
+    erros = Counter()   # (verdadeira, prevista) nas caixas aprovadas erradas
+    for nome, _, _, verdade in pares_por_anotador[0]:
+        if not all(nome in p for p in por_nome):
+            continue
+        listas = []
+        for p, limiar in zip(por_nome, limiares):
+            proposta, dets = p[nome]
+            l = formato.limiares(proposta)[0] if limiar is None else limiar
+            listas.append([d for d in dets if d[1] >= l])
+        c["imagens"] += 1
+        c["objetos"] += len(verdade)
+        # Por caixa: o que o voto aprovaria se aprovasse caixas, não imagens
+        por_caixa = consenso_por_caixa(listas, limiar_iou)
+        c["caixas_consenso"] += len(por_caixa)
+        c["caixas_consenso_certas"] += casar(por_caixa, verdade, limiar_iou)[0]
+        c["objetos_com_consenso"] += len(casar_sem_classe(por_caixa, verdade, limiar_iou))
+        motivo, consenso = votar(listas, limiar_iou)
+        if motivo:
+            c[f"reprovada_{motivo}"] += 1
+            continue
+        c["aprovadas"] += 1
+        c["objetos_aprovados"] += len(verdade)
+        c["caixas_aprovadas"] += len(consenso)
+        acertos = casar(consenso, verdade, limiar_iou)[0]
+        c["caixas_certas"] += acertos
+        c["corretas"] += acertos == len(verdade) == len(consenso)
+        por_material = [(None if d[0] is None else materiais[d[0]], d[1], d[2])
+                        for d in consenso]
+        verdade_material = [(materiais[v[0]], v[1]) for v in verdade]
+        c["corretas_material"] += (casar(por_material, verdade_material, limiar_iou)[0]
+                                   == len(verdade) == len(consenso))
+        for di, vi in casar_sem_classe(consenso, verdade, limiar_iou):
+            if consenso[di][0] != verdade[vi][0]:
+                erros[(verdade[vi][0], "outra" if consenso[di][0] is None
+                       else consenso[di][0])] += 1
+    return {**c, "_erros": erros}
+
+
+def imprimir_voto(r, anotadores, limiares, classes):
+    nomes = [c["nome"] for c in classes]
+    n, a = r.get("imagens", 0), r.get("aprovadas", 0)
+    rotulo = ", ".join(f"{x} ({'gravado' if l is None else l})"
+                       for x, l in zip(anotadores, limiares))
+    print(f"\nVoto {len(anotadores)}oo{len(anotadores)} de {rotulo}: {n} imagem(ns)")
+    if not n:
+        return
+    print(f"  aprovadas: {a} ({a / n:.0%}); reprovadas por quantidade de caixas: "
+          f"{r.get('reprovada_quantidade', 0)}, por caixa ou classe sem par: "
+          f"{r.get('reprovada_caixas', 0)}, vazias: {r.get('reprovada_vazia', 0)}")
+    if a:
+        print(f"  aprovadas corretas por inteiro: {r['corretas']} ({r['corretas'] / a:.0%}); "
+              f"só pelo material: {r['corretas_material']} ({r['corretas_material'] / a:.0%})")
+        print(f"  caixas aprovadas: {r['caixas_aprovadas']}, certas: {r['caixas_certas']} "
+              f"({r['caixas_certas'] / r['caixas_aprovadas']:.0%}); objetos nas aprovadas: "
+              f"{r['objetos_aprovados']} de {r['objetos']} ({r['objetos_aprovados'] / r['objetos']:.0%})")
+    k = r.get("caixas_consenso", 0)
+    if k:
+        print(f"  por caixa (sem exigir a imagem inteira): {k} caixas com consenso, certas "
+              f"{r['caixas_consenso_certas']} ({r['caixas_consenso_certas'] / k:.0%}); "
+              f"objetos com caixa de consenso: {r['objetos_com_consenso']} de {r['objetos']} "
+              f"({r['objetos_com_consenso'] / r['objetos']:.0%})")
+    for (real, prevista), q in r["_erros"].most_common():
+        print(f"    {nomes[real]} -> {prevista if prevista == 'outra' else nomes[prevista]}: {q}")
+
+
 def pct(v):
     return f"{v:4.0%}"
 
@@ -552,15 +692,49 @@ def main(argv=None):
     parser.add_argument("--limiares-par", type=float, nargs=2, metavar=("A", "B"),
                         help="limiares de leitura do --anotador e do --comparar no erro "
                              "conjunto (padrão: os gravados nas propostas)")
+    parser.add_argument("--voto", nargs="+", metavar="ANOTADOR",
+                        help="mede só o voto NooN estrito entre estes anotadores (o primeiro "
+                             "dá a ordem; --anotador é ignorado)")
+    parser.add_argument("--limiares-voto", nargs="+", metavar="L",
+                        help="limiar de leitura de cada anotador do --voto, na mesma ordem; "
+                             "'g' usa o gravado na proposta (padrão: todos gravados)")
     parser.add_argument("--json", type=Path, help="grava também as medidas neste arquivo")
     args = parser.parse_args(argv)
     if args.limiares_par and not args.comparar:
         parser.error("--limiares-par só vale com --comparar")
+    if args.limiares_voto and (not args.voto or len(args.limiares_voto) != len(args.voto)):
+        parser.error("--limiares-voto precisa de um limiar por anotador do --voto")
+    if args.voto and len(args.voto) < 2:
+        parser.error("--voto precisa de ao menos dois anotadores")
 
     if not args.verdade:
         parser.error("nenhuma pasta de rótulos informada nem encontrada em legado/database")
     classes = anotar.carregar_classes(args.classes)
     correcoes = {} if args.sem_correcoes else carregar_correcoes(args.correcoes)
+    if args.voto:
+        try:
+            limiares = [None if l == "g" else float(l)
+                        for l in (args.limiares_voto or ["g"] * len(args.voto))]
+        except ValueError:
+            parser.error("--limiares-voto: números ou 'g'")
+        nomes = [c["nome"] for c in classes]
+        indice = indexar_verdade(args.verdade)
+        pares = []
+        for a in args.voto:
+            pares.append(carregar_pares(args.saida, a, indice, nomes, correcoes)[0])
+            if not pares[-1]:
+                raise ValueError(f"nenhuma imagem de {args.saida} tem proposta de {a} "
+                                 "e rótulo da equipe")
+        r = medir_voto(pares, limiares, [c["material"] for c in classes])
+        imprimir_voto(r, args.voto, limiares, classes)
+        if args.json:
+            dados = {"voto": args.voto, "limiares": limiares,
+                     **{k: v for k, v in r.items() if k != "_erros"},
+                     "erros": [{"verdadeira": nomes[v], "prevista": p if p == "outra"
+                                else nomes[p], "n": q} for (v, p), q in r["_erros"].most_common()]}
+            formato.gravar_atomico(args.json, json.dumps(dados, ensure_ascii=False, indent=1) + "\n")
+            print(f"\nMedidas gravadas em {args.json}")
+        return
     resultado = avaliar(args.saida, args.anotador, classes, args.verdade, correcoes,
                         args.limiares)
 

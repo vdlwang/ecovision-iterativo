@@ -24,6 +24,7 @@ Uso:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -623,7 +624,7 @@ def escolher_imagens(parser, args, linhas):
     if not args.imagens:
         return [n for n, linha in linhas.items() if linha["status"] == "pendente"
                 and (args.sobrescrever
-                     or not formato.caminho_proposta(args.saida, args.anotador, n).exists())]
+                     or not formato.caminho_proposta(args.saida, args.pasta, n).exists())]
     pedidas = list(dict.fromkeys(Path(i).name for i in args.imagens))
     fora = [n for n in pedidas if n not in linhas]
     if fora:
@@ -636,9 +637,9 @@ def escolher_imagens(parser, args, linhas):
     pedidas = [n for n in pedidas if n not in nao_pendentes]
     if not args.sobrescrever:
         existentes = [n for n in pedidas
-                      if formato.caminho_proposta(args.saida, args.anotador, n).exists()]
+                      if formato.caminho_proposta(args.saida, args.pasta, n).exists()]
         if existentes:
-            parser.error(f"já anotadas por {args.anotador} em {args.saida}: "
+            parser.error(f"já anotadas por {args.pasta} em {args.saida}: "
                          f"{', '.join(existentes)} (use --sobrescrever)")
     return pedidas
 
@@ -653,6 +654,10 @@ def main(argv=None):
                         help="diretório de saída, já com imagens importadas (padrão: ./anotacoes)")
     parser.add_argument("--anotador", choices=sorted(ANOTADORES), default=GroundingDino.nome,
                         help=f"anotador (padrão: {GroundingDino.nome})")
+    parser.add_argument("--nome", help="nome com que as propostas são gravadas, a pasta em "
+                                       "propostas/ (padrão: o do anotador); para rodar o mesmo "
+                                       "anotador com outra configuração na mesma saída, como "
+                                       "outro peso do YOLO")
     parser.add_argument("--classes", type=Path, default=DIR_SCRIPT / "classes.yaml",
                         help="lista de classes (padrão: anotacao/classes.yaml)")
     parser.add_argument("--dispositivo", help="cuda ou cpu (padrão: cuda se houver)")
@@ -694,6 +699,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 0 <= args.piso <= args.confianca <= 1:
         parser.error("os limiares têm de valer 0 <= --piso <= --confianca <= 1")
+    if args.nome is not None and not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", args.nome):
+        parser.error("--nome só com minúsculas, dígitos, '.', '_' e '-'")
+    args.pasta = args.nome or args.anotador
 
     if not (args.saida / "imagens.csv").exists():
         parser.error(f"{args.saida} não tem imagens importadas (use o importar.py antes)")
@@ -703,11 +711,11 @@ def main(argv=None):
     lotes = formato.ler_lotes(args.saida)
     alvo = escolher_imagens(parser, args, linhas)
     if not alvo and not args.aceitar:
-        print(f"Nada a anotar com {args.anotador} em {args.saida}.")
+        print(f"Nada a anotar com {args.pasta} em {args.saida}.")
 
     if alvo:
         if args.previa:
-            (args.saida / "previa" / args.anotador).mkdir(parents=True, exist_ok=True)
+            (args.saida / "previa" / args.pasta).mkdir(parents=True, exist_ok=True)
         anotador = ANOTADORES[args.anotador].criar(classes, args)
 
     for nome in alvo:
@@ -721,11 +729,13 @@ def main(argv=None):
         # recebe os da linha de comando
         parametros = {"confianca": args.confianca, "confianca_classe": args.confianca_classe,
                       **anotador.parametros}
+        if args.pasta != anotador.nome:
+            parametros["tipo"] = anotador.nome
         formato.gravar_proposta(args.saida, formato.montar_proposta(
-            anotador.nome, anotador.versao, parametros, classes, nome, imagem.size, deteccoes))
+            args.pasta, anotador.versao, parametros, classes, nome, imagem.size, deteccoes))
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
-                            args.saida / "previa" / args.anotador / f"{Path(nome).stem}.jpg",
+                            args.saida / "previa" / args.pasta / f"{Path(nome).stem}.jpg",
                             parametros["confianca"], parametros["confianca_classe"])
 
         visiveis = [(c, conf) for c, conf, _ in deteccoes if conf >= parametros["confianca"]]
@@ -737,8 +747,8 @@ def main(argv=None):
 
     if args.aceitar:
         escolhidas = set(alvo) if args.imagens else None
-        aceitas, sem_classe = formato.aceitar(args.saida, args.anotador, escolhidas)
-        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.anotador} copiadas "
+        aceitas, sem_classe = formato.aceitar(args.saida, args.pasta, escolhidas)
+        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.pasta} copiadas "
               "para labels/")
         if sem_classe:
             print(f"{len(sem_classe)} imagem(ns) continuam pendentes, com caixa sem classe "
