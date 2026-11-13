@@ -154,6 +154,32 @@ anotacoes/
 - Um arquivo binário só: um banco corrompido perde tudo. Cópia de segurança antes de cada `anotar.py` (`anotacoes.sqlite.bak`, via `backup`), barata para o tamanho esperado (milhares de imagens, poucos MB).
 - Esforço estimado: ~1 a 1,5 dia, a maior parte reescrevendo os testes do `saida.py` e do `revisar.py` para o banco.
 
+### Ajustes antes de implementar (2026-11-13, checkpoint)
+
+Revisto antes do T6 (`votar.py`), que seria o terceiro escritor do `imagens.csv`. A implementação **não começou**: o código ainda é o das fases 1 a 3, e `anotacao/anotacoes/` pode ser recriada do zero (sem importador; as 3 revisões de teste se perdem, decidido em 2026-11-13).
+
+**Esquema, além da tabela acima:**
+- `imagens` já nasce com `lote` (FK `lotes`, pode ser nulo), `voto` (`aprovada`, `falhou` ou nulo) e `motivo`; o `conjunto` vem do lote. `largura` e `altura` gravadas pelo `importar.py` (depois do giro do EXIF).
+- `lotes` (`nome` PK, `conjunto` com `CHECK` em `treino`/`teste`, `regiao` em JSON ou nula, `importado_em`) substitui o `lotes.yaml`.
+- `execucoes` guarda o `anotador` (o nome de `--nome`, a "pasta" de hoje) e o `tipo` (`grounding-dino`, `owlv2`, `yolo`) separados.
+- `caixas_revisao` guarda o desfecho como texto (`aceita`, `classe_corrigida`, `classe_atribuida`, `adicionada`), como o registro de hoje, e a `origem` (`candidata` ou nula). As `removidas` não são gravadas: saem da proposta base (imutável) e dos limiares da execução dela, na leitura.
+- Classes: a tabela `classes` aceita acréscimo no fim; trocar ou reordenar só se nenhuma `caixas_revisao` existir (a regra de hoje para o `data.yaml`), senão é recusado.
+
+**API do `saida.py`** (os consumidores mudam pouco):
+- `abrir(saida, criar=False)`: conexão com `foreign_keys`, `busy_timeout` e a verificação de `user_version`; recusa `imagens.csv` sem `anotacoes.sqlite` (formato anterior). `transacao(con)`: `BEGIN IMMEDIATE` ... `COMMIT`. Uma conexão por chamada pública (abrir é barato), o que também serve às threads do `revisar.py`.
+- `preparar(saida, nomes)` substitui o `preparar_saida` do `anotar.py` (pastas, banco, classes, `data.yaml`).
+- `ler_estado(saida)` → `{nome: {nome, status, lote, conjunto, voto, motivo, largura, altura}}` (sem a lista de colunas); `gravar_estado` e `registrar_imagem` saem. `registrar(saida, lote, dados_do_lote, [(nome, largura, altura)])` numa transação; o `importar.py` confere as colisões de nome e de `stem` antes de copiar os arquivos e registra depois (interrompido entre os dois, importar de novo recopia).
+- `ler_lotes(saida)` mantém o formato `{lote: {conjunto, regiao, importado_em}}`.
+- `nova_execucao(saida, anotador, tipo, versao, parametros, classes_hash, agora)` → id; `gravar_proposta(saida, execucao, nome, caixas)` com `caixas = [(nome da classe, confiança, caixa normalizada)]`; `proposta(saida, anotador, nome, proposta_id=None)` → dict `{id, anotador, tipo, versao, parametros, classes, imagem, data, caixas}`, com as caixas já normalizadas (`caixas_normalizadas` passa a devolvê-las direto); `tem_proposta`, `anotadores`, e `propostas_atuais(saida, anotador)` → `{nome: proposta}` numa consulta só, para o `avaliar.py`. `limiares` e `separar` não mudam.
+- `revisar(saida, nome, pedido, agora)`: tudo numa transação (conferir o status, a proposta base, inserir a revisão e as caixas, mudar o status), e só depois os arquivos daquela imagem. O pedido aceita `proposta_id`; se vier, tem de ser a proposta vigente do `base` naquela imagem, senão 409 (o anotador gravou uma versão nova enquanto a página estava aberta). `ler_imagem` passa a devolver também `propostas_ids` `{anotador: id}`, e a página o envia no PUT.
+- `ler_revisao(saida, nome)`: a revisão vigente, no formato de hoje, com `base.proposta_id`. `aceitar` grava uma revisão `salvar` com `revisor = "aceitar"` e tempo 0.
+- `ler_imagem`: a anotação `final` vem da revisão `salvar` vigente das imagens `revisada`, não do `.txt`; `invalidas` fica sempre 0 (a página ainda lê o campo).
+- `exportar(saida)`: regenera `data.yaml`, `labels/` (e apaga `.txt` de imagem que não está `revisada`) e `revisadas.txt`. `anotar.py --exportar` e a abertura do `revisar.py` o chamam. `copia_seguranca(saida)` (API `backup`) antes de cada `anotar.py`.
+
+**Consumidores a adaptar:** `importar.py` (registrar; sai o `lotes.yaml`), `anotar.py` (`preparar`, uma execução por rodada, `tem_proposta`, `--sobrescrever` cria versão nova, `--exportar`, cópia de segurança), `avaliar.py` (`carregar_pares` com `propostas_atuais`), `revisar.py` (`main` confere o banco; `proposta_id`), `revisar.html` (envia `proposta_id`), `visualizar.py` (só `ler_estado` sem colunas), o notebook do Colab (copiar o banco para `/content` e de volta), os READMEs (`anotacao/README.md`, seção "Saída" e "Revisão"), e os testes: `test_saida.py` e as fixtures de `test_revisar.py`, `test_avaliar.py`, `test_anotar.py` e `test_importar.py` passam a montar o estado pelo `saida.py`, não por arquivos.
+
+**Ordem sugerida:** `saida.py` com o esquema e `test_saida.py`; `importar.py`; `anotar.py`; `revisar.py` e a página; `avaliar.py` e `visualizar.py`; notebook e READMEs; o teste de concorrência e o manual da seção abaixo. Depois, o T6 sobre o banco.
+
 ### Verificação
 
 - pytest do esquema: as `CHECK` recusam estado inválido; `classes` só aceita acréscimo; versão desconhecida é recusada.
@@ -172,7 +198,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 1 | [x] `8a0253d` | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
-| 3b | [ ] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
+| 3b | [~] | (Desenho revisto em 2026-11-13, ver "Ajustes antes de implementar"; código não iniciado.) Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
 | 4 | [~] | Caixa por clique sobre as candidatas do anotador e desfazer/refazer (feitos, 2026-11-11; medição no `OBJETIVO.md`). Adiados pela decisão 12: desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta) e `caixa_ajustada` | pytest da API; teste no Chrome headless pelo protocolo de depuração |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 
