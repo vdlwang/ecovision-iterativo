@@ -23,7 +23,23 @@ CLASSES = [
 def test_montar_prompt_formato_e_intervalos():
     texto, intervalos = anotar.montar_prompt(CLASSES)
     assert texto == "plastic bottle . plastic bottle cap . can ."
-    assert [texto[a:b] for a, b in intervalos] == ["plastic bottle", "plastic bottle cap", "can"]
+    assert [(texto[a:b], c) for a, b, c in intervalos] == [
+        ("plastic bottle", 0), ("plastic bottle cap", 1), ("can", 2)]
+
+
+def test_varios_prompts_por_classe():
+    classes = [{"nome": "Garrafa", "prompt": ["Plastic bottle", "pet bottle"],
+                "material": "plastic"},
+               {"nome": "Lata", "prompt": "can", "material": "metal"}]
+    assert anotar.prompts(classes[0]) == ["plastic bottle", "pet bottle"]
+    texto, intervalos = anotar.montar_prompt(classes)
+    assert texto == "plastic bottle . pet bottle . can ."
+    assert [(texto[a:b], c) for a, b, c in intervalos] == [
+        ("plastic bottle", 0), ("pet bottle", 0), ("can", 1)]
+    offsets = [(0, 0), (0, 7), (8, 14), (15, 16), (17, 20), (21, 27), (28, 29),
+               (30, 33), (34, 35), (0, 0)]
+    assert anotar.classe_de_cada_token(offsets, intervalos) == [
+        None, 0, 0, None, 0, 0, None, 1, None, None]
 
 
 def test_classe_de_cada_token_ignora_especiais_e_pontos():
@@ -144,6 +160,14 @@ def test_owlv2_registrado_e_frase_validada_antes_do_modelo():
         anotar.Owlv2(CLASSES, frase="a photo")
 
 
+def test_colunas_yolo_casa_pelo_nome():
+    modelo = {0: "Lata", 1: "Outra", 2: "Garrafa", 3: "Tampa"}
+    assert anotar.colunas_yolo(CLASSES, modelo) == [2, 3, 0]
+    with pytest.raises(ValueError, match="Tampa"):
+        anotar.colunas_yolo(CLASSES, {0: "Lata", 2: "Garrafa"})
+    assert anotar.ANOTADORES["yolo"] is anotar.Yolo
+
+
 def test_criar_passa_os_argumentos_proprios_do_detector():
     class ComFrase(DetectorFalso):
         @classmethod
@@ -179,6 +203,12 @@ def test_carregar_classes_valida(tmp_path):
         anotar.carregar_classes(escrever_classes(tmp_path, [CLASSES[0], CLASSES[0]]))
     with pytest.raises(ValueError, match="prompt"):
         anotar.carregar_classes(escrever_classes(tmp_path, [{"nome": "x", "material": "metal"}]))
+    lista = {"nome": "Garrafa", "prompt": ["a", "b"], "material": "plastic"}
+    assert anotar.carregar_classes(escrever_classes(tmp_path, [lista])) == [lista]
+    for ruim in ([], ["a", ""], [1], ["a", "A "]):
+        with pytest.raises(ValueError, match="prompt"):
+            anotar.carregar_classes(escrever_classes(
+                tmp_path, [{"nome": "x", "prompt": ruim, "material": "metal"}]))
 
 
 def test_classes_yaml_do_repositorio_e_valido():

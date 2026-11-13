@@ -1,6 +1,7 @@
 """
 Anotação automática de imagens por um anotador intercambiável (hoje, o
-Grounding DINO e o OWLv2, detectores de vocabulário aberto).
+Grounding DINO e o OWLv2, detectores de vocabulário aberto, e o YOLO da
+equipe, de conjunto fechado).
 
 Anota as imagens já importadas pelo importar.py (o armazenamento comum,
 <saida>/images/) e grava, no diretório de saída (formato em saida.py):
@@ -49,6 +50,15 @@ MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
 
+def prompts(classe):
+    """
+    Os prompts de uma classe, em minúsculas: o campo prompt é um texto ou uma
+    lista deles (vários prompts por classe; a classe recebe a maior pontuação).
+    """
+    p = classe["prompt"]
+    return [t.strip().lower() for t in ([p] if isinstance(p, str) else p)]
+
+
 def carregar_classes(caminho):
     """Lê classes.yaml e devolve a lista de {nome, prompt, material}."""
     with open(caminho, encoding="utf-8") as f:
@@ -57,9 +67,17 @@ def carregar_classes(caminho):
         raise ValueError(f"{caminho}: nenhuma classe em 'classes'")
     nomes = set()
     for i, c in enumerate(classes):
-        for campo in ("nome", "prompt", "material"):
+        for campo in ("nome", "material"):
             if not str(c.get(campo, "")).strip():
                 raise ValueError(f"{caminho}: classe {i} sem '{campo}'")
+        p = c.get("prompt")
+        lista = [p] if isinstance(p, str) else p
+        if not isinstance(lista, list) or not lista or not all(
+                isinstance(t, str) and t.strip() for t in lista):
+            raise ValueError(f"{caminho}: classe {i} sem 'prompt' (um texto ou uma lista "
+                             "de textos não vazios)")
+        if len(set(prompts(c))) != len(lista):
+            raise ValueError(f"{caminho}: classe {i} com prompt repetido")
         if c["material"] not in MATERIAIS:
             raise ValueError(f"{caminho}: classe {i} com material '{c['material']}' "
                              f"(use {', '.join(sorted(MATERIAIS))})")
@@ -115,14 +133,16 @@ def escolher_classe(pontuacoes, reservas, limiar):
 def montar_prompt(classes):
     """
     Junta os prompts no formato do Grounding DINO ("a . b . c .") e devolve
-    o texto e, para cada classe, o intervalo [inicio, fim) dela no texto.
+    o texto e, para cada prompt, (inicio, fim, classe): o intervalo [inicio,
+    fim) dele no texto e o índice da classe. Uma classe com vários prompts
+    tem um intervalo por prompt.
     """
     texto = ""
     intervalos = []
-    for c in classes:
-        frase = c["prompt"].strip().lower()
-        intervalos.append((len(texto), len(texto) + len(frase)))
-        texto += frase + " . "
+    for i, c in enumerate(classes):
+        for frase in prompts(c):
+            intervalos.append((len(texto), len(texto) + len(frase), i))
+            texto += frase + " . "
     return texto.strip(), intervalos
 
 
@@ -135,7 +155,7 @@ def classe_de_cada_token(offsets, intervalos):
     for inicio, fim in offsets:
         classe = None
         if fim > inicio:
-            for i, (a, b) in enumerate(intervalos):
+            for a, b, i in intervalos:
                 if a <= inicio < b:
                     classe = i
                     break
@@ -363,8 +383,9 @@ def caixas_owlv2(pred_boxes, largura, altura):
 
 class Owlv2(Detector):
     """
-    OWLv2 (CLIP adaptado à detecção): uma consulta de texto por classe,
-    pontuada em cada fragmento da imagem, sem mapeamento por token.
+    OWLv2 (CLIP adaptado à detecção): uma consulta de texto por prompt,
+    pontuada em cada fragmento da imagem, sem mapeamento por token; a classe
+    recebe a maior entre as consultas dos seus prompts.
     """
 
     nome = "owlv2"
@@ -398,7 +419,11 @@ class Owlv2(Detector):
         self.processador = Owlv2Processor.from_pretrained(self.versao)
         self.modelo = Owlv2ForObjectDetection.from_pretrained(self.versao)
         self.modelo.to(self.dispositivo).eval()
-        self.textos = [self.frase.format(c["prompt"].strip().lower()) for c in self.classes]
+        self.textos, self.classe_da_consulta = [], []
+        for i, c in enumerate(self.classes):
+            for p in prompts(c):
+                self.textos.append(self.frase.format(p))
+                self.classe_da_consulta.append(i)
         # O texto das consultas não muda: tokeniza uma vez só
         self.entradas_texto = self.processador(text=[self.textos], return_tensors="pt",
                                                padding="max_length", truncation=True)
@@ -412,7 +437,8 @@ class Owlv2(Detector):
     def pontuar(self, imagem):
         """
         Um fragmento da imagem por caixa (3600 no base, a 960 px): tensor
-        (caixas, classes) com o sigmoide do logit de cada consulta.
+        (caixas, classes) com o sigmoide do logit de cada consulta; a classe
+        fica com a maior entre as consultas dos seus prompts.
         """
         torch = self.torch
         entradas = self.processador(images=imagem, return_tensors="pt")
@@ -420,12 +446,108 @@ class Owlv2(Detector):
         entradas = entradas.to(self.dispositivo)
         with torch.no_grad():
             saida = self.modelo(**entradas)
-        pontuacoes = saida.logits[0].sigmoid().cpu()
+        por_consulta = saida.logits[0].sigmoid().cpu()
+        pontuacoes = torch.zeros(por_consulta.shape[0], self.n_classes)
+        for q, c in enumerate(self.classe_da_consulta):
+            pontuacoes[:, c] = torch.maximum(pontuacoes[:, c], por_consulta[:, q])
         return pontuacoes, caixas_owlv2(saida.pred_boxes[0].cpu().tolist(), *imagem.size)
 
 
+def colunas_yolo(classes, nomes_modelo):
+    """
+    Para cada classe de classes.yaml, o id dela no modelo YOLO (nomes_modelo:
+    {id: nome}, o model.names do Ultralytics), casada pelo nome. Recusa classe
+    que o modelo não conhece.
+    """
+    ids = {n: i for i, n in nomes_modelo.items()}
+    fora = [c["nome"] for c in classes if c["nome"] not in ids]
+    if fora:
+        raise ValueError(f"classes que o modelo YOLO não tem: {', '.join(fora)}")
+    return [ids[c["nome"]] for c in classes]
+
+
+class Yolo(Detector):
+    """
+    YOLO de conjunto fechado (Ultralytics), por padrão o best.pt da equipe
+    (YOLOv8s do TACO com fine-tuning nas fotos do projeto). Não usa os
+    prompts: as classes de classes.yaml são casadas pelo nome com as do
+    modelo. pontuar() devolve a saída crua da rede, antes do NMS do
+    Ultralytics: a pontuação de cada classe de classes.yaml em cada âncora, e
+    a classe vencedora sai só entre elas, como nos outros detectores.
+    """
+
+    nome = "yolo"
+    MODELO_PADRAO = "yolo_models/taco/best.pt"
+    LADO_PADRAO = 640   # imgsz do treino do best.pt (e o padrão do backend)
+
+    @classmethod
+    def opcoes(cls, parser):
+        grupo = parser.add_argument_group("yolo")
+        grupo.add_argument("--yolo-lado", type=int, default=cls.LADO_PADRAO,
+                           help="lado maior da imagem na entrada da rede, múltiplo de 32 "
+                                f"(padrão: {cls.LADO_PADRAO}, o do treino do best.pt)")
+
+    @classmethod
+    def argumentos(cls, args):
+        return {"lado": args.yolo_lado}
+
+    def __init__(self, classes, lado=LADO_PADRAO, **kwargs):
+        if lado <= 0 or lado % 32:
+            raise ValueError(f"--yolo-lado tem de ser múltiplo positivo de 32: {lado}")
+        self.lado = lado
+        super().__init__(classes, **kwargs)
+        self.parametros["lado"] = lado
+
+    def carregar(self):
+        import torch
+        from ultralytics import YOLO
+        from ultralytics.data.augment import LetterBox
+
+        self.torch = torch
+        self.dispositivo = self.dispositivo or ("cuda" if torch.cuda.is_available() else "cpu")
+        caminho = Path(self.versao)
+        if not caminho.is_absolute() and not caminho.exists():
+            caminho = DIR_SCRIPT.parent / caminho   # relativo à raiz do repositório
+        print(f"Carregando {caminho} em {self.dispositivo}...")
+        yolo = YOLO(str(caminho))
+        self.colunas = colunas_yolo(self.classes, yolo.names)
+        self.rede = yolo.model.to(self.dispositivo).eval()
+        passo = int(self.rede.stride.max())
+        # Mesmo pré-processamento do predict() do Ultralytics: lado maior em
+        # self.lado, completado com cinza só até o múltiplo do passo
+        self.letterbox = LetterBox((self.lado, self.lado), auto=True, stride=passo)
+
+    def pontuar(self, imagem):
+        """
+        As âncoras da rede (8400 a 640x640, menos com a sobra cortada) com alguma classe de classes.yaml
+        a partir do piso: tensor (caixas, classes) e as caixas na imagem
+        original, normalizadas.
+        """
+        import numpy as np
+        from ultralytics.utils import ops
+
+        torch = self.torch
+        original = np.asarray(imagem)
+        entrada = self.letterbox(image=original)
+        tensor = torch.from_numpy(np.ascontiguousarray(entrada.transpose(2, 0, 1)))
+        tensor = tensor.to(self.dispositivo).float().unsqueeze(0) / 255
+        with torch.no_grad():
+            saida = self.rede(tensor)
+        saida = (saida[0] if isinstance(saida, (list, tuple)) else saida)[0]   # (4 + nc, âncoras)
+        pontuacoes = saida[4:][self.colunas].T            # (âncoras, classes)
+        manter = pontuacoes.max(dim=1).values >= self.piso
+        pontuacoes = pontuacoes[manter].cpu()
+        caixas = ops.scale_boxes(tensor.shape[2:], ops.xywh2xyxy(saida[:4].T[manter]),
+                                 original.shape[:2]).cpu()
+        altura, largura = original.shape[:2]
+        caixas = [(max(0.0, x1 / largura), max(0.0, y1 / altura),
+                   min(1.0, x2 / largura), min(1.0, y2 / altura))
+                  for x1, y1, x2, y2 in caixas.tolist()]
+        return pontuacoes, caixas
+
+
 # Anotadores disponíveis em --anotador, pelo nome
-ANOTADORES = {a.nome: a for a in (GroundingDino, Owlv2)}
+ANOTADORES = {a.nome: a for a in (GroundingDino, Owlv2, Yolo)}
 
 
 def tem_ids_gravados(saida):
@@ -547,7 +669,8 @@ def main(argv=None):
                     "--confianca-classe são gravados nela e aplicados por quem lê")
     deteccao.add_argument("--modelo", help="modelo do anotador (padrão: o do anotador; "
                                            f"grounding-dino: {MODELO_PADRAO}; "
-                                           f"owlv2: {Owlv2.MODELO_PADRAO})")
+                                           f"owlv2: {Owlv2.MODELO_PADRAO}; "
+                                           f"yolo: {Yolo.MODELO_PADRAO})")
     deteccao.add_argument("--piso", type=float, default=PISO_PADRAO,
                           help="confiança mínima gravada; as caixas entre o piso e --confianca "
                                f"são as candidatas da caixa por clique (padrão: {PISO_PADRAO})")
