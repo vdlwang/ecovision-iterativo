@@ -44,14 +44,14 @@ cd firmware && pio run -t upload           # PlatformIO firmware
 
 **Firmware** (`firmware/src/main.cpp`, PlatformIO, `ESP32Servo`): servo on GPIO32, L298N IN1=22 / IN2=23, 115200 baud. Commands: `MOTOR ON`, `MOTOR OFF`, `SERVO <n>`, bare `<n>`. Angles go into an 8-slot FreeRTOS queue; each is held 5 s and the servo returns to 175°. Motor is fixed PWM 255 on IN1, starts off.
 
-**Models** (`yolo_models/taco/`): `best.pt` is the default (YOLOv8s fine-tuned from `150ep_best.pt` on the team's photos; 61 classes = 60 TACO + `Background`). `50ep_best`, `97ep_best`, `150ep_best` are earlier fine-tunes. `yolov8n.pt`/`yolov8m.pt` are the original TACO weights renamed; `yolov8s.pt` is the stock **COCO** checkpoint (80 classes), not TACO. The original TACO YOLOv8s lives in `legado/yolo_models/taco/yolov8s_100epochs-best.pt`. Training scripts and the train/val split are not in the repo.
+**Models** (`yolo_models/taco/`): `best.pt` is the default (YOLOv8s fine-tuned from `150ep_best.pt` on the team's photos; 61 classes = 60 TACO + `Background`). `50ep_best`, `97ep_best`, `150ep_best` are earlier fine-tunes. `yolov8n.pt`/`yolov8s.pt`/`yolov8m.pt` are the original TACO weights (60 classes, no fine-tuning), byte-identical to `legado/yolo_models/taco/yolov8{n,s,m}_100epochs-best.pt`. (Docs claimed `yolov8s.pt` was the COCO checkpoint until 2026-11-13; it is not.) Training scripts and the train/val split are not in the repo.
 
 ## Known pitfalls
 
 These are also listed for users in `README.md` ("Limitações conhecidas") and `frontend/README.md`. Update those when fixing one.
 
 
-- `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `yolov8s.pt` is the COCO model, `n`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
+- `ConfigModelPanel`'s model selector sets `model_path` to `../yolo_models/taco/<yolov8n|s|m|l|x>.pt`. `n`/`s`/`m` are TACO weights without fine-tuning, and `l`/`x` don't exist. `best.pt` is not offered.
 - `ConfigGatesPanel` uses key `vidro` while the backend maps glass to `glass`, so glass is never actuated once the config is saved from the UI.
 - The backend does not handle `get_config` (the panels request it), so the UI shows hardcoded defaults.
 - `conf` is fixed when the YOLO stream starts; changing confidence at runtime has no effect.
