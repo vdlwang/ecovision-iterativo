@@ -128,6 +128,38 @@ def test_detector_base_filtra_o_que_o_modelo_pontua():
         DetectorFalso(CLASSES, piso=0.3, confianca=0.2)
 
 
+def test_caixas_owlv2_desfaz_o_quadrado_do_processador():
+    # imagem 400x200: o processador completa embaixo até 400x400, e as caixas
+    # vêm normalizadas pelo quadrado
+    paisagem = anotar.caixas_owlv2([(0.5, 0.25, 0.5, 0.25), (0.9, 0.45, 0.4, 0.3)], 400, 200)
+    assert paisagem[0] == pytest.approx((0.25, 0.25, 0.75, 0.75))
+    assert paisagem[1] == pytest.approx((0.7, 0.6, 1.0, 1.0))  # recortada à imagem
+    retrato = anotar.caixas_owlv2([(0.25, 0.5, 0.5, 0.5)], 200, 400)
+    assert retrato[0] == pytest.approx((0.0, 0.25, 1.0, 0.75))
+
+
+def test_owlv2_registrado_e_frase_validada_antes_do_modelo():
+    assert anotar.ANOTADORES["owlv2"] is anotar.Owlv2
+    with pytest.raises(ValueError, match="sem"):
+        anotar.Owlv2(CLASSES, frase="a photo")
+
+
+def test_criar_passa_os_argumentos_proprios_do_detector():
+    class ComFrase(DetectorFalso):
+        @classmethod
+        def argumentos(cls, args):
+            return {"frase": args.frase}
+
+        def __init__(self, classes, frase=None, **kwargs):
+            self.frase = frase
+            super().__init__(classes, **kwargs)
+
+    args = anotar.argparse.Namespace(
+        modelo=None, dispositivo=None, piso=0.05, confianca=0.2, confianca_classe=0.35,
+        iou=0.5, area_maxima=0.5, contencao=0.9, frase="a {}")
+    assert ComFrase.criar(CLASSES, args).frase == "a {}"
+
+
 def test_linha_yolo():
     assert anotar.linha_yolo(3, (0.2, 0.4, 0.6, 0.5)) == "3 0.400000 0.450000 0.400000 0.100000"
 

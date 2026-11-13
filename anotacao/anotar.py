@@ -1,6 +1,6 @@
 """
 Anotação automática de imagens por um anotador intercambiável (hoje, o
-Grounding DINO, de vocabulário aberto).
+Grounding DINO e o OWLv2, detectores de vocabulário aberto).
 
 Anota as imagens já importadas pelo importar.py (o armazenamento comum,
 <saida>/images/) e grava, no diretório de saída (formato em saida.py):
@@ -223,11 +223,17 @@ class Detector:
         """Opções próprias do detector; as comuns (main()) servem a todos."""
 
     @classmethod
+    def argumentos(cls, args):
+        """Argumentos próprios do construtor, tirados das opções de opcoes()."""
+        return {}
+
+    @classmethod
     def criar(cls, classes, args):
         return cls(classes, modelo=args.modelo, dispositivo=args.dispositivo,
                    piso=args.piso, confianca=args.confianca,
                    confianca_classe=args.confianca_classe, limiar_iou=args.iou,
-                   area_maxima=args.area_maxima, contencao=args.contencao)
+                   area_maxima=args.area_maxima, contencao=args.contencao,
+                   **cls.argumentos(args))
 
     def __init__(self, classes, modelo=None, dispositivo=None, piso=PISO_PADRAO,
                  confianca=CONFIANCA_PADRAO, confianca_classe=CONFIANCA_CLASSE_PADRAO,
@@ -341,8 +347,85 @@ class GroundingDino(Detector):
         return por_classe, caixas
 
 
+def caixas_owlv2(pred_boxes, largura, altura):
+    """
+    Caixas do OWLv2 (cx, cy, w, h), normalizadas pela imagem quadrada que o
+    processador monta (a original no canto superior esquerdo, completada
+    embaixo ou à direita), para (x1, y1, x2, y2) normalizadas pela original
+    e recortadas a ela.
+    """
+    lado = max(largura, altura)
+    sx, sy = lado / largura, lado / altura
+    return [(max(0.0, (cx - w / 2) * sx), max(0.0, (cy - h / 2) * sy),
+             min(1.0, (cx + w / 2) * sx), min(1.0, (cy + h / 2) * sy))
+            for cx, cy, w, h in pred_boxes]
+
+
+class Owlv2(Detector):
+    """
+    OWLv2 (CLIP adaptado à detecção): uma consulta de texto por classe,
+    pontuada em cada fragmento da imagem, sem mapeamento por token.
+    """
+
+    nome = "owlv2"
+    MODELO_PADRAO = "google/owlv2-base-patch16-ensemble"
+
+    @classmethod
+    def opcoes(cls, parser):
+        grupo = parser.add_argument_group("owlv2")
+        grupo.add_argument("--owlv2-frase", default="{}",
+                           help="modelo da consulta de cada classe, com {} no lugar do "
+                                "prompt (ex.: 'a photo of a {}'; padrão: o prompt puro)")
+
+    @classmethod
+    def argumentos(cls, args):
+        return {"frase": args.owlv2_frase}
+
+    def __init__(self, classes, frase="{}", **kwargs):
+        if "{}" not in frase:
+            raise ValueError(f"--owlv2-frase sem {{}}: {frase!r}")
+        self.frase = frase
+        super().__init__(classes, **kwargs)
+        self.parametros["frase"] = frase
+
+    def carregar(self):
+        import torch
+        from transformers import Owlv2ForObjectDetection, Owlv2Processor
+
+        self.torch = torch
+        self.dispositivo = self.dispositivo or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Carregando {self.versao} em {self.dispositivo}...")
+        self.processador = Owlv2Processor.from_pretrained(self.versao)
+        self.modelo = Owlv2ForObjectDetection.from_pretrained(self.versao)
+        self.modelo.to(self.dispositivo).eval()
+        self.textos = [self.frase.format(c["prompt"].strip().lower()) for c in self.classes]
+        # O texto das consultas não muda: tokeniza uma vez só
+        self.entradas_texto = self.processador(text=[self.textos], return_tensors="pt",
+                                               padding="max_length", truncation=True)
+        limite = self.processador.tokenizer.model_max_length
+        longos = [t for t in self.textos
+                  if len(self.processador.tokenizer(t)["input_ids"]) > limite]
+        if longos:
+            raise ValueError(f"Consultas longas demais para o OWLv2 (máximo {limite} "
+                             f"tokens): {', '.join(longos)}")
+
+    def pontuar(self, imagem):
+        """
+        Um fragmento da imagem por caixa (3600 no base, a 960 px): tensor
+        (caixas, classes) com o sigmoide do logit de cada consulta.
+        """
+        torch = self.torch
+        entradas = self.processador(images=imagem, return_tensors="pt")
+        entradas.update(self.entradas_texto)
+        entradas = entradas.to(self.dispositivo)
+        with torch.no_grad():
+            saida = self.modelo(**entradas)
+        pontuacoes = saida.logits[0].sigmoid().cpu()
+        return pontuacoes, caixas_owlv2(saida.pred_boxes[0].cpu().tolist(), *imagem.size)
+
+
 # Anotadores disponíveis em --anotador, pelo nome
-ANOTADORES = {a.nome: a for a in (GroundingDino,)}
+ANOTADORES = {a.nome: a for a in (GroundingDino, Owlv2)}
 
 
 def tem_ids_gravados(saida):
@@ -463,7 +546,8 @@ def main(argv=None):
         "detecção", "a proposta guarda todas as caixas a partir do piso; --confianca e "
                     "--confianca-classe são gravados nela e aplicados por quem lê")
     deteccao.add_argument("--modelo", help="modelo do anotador (padrão: o do anotador; "
-                                           f"grounding-dino: {MODELO_PADRAO})")
+                                           f"grounding-dino: {MODELO_PADRAO}; "
+                                           f"owlv2: {Owlv2.MODELO_PADRAO})")
     deteccao.add_argument("--piso", type=float, default=PISO_PADRAO,
                           help="confiança mínima gravada; as caixas entre o piso e --confianca "
                                f"são as candidatas da caixa por clique (padrão: {PISO_PADRAO})")
