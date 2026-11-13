@@ -61,7 +61,7 @@ Pesa mais no teste: se o revisor parte das propostas dos anotadores, o viés vai
 
 ## 5. Escolha dos anotadores
 
-Com o voto, a pergunta deixa de ser qual é o melhor anotador e passa a ser **que trio, quando concorda, quase nunca erra, e concorda com frequência suficiente** para poupar revisão. Um anotador preciso mas muito parecido com outro vale menos que um mais fraco de outra família. Primeiro trio a medir: Grounding DINO, OWLv2 e YOLOE; a híbrida com SigLIP entra no lugar do Grounding DINO puro se corrigir a classe. Na GTX 1650 os três não cabem juntos: o `anotar.py` roda um anotador por vez sobre o lote inteiro.
+Com o voto, a pergunta deixa de ser qual é o melhor anotador e passa a ser **que trio, quando concorda, quase nunca erra, e concorda com frequência suficiente** para poupar revisão. Um anotador preciso mas muito parecido com outro vale menos que um mais fraco de outra família. Trio adotado (decisão 17, 2026-11-13): Grounding DINO, OWLv2 e o YOLO da equipe (`best.pt`); o YOLOE e a híbrida com SigLIP ficam como alternativas para o lugar de um deles. Na GTX 1650 os três não cabem juntos: o `anotar.py` roda um anotador por vez sobre o lote inteiro.
 
 Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entram também opções que só **reclassificam** as caixas. Custo = esforço para encaixar no `anotar.py` (a classe `Anotador` já isola o modelo).
 
@@ -75,11 +75,11 @@ Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entr
 | Florence-2 | `transformers` com `trust_remote_code` | MIT | Cabe | ~1 dia | Sem confiança por caixa: quebra a ordenação por incerteza (RF10) |
 | VLM local (Qwen2.5-VL/Qwen3-VL 3B–7B) | Caixas em JSON na resposta | Apache 2.0 (maioria) | 3B quantizado cabe; 7B não | ~2–3 dias | Lento, sem confiança calibrada; bom para decidir material |
 | APIs (Gemini, DINO-X / Grounding DINO 1.6 Pro) | HTTP | Comercial, por imagem | — | ½–1 dia | Imagens saem da máquina (RNF09/LGPD) |
-| Detector próprio (`best.pt` e retreinos) | `ultralytics` | AGPL-3.0 | Cabe | Baixo | Aprendizado ativo clássico; herda os próprios erros; para os ciclos seguintes |
+| Detector próprio (`best.pt` e retreinos) (**feito**, 2026-11-13: `--anotador yolo`) | `ultralytics` | AGPL-3.0 | Cabe | Baixo | Aprendizado ativo clássico; herda os próprios erros; terceiro anotador do trio. Medido abaixo: classe precisa, cobertura baixa |
 
 **Híbrida (hipótese a testar)**: manter as caixas do Grounding DINO e reclassificar cada recorte com SigLIP ou CLIP (`transformers`, Apache 2.0, ~½–1 dia), que compara o recorte com textos como "clear plastic bottle" e "glass bottle". Um VLM pode ser chamado só nos recortes ambíguos.
 
-**Como escolher**: `anotacao/avaliar.py` mede cada candidato (acerto de classe e de material com as caixas verdadeiras; precisão e recall por limiar de confiança) nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
+**Como escolher**: `anotacao/avaliar.py` mede cada candidato (acerto de classe e de material com as caixas verdadeiras; precisão e recall por limiar de confiança) nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa para os detectores de vocabulário aberto, que não treinaram nelas; o `best.pt` treinou em fotos da equipe que não estão no repositório (ressalva na seção do YOLO, abaixo). O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
 
 **Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) `avaliar.py --voto` com o trio; (5) SAM 2/3 só se as caixas virarem o problema.
 
@@ -264,6 +264,49 @@ OWLv2 × Grounding DINO, mesmas 88 fotos:
 - **Alternativa para a classe, se a dependência aparecer**: DINOv2/v3 + kNN (ou regressão logística) sobre os recortes rotulados pela equipe. É um modelo só de imagem, sem texto e sem WebLI, e a classe vem de exemplos do domínio, não de linguagem: a fonte de informação mais diferente que temos. O risco é o vazamento entre as fotos (as quatro validações são as mesmas cenas); a validação tem de ser por cena, como no plano do SigLIP abaixo. Um CLIP da OpenAI no lugar do SigLIP muda o dado (WIT), mas não a família, e ganha pouco.
 - **Ressalvas**: as 88 fotos são ~22 cenas em quatro cenários, então os objetos não são independentes entre si e as contagens são pequenas; o "esperado" supõe acerto por classe constante em todas as fotos. Refazer com quadros da esteira (T4).
 
+### Vários prompts por classe (2026-11-13)
+
+`prompt` no `classes.yaml` passou a aceitar uma lista; a classe recebe a maior pontuação entre os seus prompts (no Grounding DINO, o máximo entre os tokens de todos eles; no OWLv2, uma consulta por prompt). Duas variantes, uma iteração cada, nas mesmas 88 fotos, com o DINO lido em 0,20 e o OWLv2 em 0,10:
+
+- **v2**, só nas confusões medidas: PET com "clear plastic water bottle" e "crushed plastic bottle"; pote com "glass food jar" e "jar with a lid"; copo com "wine glass" e "glass bowl".
+- **v3**, a v2 mais um sinônimo nas outras classes: "plastic lid", "soda can", "paperboard box", "crumpled paper". `Glass bottle` fica com um prompt só, para não atrair mais.
+
+| | DINO atual | DINO v2 | DINO v3 | OWLv2 atual | OWLv2 v2 | OWLv2 v3 |
+|---|---|---|---|---|---|---|
+| Objetos cobertos | 92% | 94% | 97% | 93% | 96% | 98% |
+| Imagens completas | 73% | 75% | 86% | 85% | 86% | 92% |
+| Sobra por imagem | 1,8 | 2,6 | 3,0 | 0,8 | 0,8 | 0,8 |
+| Classe certa | 57% | 54% | 63% | 76% | 75% | 79% |
+| Material certo | 65% | 64% | 72% | 89% | 87% | 91% |
+| Detecção com classe: precisão / recall | 0,39 / 0,53 | 0,33 / 0,51 | 0,36 / 0,61 | 0,64 / 0,71 | 0,64 / 0,73 | 0,66 / 0,78 |
+
+- **v3 adotada** no `classes.yaml`. O ganho se repete nos dois ângulos, como pede o plano do SigLIP: classe do DINO 56% → 61% a 0° e 58% → 65% a 45°; do OWLv2, 77% → 81% e 75% → 77%; imagens completas sobem nos quatro casos (DINO 70% → 84% e 75% → 89%; OWLv2 82% → 89% e 89% → 95%).
+- **v2 piora o DINO**: sem "soda can", "crushed plastic bottle" leva as latas (acerto 59% → 28%). Prompt a mais atrai objetos de outras classes; cada um tem de ser medido junto com os demais.
+- **PET**: no DINO, `Clear plastic bottle` sobe de 19% para 74%, e o PET chamado de `Glass bottle` cai de 33 para 9. O custo é que o prompt de PET agora atrai vidro e lata (16 potes, 10 copos e 10 latas como PET). No OWLv2, PET 64% → 74%.
+- **Pote continua sem solução**: no OWLv2, `Glass jar` sai de 2% para 10%, e 33 de 54 ainda saem `Glass cup`. Nenhum prompt de texto separou o pote do copo. É caso para classificador por exemplos (DINOv2 + kNN), ou para rever a decisão 8 se os potes forem raros na esteira.
+- **Custos**: o DINO sobe a sobra de 1,8 para 3,0 caixas por imagem; o OWLv2 cai em papelão (100% → 72%, papelão como papel, por "crumpled paper"). Com poucos objetos sem caixa visível no DINO (13 em 0,20, eram 31), a medida do clique deixa de ser comparável.
+- **Dependência OWLv2 × DINO** (`--comparar`, 358 objetos): concordâncias erradas caem de 14% para 9%, mas acima do esperado (20 contra 10,8), agora espalhadas entre PET → vidro (6), pote → copo (6) e papelão → papel (4).
+- **Ressalva**: os prompts foram escolhidos olhando as confusões destas fotos, e é a primeira iteração; os dois ângulos são as mesmas cenas. Conferir na esteira (T4).
+
+### YOLO da equipe como terceiro anotador (2026-11-13)
+
+Decisão 17: o trio é Grounding DINO, OWLv2 e o `best.pt` (YOLOv8s do TACO com fine-tuning nas fotos da equipe), `anotar.py --anotador yolo`. Ele não usa os prompts: as classes de `classes.yaml` são casadas pelo nome com as 61 do modelo, e a saída crua da rede (pontuação de cada classe em cada âncora, antes do NMS do Ultralytics) passa pela mesma base `Detector` que os outros. Conferido contra o `predict()` do Ultralytics: mesmas caixas e confianças. Roda em 26 s nas 88 fotos.
+
+| | YOLO 0,05 | YOLO 0,20 | YOLO 0,50 |
+|---|---|---|---|
+| Objetos cobertos | 65% | 43% | 20% |
+| Imagens completas | 19% | 9% | 8% |
+| Sobra por imagem | 1,0 | 0,2 | 0,0 |
+| Classe certa | 66% | 87% | 93% |
+| Material certo | 74% | 91% | 95% |
+| Detecção com classe: precisão / recall | 0,48 / 0,43 | 0,78 / 0,37 | 0,93 / 0,19 |
+
+- **Preciso e cego**: quando dá caixa, a classe é a mais certa dos três; mas em 0,20 não acha 56 das 58 garrafas PET, 48 das 59 latas e 46 dos 54 potes. Acha tampas (83 de 98) e papel (38 de 43); copos, só 10 de 40. As latas que acha, chama de tampa (11).
+- **Não é a resolução**: com `--yolo-lado` 960 e 1280, a cobertura em 0,20 fica em 50% e 49%.
+- **Vazamento**: o `best.pt` não reproduz nestas fotos o mAP50 de 0,995 do próprio checkpoint, e prevê `Glass cup`, que os rótulos da equipe nunca usam (todo vidro é `Glass bottle`), então a classe do vidro vem do TACO. Nada indica que treinou nestas fotos, mas o `data.yaml` do treino não está no repositório; trate os números dele com cautela.
+- **Erros independentes nos objetos que cobre** (v3, YOLO em 0,20): com o OWLv2, 157 objetos, os dois erram 10 (esperado 10,0), concordam em 88%, e só 3 concordâncias (2%) estão erradas; com o DINO, 152 objetos, 2 concordâncias erradas (esperado 1,1). Dos três pares, os do YOLO são os únicos sem erro em comum além da dificuldade da classe, o que é a diversidade que o voto pede: o YOLO aprendeu a classe por exemplos rotulados, não por texto.
+- **Problema para o voto: a cobertura.** No 3oo3 estrito (seção 3), uma imagem só passa se os três acham os mesmos objetos; com o YOLO completo em só 9% das imagens (19% em 0,05), a aprovação fica abaixo disso, longe dos ~30% do critério. Opções para o T3: (a) a classe em 3oo3 e a localização em 2oo3, com o YOLO votando só nas caixas que propõe, e o objeto que ele não acha passando pelo voto dos outros dois; (b) ler o YOLO num limiar baixo (0,05); (c) retreinar o YOLO com a base revisada a cada ciclo (T12), o que deve subir a cobertura dele: é o aprendizado ativo previsto. Medir (a) e (b) no `avaliar.py --voto`.
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.
@@ -295,7 +338,7 @@ OWLv2 × Grounding DINO, mesmas 88 fotos:
 | 4 | so400m e CLIP-L com a melhor configuração | Tamanho e família do modelo |
 | 5 | margem 0, 10 e 25% | Contexto em volta do objeto |
 
-**Risco: ajustar as descrições às fotos de validação.** Não há conjunto independente: `tcc-teste` não tem rótulos, e as quatro validações são as mesmas cenas. Mitigações:
+**Risco: ajustar as descrições às fotos de validação.** Não há conjunto independente: as quatro validações são as mesmas cenas, e `tcc-teste` tem só 7 fotos (de março, 49 caixas) rotuladas num esquema próprio de 6 classes, não no do TACO. Mitigações:
 - poucas iterações de texto, todas registradas aqui com o resultado;
 - ajustar com as fotos de 0° (`tcc-0CF`, `tcc-0SF`) e conferir nas de 45°, sabendo que as cenas se repetem;
 - confirmar nas primeiras fotos da esteira assim que existirem.
@@ -367,8 +410,8 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); faltam vários prompts por classe, a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
-| T3 | [~] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5) | T2 | pytest com caixas sintéticas; tabelas |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); vários prompts por classe, adotados (2026-11-13: classe do DINO 57% → 63%, do OWLv2 76% → 79%, imagens completas 73% → 86% e 85% → 92%); YOLO da equipe como terceiro anotador, medido (2026-11-13: classe 87%, mas cobre só 43% dos objetos); ficam como alternativas a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T3 | [~] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5). A regra tem de tratar a cobertura baixa do YOLO: no 3oo3 estrito, a aprovação fica abaixo de 9–19% (seção 5, YOLO da equipe) | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
 | T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o `imagens.csv`, com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
 | T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores; trava do `imagens.csv` (seção 6) | T1, T3, T5 | pytest do voto com caixas sintéticas |
@@ -412,3 +455,4 @@ As decisões que só valem para o framework (ferramenta própria, fonte das clas
 | 15 | ~~A classe abaixo de 0,35 entra no voto?~~ | **Decidido (2026-11-11)**: sim, a `sugerida`; só é escondida do revisor. Candidatas do clique vêm de um anotador só, por enquanto. |
 | 16 | ~~Limiar na gravação ou na leitura?~~ | **Decidido (2026-11-11)**: na leitura. A proposta guarda todas as caixas a partir de 0,05, com a confiança, e cada consumidor (página, voto, `avaliar.py`) aplica o seu. |
 | 8 | ~~Taxonomia do vidro~~ | **Decidido (2026-11-09)**: três classes TACO, `Glass bottle`, `Glass jar` e `Glass cup` (copos, taças e tigelas). `Glass jar` e `Glass cup` entram no fim do `classes.yaml`, para não mudar os ids. |
+| 17 | ~~Quem é o trio do voto?~~ | **Decidido (2026-11-13)**: Grounding DINO, OWLv2 e o YOLO da equipe (`best.pt`). O YOLO é preciso na classe e erra independentemente dos outros dois, mas cobre pouco; a regra do voto (T3) tem de tratar isso (seção 5). |

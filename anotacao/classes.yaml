@@ -11,7 +11,9 @@
 #   aparecem nas fotos da equipe, mais o vidro em três (decisão 8).
 #
 #   nome:     nome da classe, um dos de nomes
-#   prompt:   descrição em inglês enviada ao Grounding DINO
+#   prompt:   descrição em inglês enviada ao anotador de vocabulário aberto,
+#             ou uma lista delas (a classe fica com a maior pontuação); o
+#             anotador yolo não usa: casa a classe com a do modelo pelo nome
 #   material: classe-pai (nível 1): plastic, metal, glass, paper ou other
 #   reserva:  opcional; true faz a classe só vencer quando nenhuma outra chega
 #             ao limiar (classe genérica; medição no OBJETIVO.md, seção 5)
@@ -80,30 +82,34 @@ nomes:
 - Background
 
 classes:
+  # Vários prompts por classe (2026-11-13, OBJETIVO.md seção 5): a classe
+  # recebe a maior pontuação entre os seus. Medido nas 88 fotos de validação,
+  # nos dois ângulos: cobertura e classe sobem no Grounding DINO e no OWLv2.
+  # "crushed plastic bottle" sem "soda can" puxava as latas para o PET.
   - nome: Clear plastic bottle
-    prompt: plastic bottle
+    prompt: [plastic bottle, clear plastic water bottle, crushed plastic bottle]
     material: plastic
   - nome: Plastic bottle cap
-    prompt: plastic bottle cap
+    prompt: [plastic bottle cap, plastic lid]
     material: plastic
   - nome: Drink can
-    prompt: aluminium drink can
+    prompt: [aluminium drink can, soda can]
     material: metal
   - nome: Glass bottle
     prompt: glass bottle
     material: glass
   - nome: Corrugated carton
-    prompt: cardboard box
+    prompt: [cardboard box, paperboard box]
     material: paper
   - nome: Normal paper
-    prompt: sheet of paper
+    prompt: [sheet of paper, crumpled paper]
     material: paper
   # Decisão 8 do OBJETIVO.md (2026-11-09): vidro em três classes. O prompt
   # descreve o objeto das fotos, não o nome TACO: no teste de 2026-10-27,
   # "drinking glass" foi o termo que mais reconheceu esses copos.
   - nome: Glass jar
-    prompt: glass jar
+    prompt: [glass jar, glass food jar, jar with a lid]
     material: glass
   - nome: Glass cup
-    prompt: drinking glass
+    prompt: [drinking glass, wine glass, glass bowl]
     material: glass

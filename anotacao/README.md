@@ -1,6 +1,6 @@
 # Anotação assistida
 
-Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `importar.py` grava as imagens de um lote num armazenamento comum, e `anotar.py` propõe caixas para elas com o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny), um detector de vocabulário aberto. Ele não depende do detector em operação (`best.pt`), então não herda os erros dele. As caixas são **propostas** para um revisor humano: ficam em `propostas/`, à parte dos rótulos finais em `labels/`.
+Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `importar.py` grava as imagens de um lote num armazenamento comum, e `anotar.py` propõe caixas para elas com um anotador intercambiável: o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny) e o [OWLv2](https://huggingface.co/google/owlv2-base-patch16-ensemble), detectores de vocabulário aberto que não dependem do detector em operação, ou o próprio `best.pt` da equipe (`yolo`), o terceiro anotador do voto. As caixas são **propostas** para um revisor humano: ficam em `propostas/`, à parte dos rótulos finais em `labels/`.
 
 ## Instalação
 
@@ -46,7 +46,7 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | Opção | Padrão | |
 |---|---|---|
 | `-o`, `--saida` | `anotacoes` | Diretório de saída, já com imagens importadas |
-| `--anotador` | `grounding-dino` | Qual anotador propõe as caixas: `grounding-dino` ou `owlv2` |
+| `--anotador` | `grounding-dino` | Qual anotador propõe as caixas: `grounding-dino`, `owlv2` ou `yolo` (o `best.pt` da equipe, de conjunto fechado) |
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
@@ -57,7 +57,7 @@ Opções de detecção, comuns a todo detector. A proposta guarda **todas** as c
 
 | Opção | Padrão | |
 |---|---|---|
-| `--modelo` | o do anotador | `grounding-dino`: `IDEA-Research/grounding-dino-tiny`; também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento. `owlv2`: `google/owlv2-base-patch16-ensemble`; também `google/owlv2-large-patch14-ensemble` |
+| `--modelo` | o do anotador | `grounding-dino`: `IDEA-Research/grounding-dino-tiny`; também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento. `owlv2`: `google/owlv2-base-patch16-ensemble`; também `google/owlv2-large-patch14-ensemble`. `yolo`: `yolo_models/taco/best.pt` (relativo à raiz do repositório), ou outro peso do Ultralytics |
 | `--piso` | `0.05` | Confiança mínima gravada. As caixas entre o piso e `--confianca` são as **candidatas** da caixa por clique (cerca de 11 por foto) |
 | `--confianca` | `0.2` | A página mostra as caixas a partir dessa confiança. Baixa de propósito: cobre 92% dos objetos e sobram ~2 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
 | `--confianca-classe` | `0.35` | Abaixo dessa, a página mostra a caixa **sem classe**: o revisor tem de dar a classe ou remover a caixa. A classe do anotador fica gravada, só não chega à página. `0` desliga |
@@ -69,7 +69,8 @@ Opções de um anotador só:
 
 | Opção | Padrão | |
 |---|---|---|
-| `--owlv2-frase` | `{}` | `owlv2`: modelo da consulta de cada classe, com `{}` no lugar do `prompt` (ex.: `"a photo of a {}"`). Fica gravada nos `parametros` da proposta |
+| `--owlv2-frase` | `{}` | `owlv2`: modelo da consulta de cada prompt, com `{}` no lugar dele (ex.: `"a photo of a {}"`). Fica gravada nos `parametros` da proposta |
+| `--yolo-lado` | `640` | `yolo`: lado maior da imagem na entrada da rede, múltiplo de 32 (o do treino do `best.pt`). 960 e 1280 não melhoram a cobertura nas fotos de validação |
 
 ## Google Colab
 
@@ -201,7 +202,7 @@ Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dic
 - `carregar()`: carrega o modelo `self.versao` em `self.dispositivo` (se `None`, o detector escolhe);
 - `pontuar(imagem)`: recebe a imagem PIL em RGB e devolve `(pontuacoes, caixas)`, a pontuação de cada classe (na ordem de `classes.yaml`) em cada caixa bruta, como lista de listas ou tensor, e as caixas `(x1, y1, x2, y2)` normalizadas de 0 a 1.
 
-A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. Argumentos próprios do construtor vêm das opções por `argumentos(args)`. O que cada um faz com o `prompt` das classes é dele. `GroundingDino` e `Owlv2` são os exemplos.
+A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. Argumentos próprios do construtor vêm das opções por `argumentos(args)`. O que cada um faz com o `prompt` das classes é dele (o `Yolo` o ignora e casa as classes pelo nome com as do modelo). `GroundingDino`, `Owlv2` e `Yolo` são os exemplos.
 
 Um anotador que não detecta (por exemplo, um que só reclassifica as caixas de outro) pode implementar a interface direto: `nome`, `opcoes(parser)`, `criar(classes, args)` e, na instância, `versao`, `parametros` e `anotar(imagem) -> [(id da classe, confiança, caixa normalizada)]`.
 
@@ -210,15 +211,15 @@ Um anotador que não detecta (por exemplo, um que só reclassifica as caixas de 
 `classes.yaml` tem duas listas (nível 2 da taxonomia):
 
 - `nomes`: as classes dos rótulos. O índice é o id nos `.txt`, e o `data.yaml` de cada saída é gerado dela. São as 60 classes TACO e `Background`, na ordem de `legado/database/tcc-*/YOLO_dataset/data.yaml` e do `yolo_models/taco/best.pt`, para que as anotações sirvam direto ao fine-tuning dele. Para não invalidar anotações já feitas, só acrescente no fim.
-- `classes`: o que o anotador automático procura, um subconjunto de `nomes`, cada uma com o `nome`, o `prompt` em inglês enviado ao modelo e o `material` (nível 1). A ordem dela não muda os ids. A lista inicial são as seis classes TACO das fotos da equipe, mais `Glass jar` e `Glass cup`: o vidro é dividido em garrafas, potes e copos (decisão 8 do [`OBJETIVO.md`](../OBJETIVO.md)).
+- `classes`: o que o anotador automático procura, um subconjunto de `nomes`, cada uma com o `nome`, o `prompt` em inglês enviado ao modelo (um texto ou uma lista deles) e o `material` (nível 1). A ordem dela não muda os ids. A lista inicial são as seis classes TACO das fotos da equipe, mais `Glass jar` e `Glass cup`: o vidro é dividido em garrafas, potes e copos (decisão 8 do [`OBJETIVO.md`](../OBJETIVO.md)).
 
 Na revisão, qualquer classe de `nomes` pode ser escolhida, mesmo as que o anotador não procura.
 
 Uma classe de `classes` com `reserva: true` só vence numa caixa quando nenhuma das outras chega ao limiar de confiança. Serve para uma classe genérica (por exemplo, `Unlabeled litter` com o prompt "object") dar caixa aos objetos que as outras não reconhecem, sem tirar delas os que reconhecem. Nenhuma classe a usa por enquanto: a frase a mais no prompt muda a pontuação das outras (medição na seção 5 do [`OBJETIVO.md`](../OBJETIVO.md)).
 
-O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir.
+O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir. Uma classe pode ter **vários prompts** (`prompt: [glass jar, glass food jar]`): a confiança dela é a maior entre eles. Serve para objetos diferentes na mesma classe (copo, taça e tigela em `Glass cup`), mas um prompt a mais também atrai objetos de outras classes; meça com o `avaliar.py` (seção 5 do `OBJETIVO.md`).
 
-Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por token do texto, e a confiança de uma classe é a maior entre os tokens do seu prompt; o OWLv2 dá uma pontuação por consulta, uma consulta por classe (o `prompt`, ou a frase de `--owlv2-frase`), em cada fragmento da imagem. Nos dois, vence a classe de maior confiança.
+Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por token do texto, e a confiança de uma classe é a maior entre os tokens do seu prompt; o OWLv2 dá uma pontuação por consulta, uma consulta por prompt (ou pela frase de `--owlv2-frase`), em cada fragmento da imagem, e a classe fica com a maior das suas; o YOLO dá a pontuação de cada uma das suas 61 classes em cada âncora, e só as de `classes.yaml` contam. Nos três, vence a classe de maior confiança.
 
 ## Avaliação
 
