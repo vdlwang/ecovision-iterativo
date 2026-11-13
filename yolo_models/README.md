@@ -16,5 +16,6 @@ Os modelos com fine-tuning têm 61 classes: as 60 do TACO mais `Background`, com
 
 ## Ressalvas
 
-- O mAP50 de 0,995 do `best.pt` é otimista. As fotos do projeto mostram as mesmas cenas em 4 condições de captura, então treino e validação quase certamente compartilham cenas. Além disso, o `best.pt` continuou o treino sobre o mesmo split. Detalhes em [`PROBLEMAS.md`](../PROBLEMAS.md) (item T2).
+- O mAP50 de 0,995 do `best.pt` é otimista. As fotos do projeto mostram as mesmas cenas em 4 condições de captura, então treino e validação quase certamente compartilham cenas. O `best.pt` continuou o treino do `150ep` com um `./data.yaml` de mesmo nome, mas o conteúdo não está no repositório (ver o último item). Detalhes em [`PROBLEMAS.md`](../PROBLEMAS.md) (item T2).
 - O script de treino, o `data.yaml` e a divisão treino/validação usados no fine-tuning não estão no repositório.
+- Nas 88 fotos de validação de `legado/database` (2026-11-13, `anotacao/avaliar.py`), o `50ep`, o `97ep` e o `150ep` acham 99% dos objetos e dão a todo vidro o rótulo original da equipe (`Glass bottle`): memorizaram essas fotos ou as mesmas cenas. O `best.pt` acha só 43% em 0,20, quase o mesmo que o `yolov8s.pt` só do TACO, então deve ter treinado noutra base. Números no `OBJETIVO.md`, seção 5.

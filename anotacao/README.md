@@ -48,6 +48,7 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | `-o`, `--saida` | `anotacoes` | Diretório de saída, já com imagens importadas |
 | `--anotador` | `grounding-dino` | Qual anotador propõe as caixas: `grounding-dino`, `owlv2` ou `yolo` (o `best.pt` da equipe, de conjunto fechado) |
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
+| `--nome` | o do anotador | Nome com que as propostas são gravadas (a pasta em `propostas/`), para rodar o mesmo anotador com outra configuração na mesma saída, por exemplo outro peso do YOLO: `--anotador yolo --nome yolo-taco-s --modelo yolo_models/taco/yolov8s.pt`. O tipo do anotador vai em `parametros.tipo` |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
 | `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
@@ -248,6 +249,12 @@ Com `--comparar OUTRO`, mede também o **erro conjunto de classe** dos dois anot
 
 ```bash
 python anotacao/avaliar.py validacao --anotador owlv2 --comparar grounding-dino --limiares-par 0.10 0.20
+```
+
+Com `--voto A B C`, mede só o **voto** (seção 3 do `OBJETIVO.md`) entre os anotadores, cada um no limiar gravado na sua proposta ou nos de `--limiares-voto` (`g` mantém o gravado). Por imagem, o NooN estrito: a imagem passa se todos propõem o mesmo número de caixas e cada caixa casa, com a mesma classe e IoU ≥ 0,5, com uma de cada um dos outros. Mostra a taxa de aprovação, os motivos de reprovação e, nas aprovadas, quantas estão corretas por inteiro (e só pelo material). Por caixa, sem exigir a imagem inteira: quantas caixas têm consenso, quantas estão certas, e quantos objetos ganham caixa de consenso.
+
+```bash
+python anotacao/avaliar.py validacao --voto grounding-dino owlv2 yolo --limiares-voto 0.20 0.10 0.05
 ```
 
 Os limiares abaixo do `piso` das propostas não são medidos (faltariam caixas ali). `--json` grava todas as medidas, para registrar a medição e comparar anotadores. Os números ficam no `OBJETIVO.md` (seção 5).

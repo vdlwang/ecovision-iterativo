@@ -307,6 +307,40 @@ Decisão 17: o trio é Grounding DINO, OWLv2 e o `best.pt` (YOLOv8s do TACO com 
 - **Erros independentes nos objetos que cobre** (v3, YOLO em 0,20): com o OWLv2, 157 objetos, os dois erram 10 (esperado 10,0), concordam em 88%, e só 3 concordâncias (2%) estão erradas; com o DINO, 152 objetos, 2 concordâncias erradas (esperado 1,1). Dos três pares, os do YOLO são os únicos sem erro em comum além da dificuldade da classe, o que é a diversidade que o voto pede: o YOLO aprendeu a classe por exemplos rotulados, não por texto.
 - **Problema para o voto: a cobertura.** No 3oo3 estrito (seção 3), uma imagem só passa se os três acham os mesmos objetos; com o YOLO completo em só 9% das imagens (19% em 0,05), a aprovação fica abaixo disso, longe dos ~30% do critério. Opções para o T3: (a) a classe em 3oo3 e a localização em 2oo3, com o YOLO votando só nas caixas que propõe, e o objeto que ele não acha passando pelo voto dos outros dois; (b) ler o YOLO num limiar baixo (0,05); (c) retreinar o YOLO com a base revisada a cada ciclo (T12), o que deve subir a cobertura dele: é o aprendizado ativo previsto. Medir (a) e (b) no `avaliar.py --voto`.
 
+### Outros pesos do YOLO e o voto medido (2026-11-13)
+
+**Pesos** (mesmas 88 fotos, prompts v3 nos outros dois; `anotar.py --anotador yolo --nome ... --modelo ...`):
+
+| Peso | Cobertos 0,05 / 0,20 | Completas 0,05 / 0,20 | Classe certa 0,05 / 0,20 | Material 0,05 / 0,20 |
+|---|---|---|---|---|
+| `best.pt` (fine-tuning, dez/2025) | 65% / 43% | 19% / 9% | 66% / 87% | 74% / 91% |
+| `yolov8s.pt` (só TACO) | 54% / 44% | 23% / 15% | 81% / 86% | 85% / 88% |
+| `yolov8n.pt` (só TACO) | 62% / 16% | 28% / 1% | 56% / 88% | 56% / 88% |
+| `yolov8m.pt` (só TACO) | 49% / 6% | 9% / 0% | 53% / 83% | 54% / 83% |
+| `150ep_best.pt` (e `97ep`, `50ep`) | 99% / 99% | 97% / 97% | 74% / 74% | 99% / 99% |
+
+- **`taco/yolov8s.pt` é o TACO**, idêntico byte a byte a `legado/yolo_models/taco/yolov8s_100epochs-best.pt`; os READMEs diziam que era o COCO (corrigido).
+- **TACO puro ≈ `best.pt`**: o `s` sem fine-tuning cobre e acerta quase o mesmo que o `best.pt`; o fine-tuning de dezembro não ajudou nestas fotos. `n` e `m` são piores (o `m` confia pouco: quase nada acima de 0,20).
+- **`50ep`, `97ep` e `150ep` memorizaram estas fotos**: 99% dos objetos, 97% das imagens completas, todo objeto não vidro com a classe certa e **todo vidro como `Glass bottle`**, exatamente o rótulo original da equipe (o 74% de classe é só o vidro, que as correções mudaram). Treinaram nestas fotos ou nas mesmas cenas; a validação não serve para medi-los. O `best.pt`, que continuou o `150ep` (com um `./data.yaml` de mesmo nome, segundo o checkpoint), perdeu isso: pelo resultado, o conteúdo desse `data.yaml` era outra base.
+
+**Voto** (`avaliar.py --voto`, DINO em 0,20 e OWLv2 em 0,10):
+
+| Terceiro anotador | Imagens aprovadas (3oo3 estrito) | Caixas com consenso dos três | Certas | Objetos com consenso |
+|---|---|---|---|---|
+| nenhum (par DINO + OWLv2) | 4 (5%) | 223 | 89% | 58% |
+| `best.pt` em 0,05 | 1 (1%) | 109 | 97% | 29% |
+| `best.pt` em 0,20 | 1 (1%) | 94 | 99% | 25% |
+| TACO `s` em 0,05 | 2 (2%) | 107 | 97% | 29% |
+| TACO `s` em 0,20 | 2 (2%) | 94 | 97% | 25% |
+| TACO `n` em 0,05 | 0 | 85 | 98% | 23% |
+| TACO `m` em 0,05 | 0 | 71 | 99% | 19% |
+| `150ep` (memorizou) | 4 (5%) | 176 | 99% | 47% |
+
+- **(b) não resolve**: baixar o limiar do YOLO de 0,20 para 0,05 sobe o consenso por caixa de 25% para 29% dos objetos e não muda a aprovação por imagem (1–2%).
+- **O gargalo é a regra por imagem, não o YOLO**: o par DINO + OWLv2 sozinho aprova 5% das fotos (12% com o DINO em 0,30, com 82% delas corretas). As fotos de validação têm ~4,3 objetos cada; basta um anotador achar uma caixa a mais ou a menos para reprovar (77 das 84 reprovações do par são por quantidade). Nos quadros da esteira, com um ou dois objetos por vez, a aprovação por imagem deve ser bem maior; medir no T4.
+- **Por caixa, o YOLO faz o que se esperava**: o consenso dos três acerta 97–99%, contra 89% do par; os erros que restam são 1–3 caixas (PET como tampa, pote como copo). O custo é a cobertura: só ~29% dos objetos têm consenso.
+- **Escolha do peso do primeiro ciclo**: `best.pt` e TACO `s` empatam; fica o `best.pt` (padrão do anotador). A decisão que importa é a da regra (decisão 18), e o caminho para a cobertura é o (c): o YOLO de cada ciclo, retreinado com a base revisada, é o terceiro anotador do ciclo seguinte (T12).
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.
@@ -411,7 +445,7 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
 | T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); vários prompts por classe, adotados (2026-11-13: classe do DINO 57% → 63%, do OWLv2 76% → 79%, imagens completas 73% → 86% e 85% → 92%); YOLO da equipe como terceiro anotador, medido (2026-11-13: classe 87%, mas cobre só 43% dos objetos); ficam como alternativas a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
-| T3 | [~] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5). A regra tem de tratar a cobertura baixa do YOLO: no 3oo3 estrito, a aprovação fica abaixo de 9–19% (seção 5, YOLO da equipe) | T2 | pytest com caixas sintéticas; tabelas |
+| T3 | [~] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5); `--voto` com o NooN estrito por imagem e o consenso por caixa (2026-11-13). Medido: por imagem, 1–5% de aprovação com qualquer YOLO; por caixa, 97–99% certas em ~29% dos objetos. Falta decidir a regra (decisão 18) | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
 | T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o `imagens.csv`, com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
 | T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores; trava do `imagens.csv` (seção 6) | T1, T3, T5 | pytest do voto com caixas sintéticas |
@@ -420,7 +454,7 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | T9 | [ ] | **Modo de teste**: segmentado e sem classe (padrão no teste, seção 4) e sem pré-anotação | T1, T5 | pytest; teste manual |
 | T10 | [ ] | **`metricas.py`** (RF13): taxa de aprovação e motivos, erro das aprovadas pela auditoria, precisão e recall de cada anotador frente à revisão, tempo por imagem e por objeto, taxa de cada tipo de correção | T1, T6, T8 | pytest com registros sintéticos |
 | T11 | [ ] | **Novas classes pela página** (RF14): acrescenta no fim do `classes.yaml` e regenera o `data.yaml` | T1 | pytest; teste manual |
-| T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07). Treinar também o **RF-DETR** (Nano/Small, Apache 2.0) na mesma base, para comparar com o YOLO: é de conjunto fechado (não serve de anotador), feito para transferir a domínios novos, e evita a AGPL da Ultralytics. XL e 2XL ficam fora (licença PML) | T6, T7 | métricas do treino |
+| T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07). O YOLO retreinado no ciclo n é o terceiro anotador do voto no ciclo n+1 (decisão 17). Treinar também o **RF-DETR** (Nano/Small, Apache 2.0) na mesma base, para comparar com o YOLO: é de conjunto fechado (não serve de anotador), feito para transferir a domínios novos, e evita a AGPL da Ultralytics. XL e 2XL ficam fora (licença PML) | T6, T7 | métricas do treino |
 | T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa: `best.pt`, o YOLO retreinado e o RF-DETR lado a lado, mais a taxa de quadros na máquina da esteira | T9, T12 | métricas por classe e material; FPS |
 | T14 | [ ] | **`pipeline.py` e `anotadores.yaml`** (seção 6): importar, anotar com os N anotadores configurados, votar ou unir conforme o conjunto, com unidade de trabalho (imagem, anotador) retomável | T5, T6 | pytest com anotadores sintéticos |
 
@@ -455,4 +489,5 @@ As decisões que só valem para o framework (ferramenta própria, fonte das clas
 | 15 | ~~A classe abaixo de 0,35 entra no voto?~~ | **Decidido (2026-11-11)**: sim, a `sugerida`; só é escondida do revisor. Candidatas do clique vêm de um anotador só, por enquanto. |
 | 16 | ~~Limiar na gravação ou na leitura?~~ | **Decidido (2026-11-11)**: na leitura. A proposta guarda todas as caixas a partir de 0,05, com a confiança, e cada consumidor (página, voto, `avaliar.py`) aplica o seu. |
 | 8 | ~~Taxonomia do vidro~~ | **Decidido (2026-11-09)**: três classes TACO, `Glass bottle`, `Glass jar` e `Glass cup` (copos, taças e tigelas). `Glass jar` e `Glass cup` entram no fim do `classes.yaml`, para não mudar os ids. |
-| 17 | ~~Quem é o trio do voto?~~ | **Decidido (2026-11-13)**: Grounding DINO, OWLv2 e o YOLO da equipe (`best.pt`). O YOLO é preciso na classe e erra independentemente dos outros dois, mas cobre pouco; a regra do voto (T3) tem de tratar isso (seção 5). |
+| 17 | ~~Quem é o trio do voto?~~ | **Decidido (2026-11-13)**: Grounding DINO, OWLv2 e o YOLO da equipe (`best.pt`). O YOLO é preciso na classe e erra independentemente dos outros dois, mas cobre pouco; a regra do voto (T3) tem de tratar isso (seção 5). A cada ciclo, o YOLO retreinado com a base revisada (T12) passa a ser o terceiro anotador do ciclo seguinte; o `best.pt` (ou o TACO puro, equivalente aqui) é o do primeiro ciclo. |
+| 18 | Voto por imagem ou por caixa? | **Pendente.** O 3oo3 estrito por imagem aprova 1–5% das fotos de validação com qualquer YOLO (o par DINO + OWLv2 sozinho, 5–12%): com ~4 objetos por foto, uma caixa a mais ou a menos reprova. Por caixa, o consenso dos três acerta 97–99% e cobre ~29% dos objetos. Aprovar por caixa poupa trabalho do revisor, mas a imagem ainda vai à revisão pelos objetos sem consenso (seção 5, Voto medido). |
