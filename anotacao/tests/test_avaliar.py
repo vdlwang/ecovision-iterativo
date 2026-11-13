@@ -146,8 +146,9 @@ def test_avaliar_de_ponta_a_ponta_sem_modelo(tmp_path):
         "b.jpg": [(1, 0.12, C)],                    # só uma candidata cobre a Lata
         "c.jpg": []}
     for nome, deteccoes in propostas.items():
-        formato.gravar_proposta(saida, formato.montar_proposta(
-            "falso", "v1", parametros, CLASSES, f"val_{nome}", (100, 100), deteccoes))
+        formato.nova_proposta(saida, "falso", f"val_{nome}",
+                              [(CLASSES[c]["nome"], conf, caixa) for c, conf, caixa in deteccoes],
+                              parametros, versao="v1")
 
     destino = tmp_path / "r.json"
     classes = tmp_path / "classes.yaml"

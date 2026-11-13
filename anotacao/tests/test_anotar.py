@@ -236,38 +236,6 @@ def test_carregar_nomes(tmp_path):
         anotar.carregar_nomes(caminho)
 
 
-def test_preparar_saida_refaz_ou_recusa_outras_classes(tmp_path):
-    anotar.preparar_saida(tmp_path, ["Garrafa", "Tampa", "Lata"])
-    dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
-    assert dados["names"] == {0: "Garrafa", 1: "Tampa", 2: "Lata"}
-    assert dados["train"] == dados["val"] == "revisadas.txt"
-    assert (tmp_path / "imagens.csv").read_text() == "nome,status\n"
-    anotar.preparar_saida(tmp_path, ["Garrafa", "Tampa", "Lata"])  # mesmas classes: ok
-    # Sem rótulos nem revisões, as propostas guardam o nome: o data.yaml é refeito
-    anotar.preparar_saida(tmp_path, ["Lata", "Garrafa"])
-    dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
-    assert dados["names"] == {0: "Lata", 1: "Garrafa"}
-    # Fundo (.txt vazio) e descarte (revisão sem caixas) não guardam ids
-    (tmp_path / "labels" / "a.txt").write_text("")
-    (tmp_path / "revisoes").mkdir()
-    (tmp_path / "revisoes" / "a.json").write_text('{"acao": "descartar", "caixas": []}')
-    anotar.preparar_saida(tmp_path, ["Garrafa", "Lata"])
-    for arquivo, texto in (("labels/a.txt", "1 0.5 0.5 0.1 0.1\n"),
-                           ("revisoes/b.json", '{"caixas": [{"id": 1}]}')):
-        (tmp_path / arquivo).write_text(texto)
-        with pytest.raises(ValueError, match="outras classes"):
-            anotar.preparar_saida(tmp_path, ["Garrafa"])
-        (tmp_path / arquivo).unlink()
-    (tmp_path / "labels" / "a.txt").write_text("")
-
-
-def test_preparar_saida_recusa_formato_antigo(tmp_path):
-    (tmp_path / "labels").mkdir()
-    (tmp_path / "labels" / "foto.txt").write_text("0 0.5 0.5 0.1 0.1\n")
-    with pytest.raises(ValueError, match="formato antigo"):
-        anotar.preparar_saida(tmp_path, ["Garrafa"])
-
-
 # --- anotar.py de ponta a ponta, com um anotador sintético no lugar do modelo ---
 
 # Os ids dos rótulos vêm de 'nomes', não da ordem de 'classes'
@@ -322,7 +290,11 @@ def ambiente(tmp_path, monkeypatch):
 
 
 def proposta_de(saida, nome):
-    return json.loads((saida / "propostas" / "falso" / f"{nome}.json").read_text())
+    return formato.ler_proposta(saida, "falso", nome)
+
+
+def estado_de(saida):
+    return [(n, l["status"], l["lote"], l["conjunto"]) for n, l in formato.ler_estado(saida).items()]
 
 
 def test_main_anota_as_importadas_sem_copiar(ambiente, capsys):
@@ -330,15 +302,15 @@ def test_main_anota_as_importadas_sem_copiar(ambiente, capsys):
     imagens_antes = sorted(p.name for p in (saida / "images").iterdir())
     anotar.main(base + ["--previa"])
 
-    proposta = proposta_de(saida, "l1_a")
-    assert proposta["anotador"] == "falso" and proposta["versao"] == "v1"
+    proposta = proposta_de(saida, "l1_a.jpg")
+    assert proposta["anotador"] == proposta["tipo"] == "falso" and proposta["versao"] == "v1"
     assert proposta["imagem"] == "l1_a.jpg"
-    assert (proposta["largura"], proposta["altura"]) == (200, 100)
-    assert proposta["caixas"][0] == {"classe": "Lata", "confianca": 0.91,
-                                     "caixa": [20.0, 20.0, 80.0, 60.0]}
-    assert proposta_de(saida, "l1_b")["caixas"] == []
-    assert (saida / "imagens.csv").read_text() == (
-        "nome,status,lote,conjunto\nl1_a.jpg,pendente,l1,treino\nl1_b.png,pendente,l1,treino\n")
+    assert proposta["classes"] == formato.hash_classes(CLASSES)
+    assert proposta["caixas"][0] == ("Lata", 0.91, (0.1, 0.2, 0.4, 0.6))
+    assert proposta_de(saida, "l1_b.png")["caixas"] == []
+    assert estado_de(saida) == [("l1_a.jpg", "pendente", "l1", "treino"),
+                                ("l1_b.png", "pendente", "l1", "treino")]
+    assert (saida / "anotacoes.sqlite.bak").exists()
     assert sorted(p.name for p in (saida / "images").iterdir()) == imagens_antes
     assert not list((saida / "labels").iterdir())
     assert (saida / "revisadas.txt").read_text() == ""
@@ -353,23 +325,24 @@ def test_main_anota_as_importadas_sem_copiar(ambiente, capsys):
         anotar.main(["l1_a.jpg"] + base)
     with pytest.raises(SystemExit):  # não importada
         anotar.main(["c.jpg"] + base)
+    primeira = proposta_de(saida, "l1_a.jpg")["id"]
     anotar.main(["l1_a.jpg"] + base + ["--sobrescrever", "--falso-versao", "v2"])
-    assert proposta_de(saida, "l1_a")["versao"] == "v2"
-    assert proposta_de(saida, "l1_b")["versao"] == "v1"
+    assert proposta_de(saida, "l1_a.jpg")["versao"] == "v2"
+    assert proposta_de(saida, "l1_b.png")["versao"] == "v1"
+    # a anterior continua no banco
+    assert formato.ler_proposta(saida, "falso", "l1_a.jpg", primeira)["versao"] == "v1"
 
 
 def test_main_so_anota_pendentes(ambiente, capsys):
     _, saida, base = ambiente
     anotar.main(base)
-    colunas, linhas = formato.ler_estado(saida)
-    linhas["l1_b.png"]["status"] = "descartada"
-    formato.gravar_estado(saida, colunas, linhas)
+    formato.revisar(saida, "l1_b.png", {"acao": "descartar"}, "t")
     anotar.main(base + ["--sobrescrever", "--falso-versao", "v2"])
-    assert proposta_de(saida, "l1_a")["versao"] == "v2"
-    assert proposta_de(saida, "l1_b")["versao"] == "v1"  # descartada: intocada
+    assert proposta_de(saida, "l1_a.jpg")["versao"] == "v2"
+    assert proposta_de(saida, "l1_b.png")["versao"] == "v1"  # descartada: intocada
     anotar.main(["l1_b.png"] + base + ["--sobrescrever", "--falso-versao", "v3"])
     assert "Puladas (já descartada): l1_b.png" in capsys.readouterr().out
-    assert proposta_de(saida, "l1_b")["versao"] == "v1"
+    assert proposta_de(saida, "l1_b.png")["versao"] == "v1"
 
 
 def test_main_regiao_de_interesse_pelo_centro(tmp_path, ambiente):
@@ -379,7 +352,7 @@ def test_main_regiao_de_interesse_pelo_centro(tmp_path, ambiente):
     importar.main([str(fotos / "a.jpg"), "-o", str(saida), "--lote", "l2", "--regiao",
                    "0", "0", "0.3", "1", "--classes", classes])
     anotar.main(["l2_a.jpg"] + base)
-    assert [c["classe"] for c in proposta_de(saida, "l2_a")["caixas"]] == ["Lata"]
+    assert [c[0] for c in proposta_de(saida, "l2_a.jpg")["caixas"]] == ["Lata"]
 
 
 def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
@@ -392,26 +365,29 @@ def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
         esperado = "".join(anotar.linha_yolo(NOMES.index(CLASSES[c]["nome"]), caixa) + "\n"
                            for c, _, caixa in deteccoes)
         assert (saida / "labels" / f"l1_{stem}.txt").read_text() == esperado
-    assert (saida / "imagens.csv").read_text() == (
-        "nome,status,lote,conjunto\nl1_a.jpg,revisada,l1,treino\nl1_b.png,revisada,l1,treino\n")
+    assert estado_de(saida) == [("l1_a.jpg", "revisada", "l1", "treino"),
+                                ("l1_b.png", "revisada", "l1", "treino")]
     assert (saida / "revisadas.txt").read_text() == "./images/l1_a.jpg\n./images/l1_b.png\n"
+    # --exportar refaz os rótulos do banco
+    (saida / "labels" / "l1_a.txt").unlink()
+    anotar.main(base + ["--exportar"])
+    assert (saida / "labels" / "l1_a.txt").exists()
 
 
 def test_main_grava_tudo_e_os_limiares_de_leitura(ambiente):
     _, saida, base = ambiente
     anotar.main(["l1_a.jpg"] + base + ["--confianca", "0.5", "--confianca-classe", "0.95",
                                        "--previa"])
-    proposta = proposta_de(saida, "l1_a")
+    proposta = proposta_de(saida, "l1_a.jpg")
     # A proposta guarda todas as caixas, com a classe; os limiares vão em parametros
-    assert [(c["classe"], c["confianca"]) for c in proposta["caixas"]] == [
+    assert [(c[0], c[1]) for c in proposta["caixas"]] == [
         ("Lata", 0.91), ("Garrafa", 0.42)]
     assert proposta["parametros"] == {"confianca": 0.5, "confianca_classe": 0.95}
     visiveis, candidatas = formato.separar(proposta)
     assert list(visiveis) == [0] and visiveis[0][3] is False  # 0,91 < 0,95: sem classe
     assert [k for k, _, _ in candidatas] == [1]
     anotar.main(base + ["--aceitar"])  # l1_a tem caixa de classe escondida: continua pendente
-    _, linhas = formato.ler_estado(saida)
-    assert linhas["l1_a.jpg"]["status"] == "pendente"
+    assert formato.ler_estado(saida)["l1_a.jpg"]["status"] == "pendente"
 
 
 def test_main_recusa_limiares_invertidos(ambiente):
@@ -426,3 +402,13 @@ def test_main_recusa_saida_sem_importacao(tmp_path, ambiente):
     base[base.index("-o") + 1] = str(tmp_path / "vazia")
     with pytest.raises(SystemExit):
         anotar.main(base)
+
+
+def test_main_nome_separa_o_anotador_do_tipo(ambiente):
+    _, saida, base = ambiente
+    anotar.main(base + ["--nome", "falso-b"])
+    proposta = formato.ler_proposta(saida, "falso-b", "l1_a.jpg")
+    assert (proposta["anotador"], proposta["tipo"]) == ("falso-b", "falso")
+    assert formato.anotadores(saida) == ["falso-b"]
+    with pytest.raises(SystemExit):
+        anotar.main(base + ["--nome", "Maiúsculo"])

@@ -42,17 +42,18 @@ def test_coletar_formato_yolo_sem_propostas(saida):
     assert por_nome["sem.jpg"]["final"] is None
 
 
-def test_coletar_propostas_e_status(saida):
-    formato.gravar_estado(saida, ["nome", "status"], {
-        "a.jpg": {"nome": "a.jpg", "status": "revisada"},
-        "sem.jpg": {"nome": "sem.jpg", "status": "pendente"}})
-    formato.gravar_proposta(saida, {
-        "formato": 2, "anotador": "falso", "imagem": "sem.jpg", "largura": 8, "altura": 4,
-        "parametros": {"confianca": 0.2, "confianca_classe": 0.5},
-        "caixas": [{"classe": "Lata", "confianca": 0.7, "caixa": [2, 1, 6, 3]},
-                   {"classe": "Pneu", "confianca": 0.6, "caixa": [0, 0, 8, 4]},
-                   {"classe": "Lata", "confianca": 0.3, "caixa": [0, 0, 4, 4]},
-                   {"classe": "Lata", "confianca": 0.1, "caixa": [4, 0, 8, 4]}]})
+def test_coletar_propostas_e_status(tmp_path):
+    saida = tmp_path / "saida"
+    (saida / "images").mkdir(parents=True)
+    for nome in ("a.jpg", "b c.png", "sem.jpg"):
+        Image.new("RGB", (8, 4)).save(saida / "images" / nome)
+    formato.preparar(saida, ["Garrafa", "Lata"])
+    formato.registrar(saida, [("a.jpg", 8, 4), ("sem.jpg", 8, 4)])
+    formato.revisar(saida, "a.jpg", {"acao": "salvar", "caixas": []}, "t")
+    formato.nova_proposta(saida, "falso", "sem.jpg", [
+        ("Lata", 0.7, (0.25, 0.25, 0.75, 0.75)), ("Pneu", 0.6, (0, 0, 1, 1)),
+        ("Lata", 0.3, (0, 0, 0.5, 1)), ("Lata", 0.1, (0.5, 0, 1, 1))],
+        {"confianca": 0.2, "confianca_classe": 0.5})
     _, anotadores, imagens = visualizar.coletar(saida)
     por_nome = {im["nome"]: im for im in imagens}
     assert anotadores == ["falso"]

@@ -203,11 +203,11 @@ def carregar_pares(saida, anotador, indice_verdade, nomes, correcoes):
     confianca, caixa)], da mais confiante para a menos. Devolve também os nomes
     sem rótulo e o Counter das classes da equipe fora de nomes.
     """
-    _, linhas = formato.ler_estado(saida)
+    linhas = formato.ler_estado(saida)
+    propostas = formato.propostas_atuais(saida, anotador)
     pares, sem_rotulo, fora = [], [], Counter()
     for nome, linha in linhas.items():
-        caminho = formato.caminho_proposta(saida, anotador, nome)
-        if not caminho.exists():
+        if nome not in propostas:
             continue
         original = nome_original(nome, linha.get("lote"))
         if original not in indice_verdade:
@@ -217,7 +217,7 @@ def carregar_pares(saida, anotador, indice_verdade, nomes, correcoes):
         verdade, fora_imagem = ler_verdade(rotulo, nomes_dataset, nomes,
                                            correcoes.get(rotulo.resolve()))
         fora += fora_imagem
-        proposta = formato.ler_proposta(caminho)
+        proposta = propostas[nome]
         deteccoes = sorted(((nomes.index(c) if c in nomes else None, conf, caixa)
                             for c, conf, caixa in formato.caixas_normalizadas(proposta)),
                            key=lambda d: d[1], reverse=True)

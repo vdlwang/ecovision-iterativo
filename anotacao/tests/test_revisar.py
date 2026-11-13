@@ -21,34 +21,35 @@ CLASSES = [
 ]
 
 
-def proposta(nome, caixas, parametros=None):
-    """caixas: [(classe, confianca)] ou [(classe, confianca, caixa em pixels)]."""
-    return {"formato": 2, "anotador": "falso", "versao": "v1", "imagem": nome,
-            "largura": 40, "altura": 20, "parametros": parametros or {},
-            "caixas": [{"classe": c[0], "confianca": c[1],
-                        "caixa": list(c[2]) if len(c) > 2 else [4, 2, 20, 10]}
-                       for c in caixas]}
+def gravar_proposta(saida, nome, caixas, parametros=None):
+    """caixas: [(classe, confianca)] ou [(classe, confianca, caixa em pixels de 40x20)]."""
+    return formato.nova_proposta(saida, "falso", nome, [
+        (c[0], c[1], tuple(v / d for v, d in zip(c[2] if len(c) > 2 else (4, 2, 20, 10),
+                                                (40, 20, 40, 20))))
+        for c in caixas], parametros or {}, versao="v1")
+
+
+def montar(pasta, nomes_classes=("Garrafa", "Lata")):
+    for nome in ("a.jpg", "b c.png", "d.jpg", "e.jpg", "f.jpg"):
+        (pasta / "images").mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (40, 20)).save(pasta / "images" / nome)
+    (pasta / "images" / "fora.jpg").write_bytes(b"")   # não registrada
+    (pasta / "segredo.txt").write_text("não deve sair")
+    formato.preparar(pasta, nomes_classes)
+    formato.registrar(pasta, [(n, 40, 20) for n in ("a.jpg", "b c.png", "d.jpg", "e.jpg",
+                                                    "f.jpg")])
+    gravar_proposta(pasta, "a.jpg", [("Lata", 0.9), ("Garrafa", 0.6)])
+    gravar_proposta(pasta, "b c.png", [("Lata", 0.3)])
+    gravar_proposta(pasta, "d.jpg", [])
+    formato.revisar(pasta, "e.jpg", {"acao": "salvar", "caixas": [
+        {"id": 1, "caixa": [0.4, 0.3, 0.6, 0.7]}]}, "t")
+    formato.revisar(pasta, "f.jpg", {"acao": "descartar"}, "t")
+    return pasta
 
 
 @pytest.fixture
 def saida(tmp_path):
-    for pasta in ("images", "labels"):
-        (tmp_path / pasta).mkdir()
-    (tmp_path / "data.yaml").write_text(
-        yaml.safe_dump({"names": {0: "Garrafa", 1: "Lata"}}), encoding="utf-8")
-    for nome in ("a.jpg", "b c.png", "d.jpg", "e.jpg", "f.jpg"):
-        Image.new("RGB", (40, 20)).save(tmp_path / "images" / nome)
-    (tmp_path / "images" / "fora.jpg").write_bytes(b"")   # fora do imagens.csv
-    (tmp_path / "segredo.txt").write_text("não deve sair")
-    formato.gravar_estado(tmp_path, ["nome", "status"], {
-        n: {"nome": n, "status": s} for n, s in [
-            ("a.jpg", "pendente"), ("b c.png", "pendente"), ("d.jpg", "pendente"),
-            ("e.jpg", "revisada"), ("f.jpg", "descartada")]})
-    formato.gravar_proposta(tmp_path, proposta("a.jpg", [("Lata", 0.9), ("Garrafa", 0.6)]))
-    formato.gravar_proposta(tmp_path, proposta("b c.png", [("Lata", 0.3)]))
-    formato.gravar_proposta(tmp_path, proposta("d.jpg", []))
-    (tmp_path / "labels" / "e.txt").write_text("1 0.5 0.5 0.2 0.4\n")
-    return tmp_path
+    return montar(tmp_path)
 
 
 @pytest.fixture
@@ -82,12 +83,16 @@ def test_pagina(servidor):
     assert b"/api/imagens" in corpo
 
 
-def test_classes_com_material_e_atalho(servidor, saida):
-    # Fundo está no data.yaml mas não no classes.yaml; o atalho segue a ordem
-    # do classes.yaml, não o id
-    (saida / "data.yaml").write_text(
-        yaml.safe_dump({"names": {0: "Fundo", 1: "Lata", 2: "Garrafa"}}), encoding="utf-8")
-    assert pedir_json(servidor + "/api/classes") == (200, [
+def test_classes_com_material_e_atalho(tmp_path):
+    # Fundo está no banco mas não no classes.yaml; o atalho segue a ordem do
+    # classes.yaml, não o id
+    srv = revisar.criar_servidor(montar(tmp_path, ("Fundo", "Lata", "Garrafa")), CLASSES, porta=0)
+    threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    resposta = pedir_json(url + "/api/classes")
+    srv.shutdown()
+    srv.server_close()
+    assert resposta == (200, [
         {"id": 0, "nome": "Fundo", "material": None, "atalho": None},
         {"id": 1, "nome": "Lata", "material": "metal", "atalho": 2},
         {"id": 2, "nome": "Garrafa", "material": "plastic", "atalho": 1}])
@@ -115,7 +120,7 @@ def test_fila_filtro_e_ordem(servidor):
     assert pedir_json(servidor + "/api/imagens?ordem=data")[0] == 400
 
 
-def test_detalhe_da_imagem(servidor):
+def test_detalhe_da_imagem(servidor, saida):
     status, dados = pedir_json(servidor + "/api/imagens/b%20c.png")
     assert status == 200
     assert dados == {
@@ -123,6 +128,7 @@ def test_detalhe_da_imagem(servidor):
         "propostas": {"falso": [{"id": 1, "nome": "Lata", "conf": 0.3,
                                  "caixa": [0.1, 0.1, 0.5, 0.5], "indice": 0}]},
         "candidatas": {"falso": []},
+        "propostas_ids": {"falso": formato.ler_proposta(saida, "falso", "b c.png")["id"]},
         "largura": 40, "altura": 20, "revisao": None}
     _, dados = pedir_json(servidor + "/api/imagens/e.jpg")
     assert dados["final"] == [{"id": 1, "nome": "Lata", "conf": None,
@@ -143,9 +149,9 @@ def test_404_fora_do_csv_e_fora_da_saida(servidor, rota):
     assert b"n\xc3\xa3o deve sair" not in corpo
 
 
-def test_main_recusa_saida_sem_imagens_csv(tmp_path):
+def test_main_recusa_saida_sem_banco(tmp_path):
     (tmp_path / "data.yaml").write_text("names: {0: a}\n")
-    with pytest.raises(ValueError, match="imagens.csv"):
+    with pytest.raises(ValueError, match="anotacoes.sqlite"):
         revisar.main([str(tmp_path)])
 
 
@@ -185,6 +191,7 @@ def test_salvar_grava_rotulo_registro_e_status(servidor, saida):
     revisao = dados["revisao"]
     assert revisao["acao"] == "salvar" and revisao["tempo_ativo_s"] == 7
     assert revisao["base"] == {"anotador": "falso", "versao": "v1", "classes": None,
+                               "proposta_id": formato.ler_proposta(saida, "falso", "a.jpg")["id"],
                                "limiares": {"confianca": 0.0, "confianca_classe": 0.0}}
     assert revisao["caixas"] == [{"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "proposta": 1,
                                   "desfecho": "classe_corrigida"}]
@@ -204,7 +211,7 @@ def test_aceitar_como_esta_e_fundo(servidor, saida):
     assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["aceita"]
     # Os mesmos .txt do --aceitar
     esperado = "".join(formato.linha_yolo(1, c) + "\n" for _, _, c in formato.caixas_normalizadas(
-        formato.ler_proposta(saida / "propostas" / "falso" / "b c.json")))
+        formato.ler_proposta(saida, "falso", "b c.png")))
     assert (saida / "labels" / "b c.txt").read_text() == esperado
     # imagem sem caixas: salva como fundo, .txt vazio
     status, dados = enviar(servidor + "/api/imagens/d.jpg",
@@ -213,8 +220,8 @@ def test_aceitar_como_esta_e_fundo(servidor, saida):
 
 
 def test_classe_escondida_abaixo_de_confianca_classe(servidor, saida):
-    formato.gravar_proposta(saida, proposta("a.jpg", [("Lata", 0.9), ("Garrafa", 0.25)],
-                                            {"confianca": 0.2, "confianca_classe": 0.5}))
+    gravar_proposta(saida, "a.jpg", [("Lata", 0.9), ("Garrafa", 0.25)],
+                    {"confianca": 0.2, "confianca_classe": 0.5})
     # A página recebe a caixa sem a classe do anotador, nem pelo nome
     status, tipo, corpo = pedir(servidor + "/api/imagens/a.jpg")
     dados = json.loads(corpo)
@@ -234,9 +241,9 @@ def test_classe_escondida_abaixo_de_confianca_classe(servidor, saida):
 
 
 def test_caixa_de_candidata(servidor, saida):
-    formato.gravar_proposta(saida, proposta(
-        "a.jpg", [("Lata", 0.9), ("Garrafa", 0.12, [20, 10, 36, 18]), ("Lata", 0.08, [0, 0, 8, 8])],
-        {"confianca": 0.2}))
+    gravar_proposta(saida, "a.jpg",
+                    [("Lata", 0.9), ("Garrafa", 0.12, [20, 10, 36, 18]), ("Lata", 0.08, [0, 0, 8, 8])],
+                    {"confianca": 0.2})
     _, detalhe = pedir_json(servidor + "/api/imagens/a.jpg")
     assert [c["indice"] for c in detalhe["propostas"]["falso"]] == [0]
     assert detalhe["candidatas"]["falso"] == [
@@ -268,9 +275,7 @@ def test_descartar_apaga_o_rotulo(saida):
     registro = formato.revisar(saida, "a.jpg", {"acao": "descartar", "base": "falso"}, "agora")
     assert not (saida / "labels" / "a.txt").exists()
     assert registro["removidas"] == [0, 1] and registro["caixas"] == []
-    _, estado = formato.ler_estado(saida)
-    assert estado["a.jpg"]["status"] == "descartada"
-    # Guarda só a última revisão
+    assert formato.ler_estado(saida)["a.jpg"]["status"] == "descartada"
     assert formato.ler_revisao(saida, "a.jpg")["acao"] == "descartar"
 
 
@@ -294,8 +299,8 @@ def test_salvar_recusa_pedido_invalido_sem_gravar(servidor, saida, corpo, trecho
     status, dados = enviar(servidor + "/api/imagens/a.jpg", corpo)
     assert status == 400 and trecho in dados["erro"], dados
     assert not (saida / "labels" / "a.txt").exists()
-    assert not (saida / "revisoes").exists()
-    assert formato.ler_estado(saida)[1]["a.jpg"]["status"] == "pendente"
+    assert formato.ler_revisao(saida, "a.jpg") is None
+    assert formato.ler_estado(saida)["a.jpg"]["status"] == "pendente"
 
 
 def test_put_protecoes(servidor):
@@ -305,3 +310,17 @@ def test_put_protecoes(servidor):
     assert enviar(url, {"acao": "descartar"}, host="exemplo.com")[0] == 403
     assert enviar(servidor + "/api/imagens/fora.jpg", {"acao": "descartar"})[0] == 404
     assert enviar(servidor + "/api/classes", {"acao": "descartar"})[0] == 404
+
+
+def test_put_com_proposta_vigente_e_com_proposta_antiga(servidor, saida):
+    url = servidor + "/api/imagens/a.jpg"
+    _, detalhe = pedir_json(url)
+    vista = detalhe["propostas_ids"]["falso"]
+    gravar_proposta(saida, "a.jpg", [("Garrafa", 0.9)])   # o anotador grava outra versão
+    status, erro = enviar(url, {"acao": "salvar", "base": "falso", "proposta_id": vista,
+                                "caixas": []})
+    assert status == 409 and "recarregue" in erro["erro"]
+    _, detalhe = pedir_json(url)
+    status, dados = enviar(url, {"acao": "salvar", "base": "falso", "caixas": [],
+                                 "proposta_id": detalhe["propostas_ids"]["falso"]})
+    assert status == 200 and dados["revisao"]["base"]["proposta_id"] != vista

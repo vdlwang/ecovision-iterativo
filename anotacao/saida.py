@@ -1,24 +1,30 @@
 """
-Formato do diretório de saída da anotação (PLANO-REVISAO.md, seção 1).
+Estado da anotação (PLANO-REVISAO.md, seções 1 e 6).
 
-    <saida>/images/<nome>.jpg                  gravada pelo importar.py
-    <saida>/lotes.yaml                         por lote: conjunto, região de interesse
-    <saida>/propostas/<anotador>/<nome>.json   saída de cada anotador
-    <saida>/labels/<nome>.txt                  caixas finais (YOLO), só após a revisão
-    <saida>/imagens.csv                        nome, status, lote, conjunto de cada imagem
-    <saida>/revisadas.txt                      gerado de imagens.csv; o data.yaml aponta para ele
-    <saida>/data.yaml
+    <saida>/anotacoes.sqlite        fonte do estado: classes, lotes, imagens,
+                                    execuções dos anotadores, propostas e revisões
+    <saida>/images/<nome>.jpg       gravada pelo importar.py
+    <saida>/labels/<stem>.txt       gerado do banco: caixas finais (YOLO) das revisadas
+    <saida>/revisadas.txt           gerado do banco; o data.yaml aponta para ele
+    <saida>/data.yaml               gerado do banco (tabela classes)
 
 O que o anotador propõe fica separado do que o revisor aprova: uma imagem sem
-.txt em labels/ não entra no treino, em vez de entrar como fundo.
+.txt em labels/ não entra no treino, em vez de entrar como fundo. Cada operação
+grava primeiro no banco, numa transação, e depois os arquivos daquela imagem;
+interrompida entre os dois, o banco vale, e exportar() refaz os arquivos.
+
+Propostas e revisões nunca são apagadas nem alteradas: anotar de novo cria uma
+proposta nova (a vigente de um anotador numa imagem é a de maior id), e cada
+revisão é uma linha nova (a vigente é a de maior id).
 """
 
-import csv
 import hashlib
-import io
 import json
 import os
+import sqlite3
 import tempfile
+from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -26,13 +32,101 @@ from PIL import Image
 
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 STATUS = ("pendente", "revisada", "descartada")
+CONJUNTOS = ("treino", "teste")
+VOTOS = ("aprovada", "falhou")
+BANCO = "anotacoes.sqlite"
+VERSAO_ESQUEMA = 1
+ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
+LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
 # mkstemp cria o arquivo só para o dono (0600); os gravados aqui recebem o modo
 # de um open() comum. A umask é lida uma vez, na importação, porque lê-la exige
 # trocá-la, o que não é seguro com o servidor em várias threads.
 _UMASK = os.umask(0)
 os.umask(_UMASK)
-COLUNAS = ["nome", "status"]
+
+ESQUEMA = f"""
+CREATE TABLE classes (
+    id INTEGER PRIMARY KEY CHECK (id >= 0),
+    nome TEXT NOT NULL UNIQUE
+);
+CREATE TABLE lotes (
+    nome TEXT PRIMARY KEY,
+    conjunto TEXT NOT NULL CHECK (conjunto IN {CONJUNTOS}),
+    regiao TEXT,
+    importado_em TEXT NOT NULL
+);
+CREATE TABLE imagens (
+    id INTEGER PRIMARY KEY,
+    nome TEXT NOT NULL UNIQUE,
+    stem TEXT NOT NULL UNIQUE,
+    largura INTEGER NOT NULL CHECK (largura > 0),
+    altura INTEGER NOT NULL CHECK (altura > 0),
+    lote TEXT REFERENCES lotes (nome),
+    status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN {STATUS}),
+    voto TEXT CHECK (voto IN {VOTOS}),
+    motivo TEXT,
+    criada_em TEXT NOT NULL
+);
+CREATE TABLE execucoes (
+    id INTEGER PRIMARY KEY,
+    anotador TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    versao TEXT,
+    parametros TEXT NOT NULL,
+    classes_hash TEXT,
+    data TEXT NOT NULL
+);
+CREATE INDEX execucoes_anotador ON execucoes (anotador);
+CREATE TABLE propostas (
+    id INTEGER PRIMARY KEY,
+    imagem_id INTEGER NOT NULL REFERENCES imagens (id),
+    execucao_id INTEGER NOT NULL REFERENCES execucoes (id),
+    data TEXT NOT NULL
+);
+CREATE INDEX propostas_imagem ON propostas (imagem_id);
+CREATE TABLE caixas_propostas (
+    proposta_id INTEGER NOT NULL REFERENCES propostas (id),
+    indice INTEGER NOT NULL CHECK (indice >= 0),
+    classe TEXT NOT NULL,
+    confianca REAL NOT NULL CHECK (confianca BETWEEN 0 AND 1),
+    x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL,
+    CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
+    PRIMARY KEY (proposta_id, indice)
+);
+CREATE TABLE revisoes (
+    id INTEGER PRIMARY KEY,
+    imagem_id INTEGER NOT NULL REFERENCES imagens (id),
+    proposta_id INTEGER REFERENCES propostas (id),
+    acao TEXT NOT NULL CHECK (acao IN ('salvar', 'descartar')),
+    data TEXT NOT NULL,
+    tempo_ativo_s REAL NOT NULL CHECK (tempo_ativo_s >= 0),
+    revisor TEXT
+);
+CREATE INDEX revisoes_imagem ON revisoes (imagem_id);
+CREATE TABLE caixas_revisao (
+    revisao_id INTEGER NOT NULL REFERENCES revisoes (id),
+    indice INTEGER NOT NULL CHECK (indice >= 0),
+    classe_id INTEGER NOT NULL REFERENCES classes (id),
+    x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL,
+    proposta_indice INTEGER,
+    desfecho TEXT NOT NULL CHECK (desfecho IN
+        ('aceita', 'classe_corrigida', 'classe_atribuida', 'adicionada')),
+    origem TEXT CHECK (origem IN ('candidata')),
+    CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
+    CHECK ((desfecho = 'adicionada') = (proposta_indice IS NULL)),
+    PRIMARY KEY (revisao_id, indice)
+);
+-- A proposta vigente de cada anotador em cada imagem
+CREATE VIEW propostas_vigentes AS
+SELECT p.id, p.imagem_id, e.anotador FROM propostas p JOIN execucoes e ON e.id = p.execucao_id
+WHERE p.id = (SELECT MAX(p2.id) FROM propostas p2 JOIN execucoes e2 ON e2.id = p2.execucao_id
+              WHERE p2.imagem_id = p.imagem_id AND e2.anotador = e.anotador);
+"""
+
+
+def agora_iso():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def gravar_atomico(caminho, texto):
@@ -63,74 +157,219 @@ def linha_yolo(classe, caixa):
             f"{x2 - x1:.6f} {y2 - y1:.6f}")
 
 
-# --- imagens.csv ----------------------------------------------------------
+# --- banco ------------------------------------------------------------------
+
+def caminho_banco(saida):
+    return Path(saida) / BANCO
+
+
+def existe(saida):
+    return caminho_banco(saida).is_file()
+
+
+def conectar(saida):
+    """
+    Conexão com as chaves estrangeiras ligadas e a espera por outra que grava.
+    Em modo de autocommit: escrever exige transacao(). Recusa banco de outra
+    versão do esquema.
+    """
+    caminho = caminho_banco(saida)
+    if not caminho.is_file():
+        raise ValueError(f"{caminho} não existe: importe imagens antes (importar.py)")
+    con = sqlite3.connect(caminho, timeout=ESPERA_S, isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    versao = con.execute("PRAGMA user_version").fetchone()[0]
+    if versao != VERSAO_ESQUEMA:
+        con.close()
+        raise ValueError(f"{caminho}: esquema na versão {versao}, este código usa a "
+                         f"{VERSAO_ESQUEMA}")
+    return con
+
+
+@contextmanager
+def abrir(saida):
+    con = conectar(saida)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+@contextmanager
+def transacao(con):
+    """
+    BEGIN IMMEDIATE: a trava de escrita vem no início, então conferir e gravar
+    são uma operação só, mesmo com o revisar.py e o anotar.py ao mesmo tempo.
+    """
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        yield con
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+
+
+def criar_banco(saida):
+    caminho = caminho_banco(saida)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(caminho, isolation_level=None)
+    try:
+        # WAL: o servidor lê enquanto o anotar.py grava
+        con.execute("PRAGMA journal_mode = WAL")
+        con.executescript(f"BEGIN; {ESQUEMA} PRAGMA user_version = {VERSAO_ESQUEMA}; COMMIT;")
+    finally:
+        con.close()
+
+
+def copia_seguranca(saida):
+    """Copia o banco para anotacoes.sqlite.bak (API backup: consistente mesmo em uso)."""
+    destino = sqlite3.connect(caminho_banco(saida).with_name(BANCO + ".bak"))
+    try:
+        with abrir(saida) as con:
+            con.backup(destino)
+    finally:
+        destino.close()
+
+
+def em_lotes(valores, tamanho=LOTE_SQL):
+    valores = list(valores)
+    for i in range(0, len(valores), tamanho):
+        yield valores[i:i + tamanho]
+
+
+# --- classes ----------------------------------------------------------------
+
+def _nomes(con):
+    return {r["id"]: r["nome"] for r in con.execute("SELECT id, nome FROM classes ORDER BY id")}
+
+
+def preparar(saida, nomes):
+    """
+    Cria as pastas e o banco, se preciso, e grava as classes (nomes, na ordem
+    dos ids) e o data.yaml. Classes novas no fim são acrescentadas; outra
+    ordem ou classes removidas só se nenhuma revisão guarda caixas (as
+    propostas guardam a classe pelo nome; fundo e descarte não têm caixas),
+    senão os ids não bateriam. Recusa as saídas de formatos anteriores.
+    """
+    saida = Path(saida)
+    if not existe(saida):
+        if (saida / "imagens.csv").exists():
+            raise ValueError(f"{saida} é do formato anterior ao SQLite (imagens.csv); "
+                             "use outro diretório e importe de novo")
+        rotulos = saida / "labels"
+        if rotulos.is_dir() and any(t.read_text(encoding="utf-8").strip()
+                                    for t in rotulos.glob("*.txt")):
+            raise ValueError(f"{saida} é do formato antigo (labels/ sem banco), em que as "
+                             "propostas eram gravadas como rótulos. Use outro diretório.")
+    for pasta in ("images", "labels"):
+        (saida / pasta).mkdir(parents=True, exist_ok=True)
+    if not existe(saida):
+        criar_banco(saida)
+    nomes = list(nomes)
+    with abrir(saida) as con:
+        with transacao(con):
+            atuais = list(_nomes(con).values())
+            if atuais != nomes:
+                if atuais == nomes[:len(atuais)]:
+                    novas = list(enumerate(nomes))[len(atuais):]
+                elif con.execute("SELECT 1 FROM caixas_revisao LIMIT 1").fetchone():
+                    raise ValueError(f"{saida} tem outras classes ({', '.join(atuais)}) e já há "
+                                     "revisões com caixas; os ids não bateriam. Só é possível "
+                                     "acrescentar classes no fim. Use outro diretório de saída.")
+                else:
+                    con.execute("DELETE FROM classes")
+                    novas = list(enumerate(nomes))
+                con.executemany("INSERT INTO classes (id, nome) VALUES (?, ?)", novas)
+        exportar_data_yaml(con, saida)
+        exportar_revisadas(con, saida)
+
+
+def nomes_classes(saida):
+    """
+    {id: nome} das classes: do banco ou, numa pasta YOLO sem banco (gerada
+    por outra ferramenta, para o visualizar.py), do data.yaml.
+    """
+    if existe(saida):
+        with abrir(saida) as con:
+            return _nomes(con)
+    data_yaml = Path(saida) / "data.yaml"
+    if not data_yaml.exists():
+        raise ValueError(f"{data_yaml} não existe; é a saída do anotar.py?")
+    with open(data_yaml, encoding="utf-8") as f:
+        nomes = (yaml.safe_load(f) or {}).get("names") or {}
+    if isinstance(nomes, list):
+        nomes = dict(enumerate(nomes))
+    return {int(i): n for i, n in nomes.items()}
+
+
+# --- lotes e imagens --------------------------------------------------------
+
+def ler_lotes(saida):
+    """{lote: {conjunto, regiao, importado_em}}; {} sem banco."""
+    if not existe(saida):
+        return {}
+    with abrir(saida) as con:
+        return {r["nome"]: {"conjunto": r["conjunto"],
+                            "regiao": None if r["regiao"] is None else json.loads(r["regiao"]),
+                            "importado_em": r["importado_em"]}
+                for r in con.execute("SELECT * FROM lotes ORDER BY nome")}
+
 
 def ler_estado(saida):
     """
-    imagens.csv -> (colunas, {nome: linha}), na ordem do arquivo. Colunas além
-    de nome e status (do sistema completo) são preservadas. Sem o arquivo,
-    devolve o estado vazio.
+    {nome: {nome, status, lote, conjunto, voto, motivo, largura, altura}}, na
+    ordem de registro; {} sem banco.
     """
-    caminho = Path(saida) / "imagens.csv"
-    if not caminho.exists():
-        return list(COLUNAS), {}
-    with open(caminho, encoding="utf-8", newline="") as f:
-        leitor = csv.DictReader(f)
-        colunas = list(leitor.fieldnames or [])
-        faltando = [c for c in COLUNAS if c not in colunas]
-        if faltando:
-            raise ValueError(f"{caminho}: faltam as colunas {', '.join(faltando)}")
-        linhas = {}
-        for linha in leitor:
-            if linha["nome"] in linhas:
-                raise ValueError(f"{caminho}: imagem '{linha['nome']}' repetida")
-            linhas[linha["nome"]] = linha
-    return colunas, linhas
-
-
-def gravar_estado(saida, colunas, linhas):
-    """Grava imagens.csv e regenera revisadas.txt a partir dele."""
-    saida = Path(saida)
-    buffer = io.StringIO()
-    escritor = csv.DictWriter(buffer, fieldnames=colunas, lineterminator="\n")
-    escritor.writeheader()
-    for linha in linhas.values():
-        escritor.writerow({c: linha.get(c, "") for c in colunas})
-    gravar_atomico(saida / "imagens.csv", buffer.getvalue())
-
-    # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
-    revisadas = [f"./images/{nome}" for nome, linha in linhas.items()
-                 if linha["status"] == "revisada"
-                 and (saida / "labels" / f"{Path(nome).stem}.txt").exists()]
-    gravar_atomico(saida / "revisadas.txt", "".join(r + "\n" for r in revisadas))
-
-
-def registrar_imagem(linhas, nome):
-    """
-    Acrescenta a imagem como pendente; mantém o status de uma já registrada.
-    Recusa outro arquivo com o mesmo nome sem extensão (o .json e o .txt colidiriam).
-    """
-    if nome in linhas:
-        return
-    for existente in linhas:
-        if Path(existente).stem == Path(nome).stem:
-            raise ValueError(f"'{nome}' colide com '{existente}', já registrada "
-                             "(mesmo nome sem extensão)")
-    linhas[nome] = {"nome": nome, "status": "pendente"}
-
-
-def ler_lotes(saida):
-    """lotes.yaml (do importar.py) -> {lote: {conjunto, regiao, importado_em}}; {} se não existe."""
-    caminho = Path(saida) / "lotes.yaml"
-    if not caminho.exists():
+    if not existe(saida):
         return {}
-    with open(caminho, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    with abrir(saida) as con:
+        return {r["nome"]: dict(r) for r in con.execute(
+            "SELECT i.nome, i.status, i.lote, l.conjunto, i.voto, i.motivo, i.largura, i.altura "
+            "FROM imagens i LEFT JOIN lotes l ON l.nome = i.lote ORDER BY i.id")}
 
 
-def gravar_lotes(saida, lotes):
-    gravar_atomico(Path(saida) / "lotes.yaml",
-                   yaml.safe_dump(lotes, allow_unicode=True, sort_keys=True))
+def conferir_colisoes(existentes, novos):
+    """
+    Recusa nome novo com o mesmo nome sem extensão de outro (já registrado ou
+    da mesma leva): o .txt de labels/ colidiria. Nomes já registrados passam.
+    """
+    stems = {Path(n).stem: n for n in existentes}
+    for nome in novos:
+        if nome in existentes:
+            continue
+        stem = Path(nome).stem
+        if stem in stems and stems[stem] != nome:
+            raise ValueError(f"'{nome}' colide com '{stems[stem]}', já registrada "
+                             "(mesmo nome sem extensão)")
+        stems[stem] = nome
+
+
+def registrar(saida, imagens, lote=None, dados_lote=None, agora=None):
+    """
+    Registra as imagens [(nome, largura, altura)] como pendentes, no lote dado,
+    numa transação; as já registradas são puladas. dados_lote {conjunto,
+    regiao, importado_em} cria o lote se ele não existe. Devolve os nomes
+    registrados.
+    """
+    agora = agora or agora_iso()
+    with abrir(saida) as con:
+        with transacao(con):
+            if lote is not None and dados_lote is not None:
+                con.execute("INSERT OR IGNORE INTO lotes (nome, conjunto, regiao, importado_em) "
+                            "VALUES (?, ?, ?, ?)",
+                            (lote, dados_lote["conjunto"],
+                             None if dados_lote.get("regiao") is None
+                             else json.dumps(dados_lote["regiao"]),
+                             dados_lote.get("importado_em") or agora))
+            existentes = {r[0] for r in con.execute("SELECT nome FROM imagens")}
+            conferir_colisoes(existentes, [n for n, _, _ in imagens])
+            novas = [(n, Path(n).stem, int(w), int(h), lote, agora)
+                     for n, w, h in imagens if n not in existentes]
+            con.executemany("INSERT INTO imagens (nome, stem, largura, altura, lote, criada_em) "
+                            "VALUES (?, ?, ?, ?, ?, ?)", novas)
+    return [n for n, *_ in novas]
 
 
 def dentro_da_regiao(caixa, regiao):
@@ -141,59 +380,131 @@ def dentro_da_regiao(caixa, regiao):
     return regiao[0] <= cx <= regiao[2] and regiao[1] <= cy <= regiao[3]
 
 
-# --- propostas ------------------------------------------------------------
-
-def caminho_proposta(saida, anotador, nome):
-    return Path(saida) / "propostas" / anotador / f"{Path(nome).stem}.json"
+def _imagem(con, nome):
+    return con.execute("SELECT id, nome, status FROM imagens WHERE nome = ?", (nome,)).fetchone()
 
 
-FORMATO_PROPOSTA = 2  # 2: lista única de caixas, limiares aplicados na leitura (decisão 16)
+# --- propostas ----------------------------------------------------------------
+
+def nova_execucao(saida, anotador, tipo, versao, parametros, classes_hash=None, agora=None):
+    """Uma rodada de um anotador (o anotar.py cria uma por chamada); devolve o id."""
+    with abrir(saida) as con:
+        with transacao(con):
+            return con.execute(
+                "INSERT INTO execucoes (anotador, tipo, versao, parametros, classes_hash, data) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (anotador, tipo, None if versao is None else str(versao),
+                 json.dumps(parametros, ensure_ascii=False, sort_keys=True), classes_hash,
+                 agora or agora_iso())).lastrowid
 
 
-def montar_proposta(anotador, versao, parametros, classes, nome, tamanho, deteccoes):
+def gravar_proposta(saida, execucao, nome, caixas, agora=None):
     """
-    deteccoes: [(id da classe, confianca, (x1, y1, x2, y2) normalizada)], todas
-    as caixas do anotador a partir do piso dele, cada uma com a classe. A caixa
-    vai em pixels da imagem gravada; a classe, pelo nome. A proposta não
-    esconde nem separa nada: quem lê aplica os limiares gravados em parametros
-    (confianca, confianca_classe; ver separar()).
+    caixas: [(nome da classe, confianca, (x1, y1, x2, y2) normalizada)], todas
+    as do anotador a partir do piso dele, cada uma com a classe. A proposta
+    não esconde nem separa nada: quem lê aplica os limiares gravados nos
+    parametros da execução (separar()). Devolve o id.
     """
-    largura, altura = tamanho
-    caixas = [{"classe": classes[classe]["nome"], "confianca": round(float(conf), 4),
-               "caixa": [round(x1 * largura, 4), round(y1 * altura, 4),
-                         round(x2 * largura, 4), round(y2 * altura, 4)]}
-              for classe, conf, (x1, y1, x2, y2) in deteccoes]
-    return {"formato": FORMATO_PROPOSTA, "anotador": anotador, "versao": versao,
-            "parametros": parametros, "classes": hash_classes(classes), "imagem": nome,
-            "largura": largura, "altura": altura, "caixas": caixas}
-
-
-def gravar_proposta(saida, proposta):
-    gravar_atomico(caminho_proposta(saida, proposta["anotador"], proposta["imagem"]),
-                   json.dumps(proposta, ensure_ascii=False, indent=1) + "\n")
-
-
-def ler_proposta(caminho):
-    try:
-        proposta = json.loads(Path(caminho).read_text(encoding="utf-8"))
-        for campo in ("anotador", "largura", "altura", "caixas"):
-            proposta[campo]
-    except (ValueError, KeyError, TypeError) as erro:
-        raise ValueError(f"{caminho}: proposta inválida ({erro})") from None
-    if proposta.get("formato") != FORMATO_PROPOSTA:
-        raise ValueError(f"{caminho}: proposta no formato {proposta.get('formato', 1)}, "
-                         f"anterior ao {FORMATO_PROPOSTA} (caixas e candidatas numa lista "
-                         "só); anote de novo numa saída nova")
+    with abrir(saida) as con:
+        with transacao(con):
+            imagem = _imagem(con, nome)
+            if imagem is None:
+                raise ValueError(f"imagem '{nome}' não registrada")
+            proposta = con.execute(
+                "INSERT INTO propostas (imagem_id, execucao_id, data) VALUES (?, ?, ?)",
+                (imagem["id"], execucao, agora or agora_iso())).lastrowid
+            con.executemany(
+                "INSERT INTO caixas_propostas (proposta_id, indice, classe, confianca, "
+                "x1, y1, x2, y2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(proposta, k, classe, round(float(conf), 4), *(round(float(v), 6) for v in caixa))
+                 for k, (classe, conf, caixa) in enumerate(caixas)])
     return proposta
+
+
+def nova_proposta(saida, anotador, nome, caixas, parametros=None, versao=None, tipo=None,
+                  classes_hash=None, agora=None):
+    """Execução avulsa com uma proposta só (testes e uso manual); devolve o id da proposta."""
+    execucao = nova_execucao(saida, anotador, tipo or anotador, versao, parametros or {},
+                             classes_hash, agora)
+    return gravar_proposta(saida, execucao, nome, caixas, agora)
+
+
+def _propostas(con, condicao, parametros=()):
+    """Propostas que satisfazem a condição SQL (sobre p, e, i), com as caixas."""
+    linhas = con.execute(
+        "SELECT p.id, p.data, i.nome AS imagem, e.anotador, e.tipo, e.versao, e.parametros, "
+        "e.classes_hash FROM propostas p JOIN execucoes e ON e.id = p.execucao_id "
+        f"JOIN imagens i ON i.id = p.imagem_id WHERE {condicao} ORDER BY p.id",
+        parametros).fetchall()
+    propostas = {r["id"]: {"id": r["id"], "anotador": r["anotador"], "tipo": r["tipo"],
+                           "versao": r["versao"], "parametros": json.loads(r["parametros"]),
+                           "classes": r["classes_hash"], "imagem": r["imagem"],
+                           "data": r["data"], "caixas": []}
+                 for r in linhas}
+    for ids in em_lotes(propostas):
+        for c in con.execute(
+                "SELECT proposta_id, classe, confianca, x1, y1, x2, y2 FROM caixas_propostas "
+                f"WHERE proposta_id IN ({','.join('?' * len(ids))}) "
+                "ORDER BY proposta_id, indice", ids):
+            propostas[c["proposta_id"]]["caixas"].append(
+                (c["classe"], c["confianca"], (c["x1"], c["y1"], c["x2"], c["y2"])))
+    return list(propostas.values())
+
+
+VIGENTE = "p.id IN (SELECT id FROM propostas_vigentes WHERE anotador = ?)"
+
+
+def _proposta(con, anotador, nome, proposta_id=None):
+    condicao, parametros = (f"{VIGENTE} AND i.nome = ?", (anotador, nome))
+    if proposta_id is not None:
+        condicao, parametros = "p.id = ? AND e.anotador = ? AND i.nome = ?", \
+            (proposta_id, anotador, nome)
+    encontradas = _propostas(con, condicao, parametros)
+    return encontradas[0] if encontradas else None
+
+
+def ler_proposta(saida, anotador, nome, proposta_id=None):
+    """
+    A proposta vigente do anotador na imagem (ou a de proposta_id, se for
+    dela): {id, anotador, tipo, versao, parametros, classes, imagem, data,
+    caixas: [(classe, confianca, caixa normalizada)]}; None se não há.
+    """
+    if not existe(saida):
+        return None
+    with abrir(saida) as con:
+        return _proposta(con, anotador, nome, proposta_id)
+
+
+def propostas_atuais(saida, anotador):
+    """{nome da imagem: proposta vigente do anotador}, numa consulta só."""
+    if not existe(saida):
+        return {}
+    with abrir(saida) as con:
+        return {p["imagem"]: p for p in _propostas(con, VIGENTE, (anotador,))}
+
+
+def imagens_com_proposta(saida, anotador):
+    if not existe(saida):
+        return set()
+    with abrir(saida) as con:
+        return {r[0] for r in con.execute(
+            "SELECT i.nome FROM propostas_vigentes v JOIN imagens i ON i.id = v.imagem_id "
+            "WHERE v.anotador = ?", (anotador,))}
+
+
+def anotadores(saida):
+    """Nomes dos anotadores com propostas gravadas."""
+    if not existe(saida):
+        return []
+    with abrir(saida) as con:
+        return [r[0] for r in con.execute(
+            "SELECT DISTINCT e.anotador FROM execucoes e JOIN propostas p ON p.execucao_id = e.id "
+            "ORDER BY e.anotador")]
 
 
 def caixas_normalizadas(proposta):
     """[(nome da classe, confianca, (x1, y1, x2, y2) normalizada)] de uma proposta."""
-    largura, altura = proposta["largura"], proposta["altura"]
-    return [(c["classe"], c["confianca"],
-             (c["caixa"][0] / largura, c["caixa"][1] / altura,
-              c["caixa"][2] / largura, c["caixa"][3] / altura))
-            for c in proposta["caixas"]]
+    return proposta["caixas"]
 
 
 def limiares(proposta):
@@ -224,59 +535,65 @@ def separar(proposta):
     return visiveis, candidatas
 
 
-def anotadores(saida):
-    """Nomes dos anotadores com propostas gravadas."""
-    pasta = Path(saida) / "propostas"
-    return sorted(p.name for p in pasta.iterdir() if p.is_dir()) if pasta.is_dir() else []
+# --- arquivos gerados do banco --------------------------------------------------
+
+def exportar_data_yaml(con, saida):
+    # Sem 'path': o Ultralytics usa a pasta do data.yaml. Só as revisadas,
+    # e ainda sem divisão treino/validação (por sessão, monografia 5.3.5).
+    gravar_atomico(Path(saida) / "data.yaml", yaml.safe_dump(
+        {"train": "revisadas.txt", "val": "revisadas.txt", "names": _nomes(con)},
+        allow_unicode=True, sort_keys=False))
 
 
-def aceitar(saida, anotador, nomes=None):
+def exportar_revisadas(con, saida):
+    # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
+    revisadas = [f"./images/{r[0]}" for r in con.execute(
+        "SELECT nome FROM imagens WHERE status = 'revisada' ORDER BY id")]
+    gravar_atomico(Path(saida) / "revisadas.txt", "".join(r + "\n" for r in revisadas))
+
+
+def _revisao_vigente(con, imagem_id):
+    return con.execute("SELECT * FROM revisoes WHERE imagem_id = ? ORDER BY id DESC LIMIT 1",
+                       (imagem_id,)).fetchone()
+
+
+def _caixas_revisao(con, revisao_id):
+    return con.execute("SELECT * FROM caixas_revisao WHERE revisao_id = ? ORDER BY indice",
+                       (revisao_id,)).fetchall()
+
+
+def _exportar_rotulo(con, saida, imagem):
+    """labels/<stem>.txt da imagem: as caixas da revisão vigente, se revisada; senão, nenhum."""
+    rotulo = Path(saida) / "labels" / f"{Path(imagem['nome']).stem}.txt"
+    revisao = _revisao_vigente(con, imagem["id"])
+    if imagem["status"] != "revisada" or revisao is None or revisao["acao"] != "salvar":
+        rotulo.unlink(missing_ok=True)
+        return
+    gravar_atomico(rotulo, "".join(
+        linha_yolo(c["classe_id"], (c["x1"], c["y1"], c["x2"], c["y2"])) + "\n"
+        for c in _caixas_revisao(con, revisao["id"])))
+
+
+def exportar(saida):
     """
-    Copia as propostas do anotador para labels/, com os ids do data.yaml, e
-    marca as imagens como revisadas: o comportamento antigo, proposta direto
-    como rótulo. Só as caixas visíveis (separar()); só mexe nas pendentes
-    (nomes=None: todas). Imagem com caixa de classe escondida fica pendente: a
-    classe dela é do revisor. Devolve (quantas
-    aceitou, [imagens deixadas pendentes por caixa sem classe]).
+    Refaz do banco todos os arquivos gerados: data.yaml, labels/ (e apaga os
+    .txt de imagens que não estão revisadas) e revisadas.txt.
     """
-    ids = {n: i for i, n in nomes_classes(saida).items()}
-    colunas, linhas = ler_estado(saida)
-    aceitas, sem_classe = 0, []
-    for nome, linha in linhas.items():
-        if linha["status"] != "pendente" or (nomes is not None and nome not in nomes):
-            continue
-        caminho = caminho_proposta(saida, anotador, nome)
-        if not caminho.exists():
-            continue
-        visiveis, _ = separar(ler_proposta(caminho))
-        if not all(mostra for _, _, _, mostra in visiveis.values()):
-            sem_classe.append(nome)
-            continue
-        texto = []
-        for classe, _, caixa, _ in visiveis.values():
-            if classe not in ids:
-                raise ValueError(f"{caminho}: classe '{classe}' fora do data.yaml")
-            texto.append(linha_yolo(ids[classe], caixa) + "\n")
-        gravar_atomico(Path(saida) / "labels" / f"{Path(nome).stem}.txt", "".join(texto))
-        linha["status"] = "revisada"
-        aceitas += 1
-    gravar_estado(saida, colunas, linhas)
-    return aceitas, sem_classe
+    saida = Path(saida)
+    (saida / "labels").mkdir(parents=True, exist_ok=True)
+    with abrir(saida) as con:
+        exportar_data_yaml(con, saida)
+        imagens = con.execute("SELECT id, nome, status FROM imagens").fetchall()
+        for imagem in imagens:
+            _exportar_rotulo(con, saida, imagem)
+        stems = {Path(i["nome"]).stem for i in imagens if i["status"] == "revisada"}
+        for rotulo in (saida / "labels").glob("*.txt"):
+            if rotulo.stem not in stems:
+                rotulo.unlink()
+        exportar_revisadas(con, saida)
 
 
 # --- leitura de uma imagem, para as páginas ---------------------------------
-
-def nomes_classes(saida):
-    """Nomes das classes do data.yaml, {id: nome}."""
-    data_yaml = Path(saida) / "data.yaml"
-    if not data_yaml.exists():
-        raise ValueError(f"{data_yaml} não existe; é a saída do anotar.py?")
-    with open(data_yaml, encoding="utf-8") as f:
-        nomes = (yaml.safe_load(f) or {}).get("names") or {}
-    if isinstance(nomes, list):
-        nomes = dict(enumerate(nomes))
-    return {int(i): n for i, n in nomes.items()}
-
 
 def ler_rotulos(caminho):
     """
@@ -308,28 +625,34 @@ def caixa_json(id_classe, nome, confianca, caixa):
 
 def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado, com_candidatas=False):
     """
-    O que as páginas mostram de uma imagem: status (None fora do imagens.csv),
-    caixas finais (None sem .txt), linhas inválidas do .txt e as propostas
-    visíveis de cada anotador (separar()), no formato de caixa_json mais o
-    "indice" na proposta; a de classe escondida vem com id e nome None.
-    com_candidatas: também as candidatas de cada anotador, {"indice", "conf",
-    "caixa"} (só a página de revisão as usa; na estática, pesariam no HTML).
+    O que as páginas mostram de uma imagem: status (None se não registrada),
+    caixas finais (do .txt de labels/, gerado do banco; None sem .txt), linhas
+    inválidas do .txt, as propostas vigentes visíveis de cada anotador
+    (separar()), no formato de caixa_json mais o "indice" na proposta (a de
+    classe escondida vem com id e nome None), e propostas_ids {anotador: id},
+    que a página devolve ao salvar. com_candidatas: também as candidatas de
+    cada anotador, {"indice", "conf", "caixa"} (só a página de revisão as usa;
+    na estática, pesariam no HTML).
     """
     saida = Path(saida)
     ids = {n: i for i, n in nomes.items()}
     finais, invalidas = ler_rotulos(saida / "labels" / f"{Path(nome).stem}.txt")
-    propostas, candidatas = {}, {}
-    for anotador in anotadores_saida:
-        caminho = caminho_proposta(saida, anotador, nome)
-        if caminho.exists():
-            visiveis, abaixo = separar(ler_proposta(caminho))
-            propostas[anotador] = [
-                dict(caixa_json(ids.get(classe) if mostra else None,
-                                classe if mostra else None, conf, caixa), indice=k)
-                for k, (classe, conf, caixa, mostra) in visiveis.items()]
-            candidatas[anotador] = [{"indice": k, "conf": conf,
-                                     "caixa": [round(v, 6) for v in caixa]}
-                                    for k, conf, caixa in abaixo]
+    propostas, candidatas, propostas_ids = {}, {}, {}
+    if anotadores_saida and existe(saida):
+        with abrir(saida) as con:
+            for anotador in anotadores_saida:
+                proposta = _proposta(con, anotador, nome)
+                if proposta is None:
+                    continue
+                visiveis, abaixo = separar(proposta)
+                propostas_ids[anotador] = proposta["id"]
+                propostas[anotador] = [
+                    dict(caixa_json(ids.get(classe) if mostra else None,
+                                    classe if mostra else None, conf, caixa), indice=k)
+                    for k, (classe, conf, caixa, mostra) in visiveis.items()]
+                candidatas[anotador] = [{"indice": k, "conf": conf,
+                                         "caixa": [round(v, 6) for v in caixa]}
+                                        for k, conf, caixa in abaixo]
     dados = {
         "nome": nome,
         "status": linha_estado["status"] if linha_estado else None,
@@ -337,6 +660,7 @@ def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado, com_candidata
             caixa_json(i, nomes.get(i, f"classe {i}"), None, c) for i, c in finais],
         "invalidas": invalidas,
         "propostas": propostas,
+        "propostas_ids": propostas_ids,
     }
     if com_candidatas:
         dados["candidatas"] = candidatas
@@ -362,20 +686,6 @@ class RevisaoInvalida(ValueError):
     def __init__(self, mensagem, status=400):
         super().__init__(mensagem)
         self.status = status
-
-
-def caminho_revisao(saida, nome):
-    return Path(saida) / "revisoes" / f"{Path(nome).stem}.json"
-
-
-def ler_revisao(saida, nome):
-    caminho = caminho_revisao(saida, nome)
-    if not caminho.exists():
-        return None
-    try:
-        return json.loads(caminho.read_text(encoding="utf-8"))
-    except ValueError as erro:
-        raise ValueError(f"{caminho}: registro inválido ({erro})") from None
 
 
 def validar_caixas(caixas, nomes, visiveis, candidatas=()):
@@ -432,10 +742,9 @@ def desfechos(caixas, visiveis, ids):
     """
     Desfecho de cada caixa final frente à proposta de origem: 'aceita',
     'classe_corrigida', 'classe_atribuida' (a classe da proposta estava
-    escondida do revisor) ou 'adicionada' (sem proposta); e os índices das
-    propostas visíveis removidas. ids: {nome da classe: id}.
+    escondida do revisor) ou 'adicionada' (sem proposta). ids: {nome da classe: id}.
     """
-    registro = []
+    resultado = []
     for id_classe, caixa, proposta, origem in caixas:
         if proposta is None:
             desfecho = "adicionada"
@@ -445,67 +754,145 @@ def desfechos(caixas, visiveis, ids):
             desfecho = "aceita"
         else:
             desfecho = "classe_corrigida"
-        item = {"id": id_classe, "caixa": [round(v, 6) for v in caixa],
-                "proposta": proposta, "desfecho": desfecho}
-        if origem is not None:
-            item["origem"] = origem
-        registro.append(item)
-    usadas = {p for _, _, p, _ in caixas if p is not None}
-    return registro, [k for k in visiveis if k not in usadas]
+        resultado.append((id_classe, caixa, proposta, origem, desfecho))
+    return resultado
+
+
+def _gravar_revisao(con, imagem, proposta_id, acao, agora, tempo, revisor, caixas):
+    """Insere a revisão e as caixas [(id, caixa, proposta, origem, desfecho)] e muda o status."""
+    revisao = con.execute(
+        "INSERT INTO revisoes (imagem_id, proposta_id, acao, data, tempo_ativo_s, revisor) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (imagem["id"], proposta_id, acao, agora, round(float(tempo), 1), revisor)).lastrowid
+    con.executemany(
+        "INSERT INTO caixas_revisao (revisao_id, indice, classe_id, x1, y1, x2, y2, "
+        "proposta_indice, desfecho, origem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(revisao, k, i, *c, p, d, o) for k, (i, c, p, o, d) in enumerate(caixas)])
+    con.execute("UPDATE imagens SET status = ? WHERE id = ?",
+                ("revisada" if acao == "salvar" else "descartada", imagem["id"]))
+    return revisao
 
 
 def revisar(saida, nome, pedido, agora):
     """
-    Aplica a revisão de uma imagem pendente. pedido: {acao, base, caixas,
-    tempo_ativo_s}, como a página envia. Grava labels/, depois revisoes/ e por
-    último o status em imagens.csv: interrompida no meio, a imagem continua
-    pendente. Guarda só a última revisão. Devolve o registro gravado.
+    Aplica a revisão de uma imagem pendente. pedido: {acao, base, proposta_id,
+    caixas, tempo_ativo_s}, como a página envia; proposta_id, se vier, tem de
+    ser a proposta vigente do anotador base (senão, outra foi gravada depois
+    que a página a abriu: 409). Grava a revisão e o status numa transação e
+    depois o .txt e o revisadas.txt. Devolve o registro (ler_revisao).
     """
     saida = Path(saida)
-    colunas, linhas = ler_estado(saida)
-    if nome not in linhas:
-        raise RevisaoInvalida(f"imagem '{nome}' não está no imagens.csv", 404)
-    if linhas[nome]["status"] != "pendente":
-        raise RevisaoInvalida(f"'{nome}' está {linhas[nome]['status']}; só pendentes são "
-                              "editáveis (reabrir é a fase 5)", 409)
     if not isinstance(pedido, dict) or pedido.get("acao") not in ACOES:
         raise RevisaoInvalida(f"'acao' deve ser uma de {', '.join(ACOES)}")
     tempo = pedido.get("tempo_ativo_s", 0)
     if not isinstance(tempo, (int, float)) or isinstance(tempo, bool) or tempo < 0:
         raise RevisaoInvalida("'tempo_ativo_s' deve ser um número não negativo")
+    base, proposta_id = pedido.get("base"), pedido.get("proposta_id")
+    if base is not None and not isinstance(base, str):
+        raise RevisaoInvalida("'base' deve ser o nome de um anotador")
+    if proposta_id is not None and (base is None or not isinstance(proposta_id, int)
+                                    or isinstance(proposta_id, bool)):
+        raise RevisaoInvalida("'proposta_id' deve ser um inteiro, com 'base'")
 
-    nomes = nomes_classes(saida)
-    base = pedido.get("base")
-    proposta, visiveis, candidatas = None, {}, []
-    if base is not None:
-        caminho = caminho_proposta(saida, str(base), nome) if base in anotadores(saida) else None
-        if caminho is None or not caminho.exists():
-            raise RevisaoInvalida(f"'{nome}' não tem proposta de '{base}'")
-        proposta = ler_proposta(caminho)
-        visiveis, candidatas = separar(proposta)
+    with abrir(saida) as con:
+        with transacao(con):
+            imagem = _imagem(con, nome)
+            if imagem is None:
+                raise RevisaoInvalida(f"imagem '{nome}' não está registrada", 404)
+            if imagem["status"] != "pendente":
+                raise RevisaoInvalida(f"'{nome}' está {imagem['status']}; só pendentes são "
+                                      "editáveis (reabrir é a fase 5)", 409)
+            nomes = _nomes(con)
+            proposta, visiveis, candidatas = None, {}, []
+            if base is not None:
+                proposta = _proposta(con, base, nome)
+                if proposta is None:
+                    raise RevisaoInvalida(f"'{nome}' não tem proposta de '{base}'")
+                if proposta_id is not None and proposta_id != proposta["id"]:
+                    raise RevisaoInvalida(
+                        f"a proposta {proposta_id} de '{base}' não é mais a vigente (é a "
+                        f"{proposta['id']}): o anotador gravou outra depois que a página foi "
+                        "aberta; recarregue", 409)
+                visiveis, candidatas = separar(proposta)
+            if pedido["acao"] == "salvar":
+                caixas = desfechos(validar_caixas(pedido.get("caixas", []), nomes, visiveis,
+                                                  candidatas),
+                                   visiveis, {n: i for i, n in nomes.items()})
+            else:
+                caixas = []
+            _gravar_revisao(con, imagem, None if proposta is None else proposta["id"],
+                            pedido["acao"], agora, tempo, None, caixas)
+        _exportar_rotulo(con, saida, _imagem(con, nome))
+        exportar_revisadas(con, saida)
+    return ler_revisao(saida, nome)
 
-    rotulo = saida / "labels" / f"{Path(nome).stem}.txt"
-    if pedido["acao"] == "salvar":
-        caixas = validar_caixas(pedido.get("caixas", []), nomes, visiveis, candidatas)
-        registro_caixas, removidas = desfechos(caixas, visiveis, {n: i for i, n in nomes.items()})
-        gravar_atomico(rotulo, "".join(linha_yolo(i, c) + "\n" for i, c, _, _ in caixas))
-        status = "revisada"
-    else:
-        registro_caixas, removidas = [], list(visiveis)
-        rotulo.unlink(missing_ok=True)
-        status = "descartada"
 
-    registro = {
-        "imagem": nome, "acao": pedido["acao"], "data": agora,
-        "tempo_ativo_s": round(float(tempo), 1), "revisor": None,
-        "base": None if proposta is None else {
-            "anotador": proposta["anotador"], "versao": proposta.get("versao"),
-            "classes": proposta.get("classes"),
-            "limiares": dict(zip(("confianca", "confianca_classe"), limiares(proposta)))},
-        "caixas": registro_caixas, "removidas": removidas,
-    }
-    gravar_atomico(caminho_revisao(saida, nome),
-                   json.dumps(registro, ensure_ascii=False, indent=1) + "\n")
-    linhas[nome]["status"] = status
-    gravar_estado(saida, colunas, linhas)
-    return registro
+def ler_revisao(saida, nome):
+    """
+    A revisão vigente da imagem, ou None: {imagem, acao, data, tempo_ativo_s,
+    revisor, base: {anotador, versao, classes, limiares, proposta_id} ou None,
+    caixas: [{id, caixa, proposta, desfecho[, origem]}], removidas}. As
+    removidas são as caixas visíveis da proposta base que nenhuma caixa cita.
+    """
+    if not existe(saida):
+        return None
+    with abrir(saida) as con:
+        imagem = _imagem(con, nome)
+        revisao = None if imagem is None else _revisao_vigente(con, imagem["id"])
+        if revisao is None:
+            return None
+        caixas = []
+        for c in _caixas_revisao(con, revisao["id"]):
+            item = {"id": c["classe_id"], "caixa": [round(c[k], 6) for k in ("x1", "y1", "x2", "y2")],
+                    "proposta": c["proposta_indice"], "desfecho": c["desfecho"]}
+            if c["origem"] is not None:
+                item["origem"] = c["origem"]
+            caixas.append(item)
+        base, removidas = None, []
+        if revisao["proposta_id"] is not None:
+            proposta = _propostas(con, "p.id = ?", (revisao["proposta_id"],))[0]
+            usadas = {c["proposta"] for c in caixas if c["proposta"] is not None}
+            removidas = [k for k in separar(proposta)[0] if k not in usadas]
+            base = {"anotador": proposta["anotador"], "versao": proposta["versao"],
+                    "classes": proposta["classes"], "proposta_id": proposta["id"],
+                    "limiares": dict(zip(("confianca", "confianca_classe"), limiares(proposta)))}
+        return {"imagem": nome, "acao": revisao["acao"], "data": revisao["data"],
+                "tempo_ativo_s": revisao["tempo_ativo_s"], "revisor": revisao["revisor"],
+                "base": base, "caixas": caixas, "removidas": removidas}
+
+
+def aceitar(saida, anotador, nomes=None, agora=None):
+    """
+    Grava as propostas vigentes do anotador como revisão (revisor "aceitar",
+    tempo 0) e marca as imagens como revisadas: o comportamento antigo,
+    proposta direto como rótulo. Só as caixas visíveis (separar()); só mexe
+    nas pendentes (nomes=None: todas). Imagem com caixa de classe escondida
+    fica pendente: a classe dela é do revisor. Devolve (quantas aceitou,
+    [imagens deixadas pendentes por caixa sem classe]).
+    """
+    agora = agora or agora_iso()
+    aceitas, sem_classe = [], []
+    with abrir(saida) as con:
+        with transacao(con):
+            ids = {n: i for i, n in _nomes(con).items()}
+            for proposta in _propostas(con, f"{VIGENTE} AND i.status = 'pendente'", (anotador,)):
+                nome = proposta["imagem"]
+                if nomes is not None and nome not in nomes:
+                    continue
+                visiveis, _ = separar(proposta)
+                if not all(mostra for _, _, _, mostra in visiveis.values()):
+                    sem_classe.append(nome)
+                    continue
+                fora = [classe for classe, _, _, _ in visiveis.values() if classe not in ids]
+                if fora:
+                    raise ValueError(f"proposta de {anotador} em {nome}: classe '{fora[0]}' "
+                                     "fora do data.yaml")
+                caixas = [(ids[classe], caixa, k, None, "aceita")
+                          for k, (classe, _, caixa, _) in visiveis.items()]
+                _gravar_revisao(con, _imagem(con, nome), proposta["id"], "salvar", agora, 0,
+                                "aceitar", caixas)
+                aceitas.append(nome)
+        for nome in aceitas:
+            _exportar_rotulo(con, saida, _imagem(con, nome))
+        exportar_revisadas(con, saida)
+    return len(aceitas), sem_classe

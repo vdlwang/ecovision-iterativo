@@ -1,9 +1,10 @@
 """
 Servidor local da página de revisão das anotações (PLANO-REVISAO.md, seção 3).
 
-Serve revisar.html e uma API JSON sobre um diretório gerado pelo anotar.py.
-Lê o disco a cada requisição, então mudanças feitas à mão aparecem sem
-reiniciar. Escuta só em 127.0.0.1.
+Serve revisar.html e uma API JSON sobre um diretório gerado pelo importar.py e
+pelo anotar.py. Lê o banco a cada requisição, então propostas gravadas pelo
+anotar.py enquanto a página está aberta aparecem sem reiniciar. Ao subir,
+refaz do banco os arquivos gerados (saida.exportar). Escuta só em 127.0.0.1.
 
     GET /                          a página
     GET /api/classes               [{id, nome, material, atalho}]
@@ -70,7 +71,7 @@ def resumir(dados):
 
 def montar_fila(saida, status="pendente", ordem="incerteza"):
     """
-    Imagens do imagens.csv com o status pedido. Ordem 'incerteza' (RF10): menor
+    Imagens registradas com o status pedido. Ordem 'incerteza' (RF10): menor
     confiança entre as caixas propostas, crescente; imagens sem nenhuma caixa
     proposta vêm antes, porque são as que mais podem ter objeto não achado.
     """
@@ -80,7 +81,7 @@ def montar_fila(saida, status="pendente", ordem="incerteza"):
         raise ErroHTTP(HTTPStatus.BAD_REQUEST, f"ordem deve ser uma de {', '.join(ORDENS)}")
     nomes = formato.nomes_classes(saida)
     anotadores = formato.anotadores(saida)
-    _, estado = formato.ler_estado(saida)
+    estado = formato.ler_estado(saida)
     contagem = {s: 0 for s in formato.STATUS}
     fila = []
     for nome, linha in estado.items():
@@ -96,13 +97,13 @@ def montar_fila(saida, status="pendente", ordem="incerteza"):
 
 def nome_valido(saida, bruto):
     """
-    Nome de imagem vindo da URL: precisa estar no imagens.csv, o que já impede
-    caminhos para fora da saída; barras e '..' nem chegam a ser procurados.
+    Nome de imagem vindo da URL: precisa estar registrado no banco, o que já
+    impede caminhos para fora da saída; barras e '..' nem chegam a ser procurados.
     """
     nome = unquote(bruto)
-    _, estado = formato.ler_estado(saida)
+    estado = formato.ler_estado(saida)
     if not nome or "/" in nome or "\\" in nome or nome.startswith(".") or nome not in estado:
-        raise ErroHTTP(HTTPStatus.NOT_FOUND, f"imagem '{nome}' não está no imagens.csv")
+        raise ErroHTTP(HTTPStatus.NOT_FOUND, f"imagem '{nome}' não está registrada")
     return nome, estado[nome]
 
 
@@ -211,10 +212,11 @@ def main(argv=None):
     parser.add_argument("--abrir", action="store_true", help="abre a página no navegador")
     args = parser.parse_args(argv)
 
-    if not (args.saida / "imagens.csv").exists():
-        raise ValueError(f"{args.saida / 'imagens.csv'} não existe: rode o anotar.py antes "
-                         "(saídas do formato antigo, só com labels/, não servem)")
-    formato.nomes_classes(args.saida)  # confere o data.yaml antes de subir
+    if not formato.existe(args.saida):
+        raise ValueError(f"{formato.caminho_banco(args.saida)} não existe: importe e anote "
+                         "antes (saídas de formatos anteriores, com imagens.csv ou só com "
+                         "labels/, não servem)")
+    formato.exportar(args.saida)  # interrompido entre o banco e os arquivos, o banco vale
     servidor = criar_servidor(args.saida, carregar_classes(args.classes), porta=args.porta)
     url = f"http://127.0.0.1:{servidor.server_address[1]}/"
     print(f"Revisão de {args.saida.resolve()} em {url} (Ctrl+C para sair)")

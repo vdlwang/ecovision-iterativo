@@ -1,8 +1,9 @@
 """
 Página HTML para conferir as anotações de um diretório gerado pelo anotar.py.
 
-Lê data.yaml, images/, labels/ (anotações finais), propostas/<anotador>/ e
-imagens.csv (status), e grava <saida>/visualizar.html, que abre direto no
+Lê images/, labels/ (anotações finais, geradas do banco) e, do banco
+(anotacoes.sqlite), as classes, as propostas vigentes de cada anotador e o
+status, e grava <saida>/visualizar.html, que abre direto no
 navegador (sem servidor): lista das imagens à esquerda, imagem com as caixas
 à direita, setas do teclado para navegar. As propostas aparecem tracejadas e
 com a confiança. Só visualiza; não edita.
@@ -11,7 +12,7 @@ Também serve para um diretório no formato YOLO de outra ferramenta (só
 data.yaml, images/ e labels/).
 
 O anotar.py já gera a página ao terminar; rode este script para refazê-la
-depois de mexer nos arquivos à mão.
+depois de anotar ou revisar mais imagens.
 
 Uso:
     python anotacao/visualizar.py anotacoes
@@ -36,7 +37,7 @@ def coletar(saida):
     nomes = formato.nomes_classes(saida)
     if not (saida / "images").is_dir():
         raise ValueError(f"{saida / 'images'} não existe")
-    _, estado = formato.ler_estado(saida)
+    estado = formato.ler_estado(saida)
     anotadores = formato.anotadores(saida)
     imagens = []
     for arquivo in sorted((saida / "images").iterdir()):

@@ -713,7 +713,10 @@ async function enviar(acao, pedirConfirmacao = false) {
       `Descartar ${detalhe.nome}?\nEla não vai para o treino.`, "Descartar", true)) return;
   if (acao === "salvar" && pedirConfirmacao && !await confirmar(resumoSalvar(), "Salvar e próxima"))
     return;
+  // proposta_id: a versão que a página mostrou; se o anotador gravou outra
+  // depois, o servidor recusa (409) em vez de aplicar índices de outra proposta
   const corpo = { acao, base: edicao.base, tempo_ativo_s: tempo.ativo,
+    proposta_id: edicao.base ? detalhe.propostas_ids?.[edicao.base] ?? null : null,
     caixas: edicao.caixas.map(({ id, caixa, proposta, origem }) =>
       ({ id, caixa, proposta, origem: origem ?? null })) };
   $("salvar").disabled = $("descartar").disabled = true;

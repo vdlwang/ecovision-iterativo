@@ -2,13 +2,10 @@
 Importa um lote de imagens para o armazenamento comum da anotação (OBJETIVO.md,
 seção 6, tarefa T5).
 
-Cada imagem é gravada uma vez em <saida>/images/<lote>_<nome> e registrada em
-imagens.csv como pendente, com o lote e o conjunto (treino ou teste) dele. Todos
+Cada imagem é gravada uma vez em <saida>/images/<lote>_<nome> e registrada no
+banco (<saida>/anotacoes.sqlite, formato em saida.py) como pendente, no lote,
+que guarda o conjunto (treino ou teste), a região de interesse e a data. Todos
 os anotadores (anotar.py) leem de lá; nenhum copia imagens.
-
-    <saida>/images/<lote>_<nome>   cópia (ou link) da imagem
-    <saida>/imagens.csv            nome, status, lote, conjunto
-    <saida>/lotes.yaml             por lote: conjunto, região de interesse, data
 
 A imagem muda o mínimo: só é regravada se o EXIF a gira (as caixas têm de valer
 para a imagem girada em qualquer leitor) ou se passa de --lado-maximo; fora
@@ -33,18 +30,15 @@ import os
 import re
 import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
-import yaml
 from PIL import Image, ImageOps
 
 import saida as formato
-from anotar import DIR_SCRIPT, TAG_ORIENTACAO_EXIF, carregar_nomes, preparar_saida
+from anotar import DIR_SCRIPT, TAG_ORIENTACAO_EXIF, carregar_nomes
 
-CONJUNTOS = ("treino", "teste")
+CONJUNTOS = formato.CONJUNTOS
 FRACAO_TESTE = 5  # 1 lote em cada 5 vai para o teste (decisão 7)
-COLUNAS_LOTE = ["lote", "conjunto"]
 LOTE_VALIDO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*$")
 QUALIDADE_JPEG = 95
 
@@ -124,44 +118,39 @@ def importar(saida, arquivos, lote, nomes_classes, conjunto=None, regiao=None,
         raise ValueError(f"conjunto deve ser um de {', '.join(CONJUNTOS)}")
     regiao = validar_regiao(regiao)
 
-    preparar_saida(saida, nomes_classes)
+    formato.preparar(saida, nomes_classes)
     lotes = formato.ler_lotes(saida)
     if lote in lotes:
-        existente = lotes[lote]
-        if conjunto is not None and conjunto != existente["conjunto"]:
-            raise ValueError(f"o lote {lote} já é de {existente['conjunto']}; o conjunto "
+        dados_lote = lotes[lote]
+        if conjunto is not None and conjunto != dados_lote["conjunto"]:
+            raise ValueError(f"o lote {lote} já é de {dados_lote['conjunto']}; o conjunto "
                              "de um lote não muda")
-        if regiao is not None and regiao != existente.get("regiao"):
-            raise ValueError(f"o lote {lote} já tem região {existente.get('regiao')}")
+        if regiao is not None and regiao != dados_lote.get("regiao"):
+            raise ValueError(f"o lote {lote} já tem região {dados_lote.get('regiao')}")
     else:
-        lotes[lote] = {"conjunto": conjunto or sortear_conjunto(lote), "regiao": regiao,
-                       "importado_em": agora or datetime.now().astimezone().isoformat(
-                           timespec="seconds")}
-    conjunto = lotes[lote]["conjunto"]
+        dados_lote = {"conjunto": conjunto or sortear_conjunto(lote), "regiao": regiao,
+                      "importado_em": agora or formato.agora_iso()}
 
-    colunas, linhas = formato.ler_estado(saida)
-    colunas += [c for c in COLUNAS_LOTE if c not in colunas]
+    estado = formato.ler_estado(saida)
     nomes = [f"{lote}_{a.name}" for a in arquivos]
     repetidos = sorted({n for n in nomes if nomes.count(n) > 1})
     if repetidos:
         raise ValueError(f"nomes repetidos na entrada: {', '.join(repetidos)}")
+    formato.conferir_colisoes(estado, nomes)  # antes de copiar qualquer arquivo
 
-    importadas, puladas = [], []
+    novas, puladas = [], []
     for arquivo, nome in zip(arquivos, nomes):
-        if nome in linhas:
+        if nome in estado:
             puladas.append(nome)
             continue
-        formato.registrar_imagem(dict(linhas), nome)  # confere a colisão antes de gravar
-        gravar_imagem(arquivo, saida / "images" / nome, lado_maximo, link)
-        formato.registrar_imagem(linhas, nome)
-        linhas[nome].update({"lote": lote, "conjunto": conjunto})
-        importadas.append(nome)
+        destino = saida / "images" / nome
+        gravar_imagem(arquivo, destino, lado_maximo, link)
+        novas.append((nome, *formato.tamanho_imagem(destino)))
 
-    # lotes.yaml antes do imagens.csv: interrompido entre os dois, o lote existe
-    # sem imagens, e importar de novo as registra
-    formato.gravar_lotes(saida, lotes)
-    formato.gravar_estado(saida, colunas, linhas)
-    return {"importadas": importadas, "puladas": puladas, "conjunto": conjunto}
+    # Os arquivos antes do banco: interrompido entre os dois, as imagens ficam
+    # sem registro, e importar de novo as grava outra vez e registra
+    importadas = formato.registrar(saida, novas, lote, dados_lote, agora)
+    return {"importadas": importadas, "puladas": puladas, "conjunto": dados_lote["conjunto"]}
 
 
 def main(argv=None):
@@ -183,7 +172,8 @@ def main(argv=None):
     parser.add_argument("--link", action="store_true",
                         help="link em vez de cópia, quando a imagem não precisa ser regravada")
     parser.add_argument("--classes", type=Path, default=DIR_SCRIPT / "classes.yaml",
-                        help="lista de classes, para o data.yaml (padrão: anotacao/classes.yaml)")
+                        help="lista de classes, para o banco e o data.yaml (padrão: "
+                             "anotacao/classes.yaml)")
     args = parser.parse_args(argv)
     if args.lado_maximo is not None and args.lado_maximo < 32:
         parser.error("--lado-maximo pequeno demais")

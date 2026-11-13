@@ -32,8 +32,10 @@ def test_importa_copia_registra_e_pula_as_ja_importadas(tmp_path):
     assert r == {"importadas": ["l1_a.jpg", "l1_b.png"], "puladas": [], "conjunto": "teste"}
     # cópia byte a byte: nada foi regravado
     assert (saida / "images" / "l1_a.jpg").read_bytes() == fotos[0].read_bytes()
-    assert (saida / "imagens.csv").read_text() == (
-        "nome,status,lote,conjunto\nl1_a.jpg,pendente,l1,teste\nl1_b.png,pendente,l1,teste\n")
+    estado = formato.ler_estado(saida)
+    assert [(n, l["status"], l["lote"], l["conjunto"], l["largura"], l["altura"])
+            for n, l in estado.items()] == [("l1_a.jpg", "pendente", "l1", "teste", 40, 20),
+                                            ("l1_b.png", "pendente", "l1", "teste", 40, 20)]
     assert formato.ler_lotes(saida) == {"l1": {"conjunto": "teste", "regiao": None,
                                                "importado_em": "2026-11-11"}}
     assert yaml.safe_load((saida / "data.yaml").read_text())["names"] == {0: "Garrafa", 1: "Lata"}
@@ -52,7 +54,7 @@ def test_outro_lote_mesma_foto_nao_colide(tmp_path):
     saida = tmp_path / "saida"
     importar.importar(saida, [a], "l1", NOMES, conjunto="treino")
     importar.importar(saida, [a], "l2", NOMES, conjunto="teste")
-    _, linhas = formato.ler_estado(saida)
+    linhas = formato.ler_estado(saida)
     assert {n: l["conjunto"] for n, l in linhas.items()} == {"l1_a.jpg": "treino",
                                                              "l2_a.jpg": "teste"}
 
@@ -73,6 +75,16 @@ def test_recusas(tmp_path):
     importar.importar(saida, [a], "l1", NOMES, regiao=[0, 0.1, 1, 0.9])
     with pytest.raises(ValueError, match="região"):
         importar.importar(saida, [a], "l1", NOMES, regiao=[0, 0, 1, 1])
+
+
+def test_registra_o_tamanho_depois_do_giro_e_recusa_colisao_antes_de_copiar(tmp_path):
+    saida = tmp_path / "saida"
+    importar.importar(saida, [foto(tmp_path / "f", "g.jpg", (40, 20), orientacao=6)], "l1",
+                      NOMES)
+    assert formato.ler_estado(saida)["l1_g.jpg"]["largura"] == 20
+    with pytest.raises(ValueError, match="colide"):
+        importar.importar(saida, [foto(tmp_path / "f", "g.png")], "l1", NOMES)
+    assert not (saida / "images" / "l1_g.png").exists()
 
 
 def test_regrava_so_a_girada_ou_grande(tmp_path):

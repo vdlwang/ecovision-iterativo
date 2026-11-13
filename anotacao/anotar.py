@@ -4,23 +4,25 @@ Grounding DINO e o OWLv2, detectores de vocabulário aberto, e o YOLO da
 equipe, de conjunto fechado).
 
 Anota as imagens já importadas pelo importar.py (o armazenamento comum,
-<saida>/images/) e grava, no diretório de saída (formato em saida.py):
+<saida>/images/) e grava as propostas, com a confiança de cada caixa, no banco
+da saída (<saida>/anotacoes.sqlite, formato em saida.py), uma execução por
+chamada. Antes, copia o banco para anotacoes.sqlite.bak. Grava também:
 
-    <saida>/propostas/<anotador>/<nome>.json   caixas propostas, com a confiança
     <saida>/previa/<anotador>/<nome>.jpg       com --previa: caixas desenhadas
     <saida>/visualizar.html                    página para conferir propostas e rótulos
 
 Só anota imagens pendentes, e não copia nem muda imagens. Caixas com o centro
-fora da região de interesse do lote (lotes.yaml) são descartadas.
+fora da região de interesse do lote são descartadas.
 
 As propostas não são rótulos: labels/ só recebe as caixas depois da revisão,
-ou com --aceitar, que copia as propostas como estão.
+ou com --aceitar, que as grava como uma revisão sem mudança.
 
 Uso:
     python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a
     python anotacao/anotar.py -o anotacoes --previa      # as pendentes ainda sem proposta
     python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
     python anotacao/anotar.py -o anotacoes --aceitar     # aceita as pendentes
+    python anotacao/anotar.py -o anotacoes --exportar    # refaz labels/ e data.yaml do banco
 """
 
 import argparse
@@ -551,49 +553,6 @@ class Yolo(Detector):
 ANOTADORES = {a.nome: a for a in (GroundingDino, Owlv2, Yolo)}
 
 
-def tem_ids_gravados(saida):
-    """Se algum .txt de labels/ ou registro de revisoes/ guarda id de classe."""
-    if any(t.read_text(encoding="utf-8").strip() for t in (saida / "labels").glob("*.txt")):
-        return True
-    return any(formato.ler_revisao(saida, r.name).get("caixas")
-               for r in (saida / "revisoes").glob("*.json"))
-
-
-def preparar_saida(saida, nomes):
-    """
-    Cria as pastas, o data.yaml (nomes: os de carregar_nomes, na ordem dos ids)
-    e o imagens.csv. Um data.yaml com outras classes é refeito se nenhum rótulo
-    ou revisão guarda ids (as propostas guardam a classe pelo nome; fundo e
-    descarte não têm caixas); senão, é recusado, porque os ids não bateriam. Recusa também uma saída do
-    formato antigo (labels/ sem imagens.csv), em que as propostas eram
-    gravadas direto como rótulos.
-    """
-    for pasta in ("images", "labels", "propostas"):
-        (saida / pasta).mkdir(parents=True, exist_ok=True)
-    if not (saida / "imagens.csv").exists() and any((saida / "labels").glob("*.txt")):
-        raise ValueError(f"{saida} é do formato antigo (labels/ sem imagens.csv), em que "
-                         "as propostas eram gravadas como rótulos. Use outro diretório.")
-    nomes = dict(enumerate(nomes))
-    data_yaml = saida / "data.yaml"
-    existentes = None
-    if data_yaml.exists():
-        with open(data_yaml, encoding="utf-8") as f:
-            existentes = (yaml.safe_load(f) or {}).get("names")
-        if isinstance(existentes, list):
-            existentes = dict(enumerate(existentes))
-    if existentes != nomes:
-        if existentes is not None and tem_ids_gravados(saida):
-            raise ValueError(f"{data_yaml} tem outras classes e já há rótulos ou revisões "
-                             "com caixas; os ids não bateriam. Use outro diretório de saída.")
-        # Sem 'path': o Ultralytics usa a pasta do data.yaml. Só as revisadas,
-        # e ainda sem divisão treino/validação (por sessão, monografia 5.3.5).
-        formato.gravar_atomico(data_yaml, yaml.safe_dump(
-            {"train": "revisadas.txt", "val": "revisadas.txt", "names": nomes},
-            allow_unicode=True, sort_keys=False))
-    if not (saida / "imagens.csv").exists():
-        formato.gravar_estado(saida, list(formato.COLUNAS), {})
-
-
 def desenhar_previa(imagem, deteccoes, classes, destino, confianca=0.0, confianca_classe=0.0):
     """As caixas que a página mostraria (a partir de confianca), "sem classe" abaixo de confianca_classe."""
     previa = imagem.copy()
@@ -621,10 +580,10 @@ def escolher_imagens(parser, args, linhas):
     pendentes com --sobrescrever). Só pendentes: anotar de novo uma revisada ou
     descartada trocaria a proposta que o registro da revisão cita.
     """
+    ja_anotadas = formato.imagens_com_proposta(args.saida, args.pasta)
     if not args.imagens:
         return [n for n, linha in linhas.items() if linha["status"] == "pendente"
-                and (args.sobrescrever
-                     or not formato.caminho_proposta(args.saida, args.pasta, n).exists())]
+                and (args.sobrescrever or n not in ja_anotadas)]
     pedidas = list(dict.fromkeys(Path(i).name for i in args.imagens))
     fora = [n for n in pedidas if n not in linhas]
     if fora:
@@ -636,8 +595,7 @@ def escolher_imagens(parser, args, linhas):
               f"{', '.join(nao_pendentes)}")
     pedidas = [n for n in pedidas if n not in nao_pendentes]
     if not args.sobrescrever:
-        existentes = [n for n in pedidas
-                      if formato.caminho_proposta(args.saida, args.pasta, n).exists()]
+        existentes = [n for n in pedidas if n in ja_anotadas]
         if existentes:
             parser.error(f"já anotadas por {args.pasta} em {args.saida}: "
                          f"{', '.join(existentes)} (use --sobrescrever)")
@@ -654,8 +612,8 @@ def main(argv=None):
                         help="diretório de saída, já com imagens importadas (padrão: ./anotacoes)")
     parser.add_argument("--anotador", choices=sorted(ANOTADORES), default=GroundingDino.nome,
                         help=f"anotador (padrão: {GroundingDino.nome})")
-    parser.add_argument("--nome", help="nome com que as propostas são gravadas, a pasta em "
-                                       "propostas/ (padrão: o do anotador); para rodar o mesmo "
+    parser.add_argument("--nome", help="nome com que as propostas são gravadas (padrão: o do "
+                                       "anotador); para rodar o mesmo "
                                        "anotador com outra configuração na mesma saída, como "
                                        "outro peso do YOLO")
     parser.add_argument("--classes", type=Path, default=DIR_SCRIPT / "classes.yaml",
@@ -664,11 +622,15 @@ def main(argv=None):
     parser.add_argument("--previa", action="store_true",
                         help="grava também previa/<anotador>/<nome>.jpg com as caixas desenhadas")
     parser.add_argument("--sobrescrever", action="store_true",
-                        help="anota de novo imagens pendentes que já têm proposta deste anotador")
+                        help="anota de novo imagens pendentes que já têm proposta deste "
+                             "anotador (grava uma proposta nova; a anterior fica no banco)")
     parser.add_argument("--aceitar", action="store_true",
-                        help="copia as propostas do anotador para labels/ como rótulos finais "
-                             "e marca as imagens como revisadas (só as pendentes; sem "
-                             "imagens na linha de comando, todas)")
+                        help="grava as propostas do anotador como revisão (labels/) e marca "
+                             "as imagens como revisadas (só as pendentes; sem imagens na "
+                             "linha de comando, todas)")
+    parser.add_argument("--exportar", action="store_true",
+                        help="só refaz do banco os arquivos gerados (data.yaml, labels/, "
+                             "revisadas.txt) e sai")
     deteccao = parser.add_argument_group(
         "detecção", "a proposta guarda todas as caixas a partir do piso; --confianca e "
                     "--confianca-classe são gravados nela e aplicados por quem lê")
@@ -703,11 +665,15 @@ def main(argv=None):
         parser.error("--nome só com minúsculas, dígitos, '.', '_' e '-'")
     args.pasta = args.nome or args.anotador
 
-    if not (args.saida / "imagens.csv").exists():
+    if not formato.existe(args.saida):
         parser.error(f"{args.saida} não tem imagens importadas (use o importar.py antes)")
+    if args.exportar:
+        formato.exportar(args.saida)
+        print(f"Arquivos refeitos do banco em {args.saida.resolve()}")
+        return
     classes = carregar_classes(args.classes)
-    preparar_saida(args.saida, carregar_nomes(args.classes))
-    _, linhas = formato.ler_estado(args.saida)
+    formato.preparar(args.saida, carregar_nomes(args.classes))
+    linhas = formato.ler_estado(args.saida)
     lotes = formato.ler_lotes(args.saida)
     alvo = escolher_imagens(parser, args, linhas)
     if not alvo and not args.aceitar:
@@ -717,6 +683,13 @@ def main(argv=None):
         if args.previa:
             (args.saida / "previa" / args.pasta).mkdir(parents=True, exist_ok=True)
         anotador = ANOTADORES[args.anotador].criar(classes, args)
+        # Os limiares de leitura vão na execução; um anotador que não os define
+        # recebe os da linha de comando
+        parametros = {"confianca": args.confianca, "confianca_classe": args.confianca_classe,
+                      **anotador.parametros}
+        formato.copia_seguranca(args.saida)
+        execucao = formato.nova_execucao(args.saida, args.pasta, anotador.nome, anotador.versao,
+                                         parametros, formato.hash_classes(classes))
 
     for nome in alvo:
         imagem, _ = abrir_imagem(args.saida / "images" / nome)
@@ -725,14 +698,8 @@ def main(argv=None):
         regiao = lotes.get(linhas[nome].get("lote"), {}).get("regiao")
         deteccoes = [d for d in deteccoes if formato.dentro_da_regiao(d[2], regiao)]
 
-        # Os limiares de leitura vão na proposta; um anotador que não os define
-        # recebe os da linha de comando
-        parametros = {"confianca": args.confianca, "confianca_classe": args.confianca_classe,
-                      **anotador.parametros}
-        if args.pasta != anotador.nome:
-            parametros["tipo"] = anotador.nome
-        formato.gravar_proposta(args.saida, formato.montar_proposta(
-            args.pasta, anotador.versao, parametros, classes, nome, imagem.size, deteccoes))
+        formato.gravar_proposta(args.saida, execucao, nome,
+                                [(classes[c]["nome"], conf, caixa) for c, conf, caixa in deteccoes])
         if args.previa:
             desenhar_previa(imagem, deteccoes, classes,
                             args.saida / "previa" / args.pasta / f"{Path(nome).stem}.jpg",
@@ -748,8 +715,8 @@ def main(argv=None):
     if args.aceitar:
         escolhidas = set(alvo) if args.imagens else None
         aceitas, sem_classe = formato.aceitar(args.saida, args.pasta, escolhidas)
-        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.pasta} copiadas "
-              "para labels/")
+        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.pasta} gravadas como "
+              "revisão e copiadas para labels/")
         if sem_classe:
             print(f"{len(sem_classe)} imagem(ns) continuam pendentes, com caixa sem classe "
                   f"(revise-as na página): {', '.join(sem_classe)}")
