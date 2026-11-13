@@ -68,10 +68,10 @@ Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entr
 | Opção | Como entra | Licença | GTX 1650 (4 GB) | Custo | Observações |
 |---|---|---|---|---|---|
 | Grounding DINO tiny/base (atual) | — | Apache 2.0 | Cabe | — | Referência de precisão para rótulos offline |
-| OWLv2 | `transformers`, mesma API; pontuação por texto de classe (dispensa o mapeamento por token) | Apache 2.0 | Cabe | ~½ dia | Concorrente mais direto |
+| OWLv2 (**feito**, 2026-11-12) | `transformers`, mesma API; pontuação por texto de classe (dispensa o mapeamento por token) | Apache 2.0 | Cabe (base) | ~½ dia | Concorrente mais direto. Medido abaixo: classe bem melhor que a do Grounding DINO |
 | YOLO-World / YOLOE | `ultralytics` (`set_classes`) | GPL-3.0 / AGPL-3.0 | Tempo real | ~½ dia | Mais rápidos, menos precisos; o YOLOE treina como YOLO comum e poderia virar o detector da esteira |
 | Grounding DINO + SAM 2 | Caixas do DINO como prompt do SAM | Apache 2.0 | Cabe (SAM 2 pequeno) | ~1 dia | Melhora caixas, não a classe |
-| SAM 3 (texto → máscaras e caixas) | `ultralytics` ≥ 8.3.237 (`SAM3SemanticPredictor`) ou `transformers` | Licença própria da Meta (verificar) | Provavelmente apertado (~850M parâmetros) | ~1–2 dias | Pesos baixados à mão |
+| SAM 3 (texto → máscaras e caixas) | `ultralytics` ≥ 8.3.237 (`SAM3SemanticPredictor`) ou `transformers` | Licença própria da Meta (verificar) | **Não cabe**: 848M parâmetros, checkpoint de ~3,4 GB, o guia oficial pede ≥ 16 GB; roda no Colab | ~1–2 dias | Pesos baixados à mão. Papel previsto: só gerar caixas e candidatas (abaixo) |
 | Florence-2 | `transformers` com `trust_remote_code` | MIT | Cabe | ~1 dia | Sem confiança por caixa: quebra a ordenação por incerteza (RF10) |
 | VLM local (Qwen2.5-VL/Qwen3-VL 3B–7B) | Caixas em JSON na resposta | Apache 2.0 (maioria) | 3B quantizado cabe; 7B não | ~2–3 dias | Lento, sem confiança calibrada; bom para decidir material |
 | APIs (Gemini, DINO-X / Grounding DINO 1.6 Pro) | HTTP | Comercial, por imagem | — | ½–1 dia | Imagens saem da máquina (RNF09/LGPD) |
@@ -82,6 +82,8 @@ Nas fotos testadas, o Grounding DINO localiza bem e erra a classe; por isso entr
 **Como escolher**: `anotacao/avaliar.py` mede cada candidato (acerto de classe e de material com as caixas verdadeiras; precisão e recall por limiar de confiança) nas fotos de `legado/database/*/YOLO_dataset/validation`, que têm rótulos da equipe nas mesmas 6 classes do `classes.yaml` (polígonos de 4 pontos → caixas). Ressalvas: fotos paradas, sem esteira; o vazamento entre os cenários não pesa, porque nenhum candidato treinou nelas. O script serve à monografia (objetivo 3) e é reaproveitado a cada ciclo.
 
 **Ordem**: (1) `avaliar.py` com o Grounding DINO como linha de base; (2) OWLv2 e YOLOE; (3) híbrida com SigLIP; (4) `avaliar.py --voto` com o trio; (5) SAM 2/3 só se as caixas virarem o problema.
+
+**SAM 3 como gerador de caixas e candidatas (alternativa, 2026-11-12).** Não como anotador do trio nem para dar a classe: só para produzir as caixas, inclusive as candidatas do clique, que os outros anotadores classificam ou o revisor completa. A motivação é desacoplar a localização da classe: hoje uma só confiança decide se a caixa aparece (`confianca`), se vira candidata (`piso`) e se a classe é mostrada (`confianca_classe`), e os três limiares foram escolhidos sobre a pontuação do Grounding DINO, que mistura "é um objeto" com "é desta classe". Com caixas de um segmentador, a decisão de mostrar ou não uma caixa passaria a depender da qualidade da máscara, e a da classe, só do classificador, o que permite rever as questões de limiar (decisões 15 e 16) separadamente. Não roda na GTX 1650; seria rodado no Colab e gravado como proposta de um anotador, como os outros. Entra só se a cobertura sem classe ou o clique virarem o gargalo depois do trio e do SigLIP.
 
 **Critério do trio** (a confirmar com os números): ao menos 95% das imagens aprovadas corretas por inteiro. A taxa de aprovação decide se o voto compensa: abaixo de uns 30%, quase tudo vai ao revisor de qualquer jeito.
 
@@ -208,6 +210,60 @@ Para os objetos que a proposta não cobre, a página de revisão oferece as caix
 - **Decisão**: `anotar.py --candidatas 0.05` grava as candidatas na proposta, sem classe; na página, `N` e um clique criam a caixa, `Tab` troca a candidata. A caixa nasce sem classe, como as de baixa confiança. O registro marca `"origem": "candidata"`, e o servidor recusa uma caixa que diz ser candidata e não é, o que permite medir no uso quantas vezes o clique resolve.
 - **Ressalvas**: o clique simulado cai no centro exato do objeto; num objeto pequeno ou dentro de outro (a lata e o topo dela), há muitas candidatas no ponto (22 no teste da lata), mas a ordem pela confiança põe as úteis antes. Desenhar à mão continua necessário para os ~15% restantes (fase 4 do T1).
 
+### OWLv2 (2026-11-12)
+
+Segundo anotador do trio: `anotar.py --anotador owlv2` (`google/owlv2-base-patch16-ensemble`, uma consulta de texto por classe, com o mesmo `prompt` do `classes.yaml`), sobre a classe base `Detector`, com os mesmos filtros (piso 0,05, área máxima 0,5, NMS 0,5, contenção 0,9). Mesmas 88 fotos e 375 caixas, medidas pelo `avaliar.py` sobre as propostas gravadas; o Grounding DINO `tiny` foi anotado de novo na mesma saída e reproduz as medidas de 2026-11-11.
+
+| | Grounding DINO 0,20 | OWLv2 0,20 | OWLv2 0,10 |
+|---|---|---|---|
+| Objetos cobertos | 92% | 82% | 93% |
+| Imagens completas | 73% | 64% | 85% |
+| Caixas / sobra por imagem | 5,8 / 1,8 | 3,8 / 0,3 | 4,7 / 0,8 |
+| Classe certa (das caixas que cobrem objeto) | 57% | 75% | 76% |
+| Material certo | 65% | 89% | 89% |
+| Detecção com classe: precisão / recall | 0,39 / 0,52 | 0,69 / 0,62 | 0,64 / 0,71 |
+| Clique: objetos sem caixa, 1ª candidata com IoU ≥ 0,75 | 25/31 (81%) | 52/68 (76%) | — |
+| Candidatas por imagem | 11,3 | 2,0 | — |
+| Tempo nas 88 fotos (GTX 1650, com a carga) | 2,2 min | 5,1 min | |
+
+- **Classe muito melhor**: a confusão que restava é a do PET com o vidro (20 das 58 `Clear plastic bottle` saem `Glass bottle`) e a de potes com copos (38 dos 50 `Glass jar` saem `Glass cup`, 2% de acerto). Latas, tampas, papelão e papel acertam 96–100%. No Grounding DINO, os erros se espalham por todas as classes.
+- **A pontuação tem outra escala**: o OWLv2 dá confiança mais baixa e quase sem caixa espúria (sobra de 0,3 por imagem em 0,20, contra 1,8). O limiar de leitura dele deve ser **0,10**, não 0,20: mais imagens completas que o Grounding DINO em 0,20 (85% contra 73%), com menos da metade da sobra. Como o limiar é de leitura (decisão 16), não é preciso anotar de novo: basta o voto e a página aplicarem o limiar de cada anotador (seção 6, `anotadores.yaml`).
+- **`confianca_classe` de 0,35 não serve ao OWLv2**: a classe acerta 75–100% abaixo de 0,35 e só 48–58% entre 0,35 e 0,50 (onde estão os potes chamados de copo), e 89% acima de 0,50. A faixa não é monótona, então o limiar que esconde a classe tem de ser medido por anotador, e não herdado do Grounding DINO.
+- **O clique fica com o Grounding DINO**: o OWLv2 grava poucas caixas abaixo do limiar (2 candidatas por foto, contra 11), porque os fragmentos vizinhos se fundem no NMS. Continua valendo a candidata de um anotador só, o de base (seção 6).
+- **Frase da consulta**: `--owlv2-frase "a photo of a {}"` deu o mesmo resultado que o prompt puro (cobertura e classe a ±1–4 pontos em todo limiar; potes ainda 0%). O padrão continua o prompt puro.
+- **Lento no pré-processamento**: o processador do OWLv2 sem `torchvision` usa `scipy` sobre a foto de 12 MP (~3 s por imagem). Nos quadros da webcam, bem menores, deve cair muito.
+- **Para o trio**: OWLv2 e Grounding DINO concordam pouco na classe (o DINO erra muito), o que hoje faria o voto 3oo3 reprovar quase tudo por causa do DINO. Reforça a híbrida com SigLIP ou a troca do DINO; medir no T3.
+
+### Dependência entre anotadores (2026-11-12)
+
+O 3oo3 só funciona se os erros de classe forem pouco correlacionados: o erro que passa no voto é aquele que os três cometem juntos, na mesma classe. A localização já está boa nos anotadores medidos; a independência importa na **classe**. E quase todo detector de vocabulário aberto decide a classe com um modelo da família do CLIP:
+
+| Anotador | O que decide a classe | Pré-treino |
+|---|---|---|
+| Grounding DINO | BERT + Swin, fusão texto-imagem treinada em detecção e *grounding* | O365, GoldG, Cap4M |
+| OWLv2 | ViT inicializado do CLIP, autotreinado com pseudo-rótulos do OWL-ViT | WebLI (Google) |
+| SigLIP (híbrida) | Contrastivo imagem-texto | WebLI (Google) |
+| YOLOE | Texto pelo MobileCLIP | DataCompDR (Apple) |
+| YOLO-World | Texto pelo CLIP | WIT (OpenAI) |
+
+**Risco da híbrida**: com a classe do SigLIP, dois dos três votos de classe (OWLv2 e SigLIP) viriam de modelos contrastivos do mesmo WebLI, e o 3oo3 viraria, na classe, quase um 2oo2. Os erros do OWLv2 são de aparência (PET transparente como vidro, pote como copo), do tipo que um modelo do mesmo dado tende a repetir. O YOLOE também não escapa: a diversidade dele está na arquitetura e no treino de detecção, não na fonte da classe.
+
+**Medida** (`avaliar.py --comparar`): sobre os objetos que os dois anotadores cobrem, quantas vezes erram juntos e quantas concordam na **mesma classe errada** (o que o voto aprovaria), contra o esperado se os erros fossem independentes **dada a classe verdadeira**: cada anotador com o mesmo acerto por classe, sorteado à parte. Assim, uma classe difícil para todos não conta como dependência; conta o erro em comum além disso.
+
+OWLv2 × Grounding DINO, mesmas 88 fotos:
+
+| Limiares (OWLv2 / DINO) | Objetos cobertos pelos dois | OWLv2 erra | DINO erra | Os dois erram (esperado) | Concordam | Mesma classe errada (esperado) | phi dos erros |
+|---|---|---|---|---|---|---|---|
+| 0,20 / 0,20 | 295 | 26% | 42% | 44 (40,1) | 55% | 23 (17,6) | 0,19 |
+| 0,10 / 0,20 | 328 | 25% | 42% | 48 (42,5) | 55% | 26 (18,6) | 0,19 |
+| 0,05 / 0,05 | 364 | 24% | 43% | 52 (44,6) | 54% | 27 (19,3) | 0,18 |
+
+- **Mesmo de famílias diferentes, os erros são dependentes**: a mesma classe errada sai ~1,4 vez o esperado, e quase toda (17 de 23) é a mesma confusão, `Clear plastic bottle` → `Glass bottle`. É um erro do problema (garrafa transparente) mais que da linhagem do modelo; outros erros em comum: pote como copo (3), papelão como papel (3–4).
+- **O par sozinho não basta**: 14% das concordâncias estão erradas, longe dos 95% de aprovadas corretas do critério do trio. O terceiro anotador tem de errar diferente justamente no PET × vidro.
+- **Decisão**: a escolha do trio é pelo erro conjunto medido, não pela família declarada. A híbrida com SigLIP só entra num trio com o OWLv2 se `--comparar` mostrar que os dois não repetem a confusão do PET; senão, ela substitui o OWLv2, e não o DINO.
+- **Alternativa para a classe, se a dependência aparecer**: DINOv2/v3 + kNN (ou regressão logística) sobre os recortes rotulados pela equipe. É um modelo só de imagem, sem texto e sem WebLI, e a classe vem de exemplos do domínio, não de linguagem: a fonte de informação mais diferente que temos. O risco é o vazamento entre as fotos (as quatro validações são as mesmas cenas); a validação tem de ser por cena, como no plano do SigLIP abaixo. Um CLIP da OpenAI no lugar do SigLIP muda o dado (WIT), mas não a família, e ganha pouco.
+- **Ressalvas**: as 88 fotos são ~22 cenas em quatro cenários, então os objetos não são independentes entre si e as contagens são pequenas; o "esperado" supõe acerto por classe constante em todas as fotos. Refazer com quadros da esteira (T4).
+
 ### Plano: SigLIP como classificador no `avaliar.py`
 
 **Objetivo**: medir se reclassificar o recorte de cada caixa com o SigLIP supera a classe do Grounding DINO (46% de classe, 50% de material) e, se superar, levar a troca ao `anotar.py`.
@@ -248,7 +304,7 @@ Para os objetos que a proposta não cobre, a página de revisão oferece as caix
 
 **Esforço**: ~½ dia para o `classificador.py` e a integração ao `avaliar.py`, ~½ dia para os experimentos.
 
-Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). Levantamento de 2026-10-27; custos e cabimento na GPU são estimativas, não medidos.
+Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). [Instalação do SAM 3](https://www.mintlify.com/facebookresearch/sam3/installation), [RF-DETR — ICLR 2026](https://mlanthology.org/iclr/2026/robinson2026iclr-rfdetr/), [RF-DETR vs. alternativas — Roboflow](https://blog.roboflow.com/rf-detr-vs-alternatives/). Levantamento de 2026-10-27, revisto em 2026-11-12 (SAM 3 e RF-DETR); custos e cabimento na GPU são estimativas, não medidos, salvo onde dito.
 
 ## 6. Pipeline de anotação (planejado em 2026-11-11)
 
@@ -311,18 +367,18 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | # | Status | Tarefa | Depende de | Verificação |
 |---|---|---|---|---|
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
-| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); faltam vários prompts por classe, a híbrida com SigLIP, OWLv2 e YOLOE como anotadores do T1 | T1 (interface de anotador) | tabelas do `avaliar.py` |
-| T3 | [ ] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6) | T2 | pytest com caixas sintéticas; tabelas |
+| T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); faltam vários prompts por classe, a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
+| T3 | [~] | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5) | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
 | T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o `imagens.csv`, com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
 | T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores; trava do `imagens.csv` (seção 6) | T1, T3, T5 | pytest do voto com caixas sintéticas |
-| T7 | [ ] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs | T1, T6 | pytest da API; teste manual |
+| T7 | [ ] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs. Até lá a página fica como está (2026-11-12), com três pendências: a base da edição é o primeiro anotador em ordem alfabética (hoje o Grounding DINO, pior em classe que o OWLv2); a ordem por incerteza mistura as confianças de todos os anotadores, em escalas diferentes; e o registro da revisão só mede a base | T1, T6 | pytest da API; teste manual |
 | T8 | [ ] | **Auditoria**: amostra das aprovadas (ex.: 5%) na fila de revisão, sem o revisor saber | T6, T7 | pytest |
 | T9 | [ ] | **Modo de teste**: segmentado e sem classe (padrão no teste, seção 4) e sem pré-anotação | T1, T5 | pytest; teste manual |
 | T10 | [ ] | **`metricas.py`** (RF13): taxa de aprovação e motivos, erro das aprovadas pela auditoria, precisão e recall de cada anotador frente à revisão, tempo por imagem e por objeto, taxa de cada tipo de correção | T1, T6, T8 | pytest com registros sintéticos |
 | T11 | [ ] | **Novas classes pela página** (RF14): acrescenta no fim do `classes.yaml` e regenera o `data.yaml` | T1 | pytest; teste manual |
-| T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07) | T6, T7 | métricas do treino |
-| T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa | T9, T12 | métricas por classe e material |
+| T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07). Treinar também o **RF-DETR** (Nano/Small, Apache 2.0) na mesma base, para comparar com o YOLO: é de conjunto fechado (não serve de anotador), feito para transferir a domínios novos, e evita a AGPL da Ultralytics. XL e 2XL ficam fora (licença PML) | T6, T7 | métricas do treino |
+| T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa: `best.pt`, o YOLO retreinado e o RF-DETR lado a lado, mais a taxa de quadros na máquina da esteira | T9, T12 | métricas por classe e material; FPS |
 | T14 | [ ] | **`pipeline.py` e `anotadores.yaml`** (seção 6): importar, anotar com os N anotadores configurados, votar ou unir conforme o conjunto, com unidade de trabalho (imagem, anotador) retomável | T5, T6 | pytest com anotadores sintéticos |
 
 ### Resolução e origem das imagens

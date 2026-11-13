@@ -46,7 +46,7 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | Opção | Padrão | |
 |---|---|---|
 | `-o`, `--saida` | `anotacoes` | Diretório de saída, já com imagens importadas |
-| `--anotador` | `grounding-dino` | Qual anotador propõe as caixas (por enquanto, só esse) |
+| `--anotador` | `grounding-dino` | Qual anotador propõe as caixas: `grounding-dino` ou `owlv2` |
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
@@ -57,13 +57,19 @@ Opções de detecção, comuns a todo detector. A proposta guarda **todas** as c
 
 | Opção | Padrão | |
 |---|---|---|
-| `--modelo` | o do anotador | `grounding-dino`: `IDEA-Research/grounding-dino-tiny`; também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento |
+| `--modelo` | o do anotador | `grounding-dino`: `IDEA-Research/grounding-dino-tiny`; também `IDEA-Research/grounding-dino-base`, mais preciso e mais lento. `owlv2`: `google/owlv2-base-patch16-ensemble`; também `google/owlv2-large-patch14-ensemble` |
 | `--piso` | `0.05` | Confiança mínima gravada. As caixas entre o piso e `--confianca` são as **candidatas** da caixa por clique (cerca de 11 por foto) |
 | `--confianca` | `0.2` | A página mostra as caixas a partir dessa confiança. Baixa de propósito: cobre 92% dos objetos e sobram ~2 caixas por imagem para remover (medida no `OBJETIVO.md`, seção 5) |
 | `--confianca-classe` | `0.35` | Abaixo dessa, a página mostra a caixa **sem classe**: o revisor tem de dar a classe ou remover a caixa. A classe do anotador fica gravada, só não chega à página. `0` desliga |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
 | `--contencao` | `0.9` | Remove a caixa que tem ao menos essa fração dentro de outra maior e mais confiante (partes do objeto, como o topo da lata proposto como tampa, e duplicatas menores, que o NMS não pega). A caixa grande que envolve uma menor mais confiante fica: em geral é o objeto inteiro. Acima de `1` desliga |
+
+Opções de um anotador só:
+
+| Opção | Padrão | |
+|---|---|---|
+| `--owlv2-frase` | `{}` | `owlv2`: modelo da consulta de cada classe, com `{}` no lugar do `prompt` (ex.: `"a photo of a {}"`). Fica gravada nos `parametros` da proposta |
 
 ## Google Colab
 
@@ -195,7 +201,7 @@ Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dic
 - `carregar()`: carrega o modelo `self.versao` em `self.dispositivo` (se `None`, o detector escolhe);
 - `pontuar(imagem)`: recebe a imagem PIL em RGB e devolve `(pontuacoes, caixas)`, a pontuação de cada classe (na ordem de `classes.yaml`) em cada caixa bruta, como lista de listas ou tensor, e as caixas `(x1, y1, x2, y2)` normalizadas de 0 a 1.
 
-A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. O que cada um faz com o `prompt` das classes é dele. `GroundingDino` é o exemplo.
+A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. Argumentos próprios do construtor vêm das opções por `argumentos(args)`. O que cada um faz com o `prompt` das classes é dele. `GroundingDino` e `Owlv2` são os exemplos.
 
 Um anotador que não detecta (por exemplo, um que só reclassifica as caixas de outro) pode implementar a interface direto: `nome`, `opcoes(parser)`, `criar(classes, args)` e, na instância, `versao`, `parametros` e `anotar(imagem) -> [(id da classe, confiança, caixa normalizada)]`.
 
@@ -212,7 +218,7 @@ Uma classe de `classes` com `reserva: true` só vence numa caixa quando nenhuma 
 
 O prompt é o que mais muda o resultado. Prefira descrições visuais curtas ("cardboard box" em vez de "corrugated carton"), e use `--previa` para conferir.
 
-Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por token do texto; a confiança de uma classe é a maior entre os tokens do seu prompt, e vence a classe de maior confiança.
+Como cada caixa recebe uma classe: o Grounding DINO dá uma pontuação por token do texto, e a confiança de uma classe é a maior entre os tokens do seu prompt; o OWLv2 dá uma pontuação por consulta, uma consulta por classe (o `prompt`, ou a frase de `--owlv2-frase`), em cada fragmento da imagem. Nos dois, vence a classe de maior confiança.
 
 ## Avaliação
 
@@ -236,6 +242,12 @@ Cada imagem é casada com o rótulo da equipe pelo nome original (sem o prefixo 
 | **Classe por faixa de confiança**, sobre todas as caixas gravadas | Escolher `--confianca-classe` |
 | **Detecção** com classe, por limiar: precisão e recall | Comparar com a linha de base |
 | **Caixa por clique**: nos objetos sem caixa visível, se a 1ª (ou uma das 3 primeiras) candidata no centro do objeto tem IoU ≥ 0,75 | Escolher `--piso` |
+
+Com `--comparar OUTRO`, mede também o **erro conjunto de classe** dos dois anotadores, sobre os objetos que ambos cobrem: quantas vezes os dois erram, quantas concordam na mesma classe errada (o que o voto aprovaria) e quais confusões repetem, contra o esperado se os erros fossem independentes dada a classe verdadeira. Serve para escolher o trio do voto: anotadores que erram juntos valem menos que um mais fraco que erra diferente (`OBJETIVO.md`, seção 5). Cada um é lido no limiar gravado na sua proposta, ou nos de `--limiares-par A B`.
+
+```bash
+python anotacao/avaliar.py validacao --anotador owlv2 --comparar grounding-dino --limiares-par 0.10 0.20
+```
 
 Os limiares abaixo do `piso` das propostas não são medidos (faltariam caixas ali). `--json` grava todas as medidas, para registrar a medição e comparar anotadores. Os números ficam no `OBJETIVO.md` (seção 5).
 
