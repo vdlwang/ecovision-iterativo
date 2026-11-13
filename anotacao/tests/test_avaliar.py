@@ -184,3 +184,33 @@ def test_avaliar_sem_nenhuma_imagem_com_rotulo(tmp_path):
     importar.importar(saida, [verdade / "images" / "a.jpg"], "val", ["Garrafa"])
     with pytest.raises(ValueError, match="nenhuma imagem"):
         avaliar.avaliar(saida, "falso", CLASSES, [verdade], {}, [0.2])
+
+
+def test_medir_erro_conjunto_compara_com_o_esperado_por_classe():
+    caixa = [(0.1 * i, 0.1, 0.1 * i + 0.05, 0.2) for i in range(5)]
+    # 5 objetos da classe 0 (Drink can); materiais: 0 metal, 1 plastic
+    verdade = [(0, c) for c in caixa]
+    proposta = {"parametros": {"confianca": 0.2}}
+
+    def pares(classes, confs=None):
+        confs = confs or [0.9] * len(classes)
+        return [("foto.jpg", proposta,
+                 [(k, conf, c) for k, conf, c in zip(classes, confs, caixa)], verdade)]
+
+    # a erra os objetos 0 e 1 (classe 1), b erra 0 (classe 1) e 2 ("outra", fora de
+    # classes.yaml); o objeto 4 de b está abaixo do limiar: fica de fora
+    a = pares([1, 1, 0, 0, 0])
+    b = pares([1, 0, None, 0, 0], [0.9, 0.9, 0.9, 0.9, 0.1])
+    r = avaliar.medir_erro_conjunto(a, b, ["metal", "plastic"])
+    assert r["objetos"] == 4 and r["imagens"] == 1
+    assert (r["erro_a"], r["erro_b"], r["ambos_erram"]) == (2, 2, 1)
+    assert r["esperado_ambos_erram"] == pytest.approx(2 * 2 / 4)
+    assert (r["concordam"], r["concordam_errado"]) == (2, 1)
+    assert r["esperado_concordam_errado"] == pytest.approx(2 * 1 / 4)   # só a classe 1
+    assert r["material_concordam_errado"] == 1
+    assert r["_erros_iguais"] == Counter({(0, 1): 1})
+    assert r["phi"] == pytest.approx(0.0)   # 1 de 2 erros em comum, com 2 de 4: independentes
+    # com o limiar de b mais baixo, o objeto 4 entra (acerto dos dois)
+    assert avaliar.medir_erro_conjunto(a, b, ["metal", "plastic"], 0.2, 0.05)["objetos"] == 5
+    # imagens sem proposta do outro anotador não entram
+    assert avaliar.medir_erro_conjunto(a, [], ["metal", "plastic"])["objetos"] == 0

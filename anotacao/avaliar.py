@@ -18,6 +18,9 @@ Medidas, com IoU >= 0,5 como acerto de posição:
 4. Precisão e recall com classe, por limiar.
 5. Caixa por clique: nos objetos sem caixa visível, se a 1ª (ou uma das 3
    primeiras) candidata no centro do objeto tem IoU >= 0,75.
+6. Com --comparar OUTRO: erro conjunto de classe dos dois anotadores, nos
+   objetos que ambos cobrem, contra o esperado com erros independentes dada a
+   classe verdadeira (dependência entre anotadores, para o voto).
 
 Os rótulos da equipe usam os nomes TACO; só entram as classes de classes.yaml,
 casadas pelo nome. Polígonos viram a caixa que os contém. Antes, valem as
@@ -335,6 +338,104 @@ def medir_clique(pares):
             "candidatas_por_imagem": c["candidatas"] / n if n else 0.0}
 
 
+def classe_por_objeto(deteccoes, verdade, limiar):
+    """
+    {índice da caixa verdadeira: classe prevista} pelas caixas a partir do
+    limiar, com o casamento sem classe; "outra" se a classe está fora de
+    classes.yaml. Objetos sem caixa ficam de fora.
+    """
+    dets = [d for d in deteccoes if d[1] >= limiar]
+    return {vi: "outra" if dets[di][0] is None else dets[di][0]
+            for di, vi in casar_sem_classe(dets, verdade)}
+
+
+def medir_erro_conjunto(pares_a, pares_b, materiais, limiar_a=None, limiar_b=None):
+    """
+    Dependência entre os erros de classe de dois anotadores (OBJETIVO.md,
+    seção 5), sobre os objetos que os dois cobrem. limiar None: o de leitura
+    gravado em cada proposta. O voto aprova o erro em que os dois concordam na
+    mesma classe errada; o esperado é o que dariam erros independentes dada a
+    classe verdadeira (o mesmo acerto de cada um por classe, sorteado à parte),
+    para que uma classe difícil para todos não conte como dependência.
+    """
+    por_nome_b = {nome: (proposta, deteccoes) for nome, proposta, deteccoes, _ in pares_b}
+    objetos = []   # (real, prevista por a, prevista por b)
+    imagens = 0
+    for nome, proposta_a, deteccoes_a, verdade in pares_a:
+        if nome not in por_nome_b:
+            continue
+        proposta_b, deteccoes_b = por_nome_b[nome]
+        imagens += 1
+        la = formato.limiares(proposta_a)[0] if limiar_a is None else limiar_a
+        lb = formato.limiares(proposta_b)[0] if limiar_b is None else limiar_b
+        pa = classe_por_objeto(deteccoes_a, verdade, la)
+        pb = classe_por_objeto(deteccoes_b, verdade, lb)
+        objetos += [(verdade[vi][0], pa[vi], pb[vi]) for vi in pa.keys() & pb.keys()]
+
+    def material(c):
+        return None if c == "outra" else materiais[c]
+
+    n = len(objetos)
+    c = Counter()
+    por_real = {}
+    erros_iguais = Counter()
+    for real, a, b in objetos:
+        ea, eb = a != real, b != real
+        c["erro_a"] += ea
+        c["erro_b"] += eb
+        c["ambos_erram"] += ea and eb
+        c["concordam"] += a == b
+        c["concordam_errado"] += a == b != real
+        c["material_concordam_errado"] += (material(a) == material(b) != materiais[real])
+        if a == b != real:
+            erros_iguais[(real, a)] += 1
+        r = por_real.setdefault(real, {"n": 0, "a": Counter(), "b": Counter(),
+                                       "ea": 0, "eb": 0})
+        r["n"] += 1
+        r["a"][a] += 1
+        r["b"][b] += 1
+        r["ea"] += ea
+        r["eb"] += eb
+    # Esperado com erros independentes dada a classe verdadeira
+    esperado_ambos = sum(r["ea"] * r["eb"] / r["n"] for r in por_real.values())
+    esperado_iguais = sum(r["a"][k] * r["b"][k] / r["n"] for real, r in por_real.items()
+                          for k in r["a"] if k != real)
+    # Correlação (phi) entre os indicadores de erro
+    n11 = c["ambos_erram"]
+    n10, n01 = c["erro_a"] - n11, c["erro_b"] - n11
+    n00 = n - n11 - n10 - n01
+    denominador = (c["erro_a"] * (n - c["erro_a"]) * c["erro_b"] * (n - c["erro_b"])) ** 0.5
+    return {
+        "imagens": imagens, "objetos": n, **c,
+        "esperado_ambos_erram": esperado_ambos,
+        "esperado_concordam_errado": esperado_iguais,
+        "phi": (n11 * n00 - n10 * n01) / denominador if denominador else 0.0,
+        "_erros_iguais": erros_iguais,
+    }
+
+
+def imprimir_erro_conjunto(r, a, b, classes):
+    nomes = [c["nome"] for c in classes]
+    n = r["objetos"]
+    print(f"\nErro conjunto de {a} e {b}: {n} objeto(s) cobertos pelos dois, "
+          f"em {r['imagens']} imagem(ns)")
+    if not n:
+        return
+    print(f"  {a} erra a classe: {r['erro_a']} ({r['erro_a'] / n:.0%}); "
+          f"{b}: {r['erro_b']} ({r['erro_b'] / n:.0%})")
+    print(f"  os dois erram: {r['ambos_erram']} (esperado se independentes dada a classe: "
+          f"{r['esperado_ambos_erram']:.1f}); phi dos erros: {r['phi']:.2f}")
+    print(f"  concordam na classe: {r['concordam']} ({r['concordam'] / n:.0%}); "
+          f"desses, errados: {r['concordam_errado']} "
+          f"({r['concordam_errado'] / r['concordam']:.0%} das concordâncias)"
+          if r["concordam"] else "  nunca concordam na classe")
+    print(f"  mesma classe errada (o voto aprovaria): {r['concordam_errado']} "
+          f"(esperado se independentes: {r['esperado_concordam_errado']:.1f}); "
+          f"mesmo material errado: {r['material_concordam_errado']}")
+    for (real, prevista), q in r["_erros_iguais"].most_common():
+        print(f"    {nomes[real]} -> {prevista if prevista == 'outra' else nomes[prevista]}: {q}")
+
+
 def pct(v):
     return f"{v:4.0%}"
 
@@ -445,8 +546,16 @@ def main(argv=None):
                         help="usa os rótulos da equipe como estão")
     parser.add_argument("--limiares", type=float, nargs="+", default=LIMIARES_PADRAO,
                         help="limiares de leitura da cobertura e da detecção")
+    parser.add_argument("--comparar", metavar="ANOTADOR",
+                        help="mede também o erro conjunto de classe com este outro anotador "
+                             "(dependência entre anotadores, para o voto)")
+    parser.add_argument("--limiares-par", type=float, nargs=2, metavar=("A", "B"),
+                        help="limiares de leitura do --anotador e do --comparar no erro "
+                             "conjunto (padrão: os gravados nas propostas)")
     parser.add_argument("--json", type=Path, help="grava também as medidas neste arquivo")
     args = parser.parse_args(argv)
+    if args.limiares_par and not args.comparar:
+        parser.error("--limiares-par só vale com --comparar")
 
     if not args.verdade:
         parser.error("nenhuma pasta de rótulos informada nem encontrada em legado/database")
@@ -466,9 +575,26 @@ def main(argv=None):
         print("Limiares abaixo do piso das propostas (sem caixas gravadas ali), ignorados: "
               + ", ".join(map(str, resultado["limiares_abaixo_do_piso"])))
     imprimir(resultado, classes)
+    dados = para_json(resultado, classes)
+    if args.comparar:
+        nomes = [c["nome"] for c in classes]
+        indice = indexar_verdade(args.verdade)
+        pares = [carregar_pares(args.saida, a, indice, nomes, correcoes)[0]
+                 for a in (args.anotador, args.comparar)]
+        if not pares[1]:
+            raise ValueError(f"nenhuma imagem de {args.saida} tem proposta de {args.comparar} "
+                             "e rótulo da equipe")
+        conjunto = medir_erro_conjunto(*pares, [c["material"] for c in classes],
+                                       *(args.limiares_par or (None, None)))
+        imprimir_erro_conjunto(conjunto, args.anotador, args.comparar, classes)
+        dados["erro_conjunto"] = {
+            "com": args.comparar, "limiares": args.limiares_par,
+            **{k: v for k, v in conjunto.items() if k != "_erros_iguais"},
+            "erros_iguais": [{"verdadeira": nomes[r],
+                              "prevista": p if p == "outra" else nomes[p], "n": q}
+                             for (r, p), q in conjunto["_erros_iguais"].most_common()]}
     if args.json:
-        formato.gravar_atomico(args.json, json.dumps(para_json(resultado, classes),
-                                                     ensure_ascii=False, indent=1) + "\n")
+        formato.gravar_atomico(args.json, json.dumps(dados, ensure_ascii=False, indent=1) + "\n")
         print(f"\nMedidas gravadas em {args.json}")
 
 
