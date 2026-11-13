@@ -1,6 +1,6 @@
 # Anotação assistida
 
-Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `importar.py` grava as imagens de um lote num armazenamento comum, e `anotar.py` propõe caixas para elas com um anotador intercambiável: o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny) e o [OWLv2](https://huggingface.co/google/owlv2-base-patch16-ensemble), detectores de vocabulário aberto que não dependem do detector em operação, ou o próprio `best.pt` da equipe (`yolo`), o terceiro anotador do voto. As caixas são **propostas** para um revisor humano: ficam em `propostas/`, à parte dos rótulos finais em `labels/`.
+Primeiro passo da anotação assistida prevista na monografia (seção 5.3.4, RF11): `importar.py` grava as imagens de um lote num armazenamento comum, e `anotar.py` propõe caixas para elas com um anotador intercambiável: o [Grounding DINO](https://huggingface.co/IDEA-Research/grounding-dino-tiny) e o [OWLv2](https://huggingface.co/google/owlv2-base-patch16-ensemble), detectores de vocabulário aberto que não dependem do detector em operação, ou o próprio `best.pt` da equipe (`yolo`), o terceiro anotador do voto. As caixas são **propostas** para um revisor humano: ficam no banco da saída (`anotacoes.sqlite`), à parte dos rótulos finais em `labels/`.
 
 ## Instalação
 
@@ -23,10 +23,10 @@ python anotacao/anotar.py -o anotacoes --aceitar         # propostas viram rótu
 
 ### Importar
 
-O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra em `imagens.csv` como `pendente`, com o lote e o conjunto. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
+O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote, com a largura e a altura. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
 
 - **A imagem muda o mínimo**: é copiada byte a byte, a não ser que o EXIF a gire (fotos de celular; ela é gravada já girada, e as caixas valem para ela) ou que passe de `--lado-maximo`. Sem normalizar cor nem recortar: a base de treino tem de parecer com o que a câmera vê na operação.
-- **Conjunto por lote**: o lote inteiro vai para `treino` ou `teste` (frames seguidos são quase iguais). O sorteio é pelo hash do nome do lote, cerca de 1 em cada 5 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força. Depois de gravado em `lotes.yaml`, não muda.
+- **Conjunto por lote**: o lote inteiro vai para `treino` ou `teste` (frames seguidos são quase iguais). O sorteio é pelo hash do nome do lote, cerca de 1 em cada 5 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força. Depois de gravado no banco, não muda.
 - **Região de interesse** (`--regiao X1 Y1 X2 Y2`, de 0 a 1): os anotadores descartam caixas com o **centro** fora dela (a mesa em volta da esteira). A imagem continua inteira.
 
 | Opção | Padrão | |
@@ -48,11 +48,12 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | `-o`, `--saida` | `anotacoes` | Diretório de saída, já com imagens importadas |
 | `--anotador` | `grounding-dino` | Qual anotador propõe as caixas: `grounding-dino`, `owlv2` ou `yolo` (o `best.pt` da equipe, de conjunto fechado) |
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
-| `--nome` | o do anotador | Nome com que as propostas são gravadas (a pasta em `propostas/`), para rodar o mesmo anotador com outra configuração na mesma saída, por exemplo outro peso do YOLO: `--anotador yolo --nome yolo-taco-s --modelo yolo_models/taco/yolov8s.pt`. O tipo do anotador vai em `parametros.tipo` |
+| `--nome` | o do anotador | Nome com que as propostas são gravadas, para rodar o mesmo anotador com outra configuração na mesma saída, por exemplo outro peso do YOLO: `--anotador yolo --nome yolo-taco-s --modelo yolo_models/taco/yolov8s.pt`. O tipo do anotador fica gravado à parte, na execução |
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
 | `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
-| `--aceitar` | — | Copia as propostas do anotador para `labels/` como estão e marca as imagens como `revisada`; só mexe nas `pendente`, só as caixas visíveis (a partir de `--confianca`), e deixa pendentes as que têm caixa de classe escondida. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
+| `--exportar` | — | Só refaz do banco os arquivos gerados (`data.yaml`, `labels/`, `revisadas.txt`) e sai |
+| `--aceitar` | — | Grava as propostas do anotador como uma revisão sem mudança (revisor `aceitar`), copia-as para `labels/` e marca as imagens como `revisada`; só mexe nas `pendente`, só as caixas visíveis (a partir de `--confianca`), e deixa pendentes as que têm caixa de classe escondida. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
 Opções de detecção, comuns a todo detector. A proposta guarda **todas** as caixas a partir de `--piso`, sempre com a classe; `--confianca` e `--confianca-classe` são gravados nela e aplicados por quem lê (a página, o `aceitar`, depois o voto), então dá para mudá-los sem rodar o modelo de novo (decisão 16 do `OBJETIVO.md`).
 
@@ -75,41 +76,38 @@ Opções de um anotador só:
 
 ## Google Colab
 
-Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `importar.py` e o `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, são importadas como um lote, e a saída fica no Drive (ou é baixada como `.zip`). Imagens já importadas e já anotadas são puladas, então, se o Colab desconectar, basta rodar de novo. O campo `RAMO` escolhe o ramo clonado.
+Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `importar.py` e o `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, são importadas como um lote, e a saída fica no Drive (ou é baixada como `.zip`). O banco não é usado direto sobre o Drive montado, onde as travas do SQLite não valem: o notebook trabalha numa cópia em `/content` e a grava de volta no Drive no último passo; se o Colab desconectar antes, o que foi anotado depois da última gravação se perde (imagens já importadas e já anotadas são puladas, então basta rodar de novo). Não rode dois Colabs sobre a mesma saída. O campo `RAMO` escolhe o ramo clonado.
 
 ## Saída
 
 ```
 anotacoes/
-├── data.yaml                          # names: os nomes de classes.yaml (TACO + Background); train e val: revisadas.txt
+├── anotacoes.sqlite                   # o estado: classes, lotes, imagens, propostas e revisões
+├── anotacoes.sqlite.bak               # cópia do banco antes de cada anotar.py
 ├── images/lote_foto.jpg               # gravada pelo importar.py
-├── lotes.yaml                         # por lote: conjunto, região de interesse, data da importação
-├── propostas/grounding-dino/lote_foto.json # o que o anotador propôs, com a confiança
-├── labels/foto.txt                    # rótulos finais (YOLO): só depois da revisão ou de --aceitar
-├── revisoes/foto.json                 # registro da última revisão (tempo, desfecho de cada caixa)
-├── imagens.csv                        # nome, status (pendente, revisada, descartada), lote e conjunto
-├── revisadas.txt                      # imagens revisadas com rótulo; gerado de imagens.csv
+├── labels/lote_foto.txt               # gerado do banco: rótulos finais (YOLO) das revisadas
+├── revisadas.txt                      # gerado do banco: imagens revisadas; train e val do data.yaml
+├── data.yaml                          # gerado do banco: names (TACO + Background); train e val: revisadas.txt
 ├── previa/grounding-dino/foto.jpg     # só com --previa
 └── visualizar.html                    # página para conferir propostas e rótulos (abaixo)
 ```
 
+O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels/`, `revisadas.txt` e `data.yaml` são gerados dele, para o Ultralytics e o Colab, que leem arquivos. Cada operação grava primeiro no banco, numa transação, e depois os arquivos daquela imagem; interrompida entre os dois, o banco vale, e `anotar.py --exportar` (ou a abertura do `revisar.py`) refaz os arquivos. O `importar.py`, o `anotar.py` e o `revisar.py` podem rodar ao mesmo tempo sobre a mesma saída: cada gravação é uma transação, e quem chega depois espera. Para inspecionar: `sqlite3 anotacoes/anotacoes.sqlite` ou o DB Browser for SQLite. O esquema está no `saida.py` e no [`PLANO-REVISAO.md`](PLANO-REVISAO.md), seção 6:
+
+| Tabela | O que guarda |
+|---|---|
+| `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão guarda caixas |
+| `lotes` | Conjunto (`treino` ou `teste`), região de interesse e data de cada lote |
+| `imagens` | Nome, tamanho, lote, status (`pendente`, `revisada`, `descartada`) e, para o voto (T6), `voto` e `motivo` |
+| `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
+| `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
+| `revisoes`, `caixas_revisao` | Cada sessão de revisão: ação, data, tempo ativo, revisor, a proposta que serviu de base e as caixas finais com o desfecho |
+
 As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada com `.txt` entraria no treino como negativo falso. E, sem a proposta original, não dá para medir quanto o revisor corrigiu cada anotador (RF13). Por isso o `data.yaml` aponta para `revisadas.txt`, e não para `images/`.
 
-Cada proposta é um JSON:
+**Nada é sobrescrito.** Anotar de novo (`--sobrescrever`) grava uma proposta nova, e a vigente de um anotador numa imagem é a mais recente; as anteriores continuam no banco, e a revisão guarda qual versão viu. Cada revisão é uma linha nova, e a vigente é a mais recente. A proposta guarda a classe pelo nome (o anotador pode propor classe fora do `data.yaml`) e as caixas da mais confiante para a menos. Quem lê aplica os limiares de leitura gravados nos parâmetros da execução (`confianca`, `confianca_classe`): a página mostra a partir de `confianca`, esconde a classe abaixo de `confianca_classe` e oferece as de baixo como candidatas. O registro da revisão cita cada caixa pelo índice na proposta, que não muda com os limiares. Uma imagem entra como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
-```json
-{"formato": 2, "anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny",
- "parametros": {"piso": 0.05, "confianca": 0.2, "confianca_classe": 0.35, "iou": 0.5,
-                "area_maxima": 0.5, "contencao": 0.9},
- "classes": "<hash da lista de classes>", "imagem": "lote_foto.jpg", "largura": 4032, "altura": 3024,
- "caixas": [{"classe": "Drink can", "confianca": 0.81, "caixa": [x1, y1, x2, y2]},
-            {"classe": "Glass cup", "confianca": 0.22, "caixa": [x1, y1, x2, y2]},
-            {"classe": "Normal paper", "confianca": 0.12, "caixa": [x1, y1, x2, y2]}]}
-```
-
-A classe vai pelo nome, e a caixa em pixels da imagem gravada em `images/`, da mais confiante para a menos. Quem lê aplica os limiares de `parametros`: no exemplo, a página mostra a lata e o copo (este sem classe, abaixo de 0,35) e oferece o papel como candidata. O registro da revisão cita cada caixa pelo índice nessa lista, que não muda com os limiares. Propostas do formato anterior (sem `formato`, com `candidatas` e `sugerida` à parte) são recusadas: anote de novo numa saída nova. Cada anotador grava na sua pasta, então vários podem anotar a mesma saída, um de cada vez. Uma imagem entra em `imagens.csv` como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
-
-Várias execuções podem gravar no mesmo diretório. Se o `data.yaml` da saída tiver outras classes, o script o refaz quando nenhum `.txt` de `labels/` nem registro de `revisoes/` guarda ids (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); senão, recusa a saída, porque os ids deixariam de bater. Recusa também uma saída do formato antigo (`labels/` sem `imagens.csv`), em que as propostas eram gravadas direto como rótulos.
+Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão guarda caixas (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, ou só com `labels/`) são recusadas: importe de novo numa saída nova.
 
 Ainda não há divisão entre treino e validação: ela deve ser feita por sessão de captura, nunca por imagem (monografia, seção 5.3.5), e fica para quando houver sessões.
 
@@ -119,13 +117,13 @@ O diretório `anotacoes/` está no `.gitignore`: imagens não vão para o reposi
 
 Ao terminar, o `anotar.py` grava `visualizar.html` no diretório de saída e imprime o endereço. A página abre direto no navegador, sem servidor. À esquerda fica a lista das imagens, com a contagem de objetos e o status. À direita, a imagem com as caixas coloridas por classe e, embaixo, a contagem por classe. O seletor "mostrar" escolhe o que é desenhado:
 
-- **automático** (padrão): a anotação final se a imagem tem `.txt`; senão, as propostas do primeiro anotador que tiver alguma;
+- **automático** (padrão): a anotação final se a imagem tem `.txt`; senão, as propostas vigentes do primeiro anotador que tiver alguma;
 - **anotação final**: só `labels/`;
 - **propostas: \<anotador\>**: as propostas de um anotador.
 
 As propostas aparecem tracejadas e com a confiança, e as caixas finais em linha contínua. As setas `←`/`→` navegam, as caixas e os nomes podem ser escondidos, e `visualizar.html#3` abre a terceira imagem. A página só mostra; corrigir fica para a página de revisão (RF12, [`PLANO-REVISAO.md`](PLANO-REVISAO.md)).
 
-A página lê os arquivos quando é gerada. Depois de editar algum à mão, ou para ver um diretório no formato YOLO gerado por outra ferramenta (só `data.yaml`, `images/` e `labels/`), gere de novo:
+A página lê o banco e `labels/` quando é gerada. Depois de anotar ou revisar mais imagens, ou para ver um diretório no formato YOLO gerado por outra ferramenta (só `data.yaml`, `images/` e `labels/`, sem banco), gere de novo:
 
 ```bash
 python anotacao/visualizar.py anotacoes
@@ -164,41 +162,42 @@ A busca oferece qualquer classe do `data.yaml` e mostra até 9 opções. Não di
 
 A confirmação do `Enter` resume o que vai ser gravado: as classes das caixas, quantas foram corrigidas e removidas, e o aviso de fundo quando não sobra nenhuma caixa. Salvar pelo botão ou por `Ctrl+S` não pede confirmação.
 
-Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava `labels/<nome>.txt` e marca a imagem como `revisada`; descartar apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
+Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava a revisão no banco, gera `labels/<nome>.txt` e marca a imagem como `revisada`; descartar grava a revisão, apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
 
 **Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as caixas da proposta abaixo de `--confianca` (de `--piso` para cima); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto.
 
 Desfazer tudo volta às propostas como chegaram, e a imagem deixa de contar como alterada. Ainda não dá para desenhar à mão, mover ou redimensionar caixas: um objeto que nenhuma candidata cobre leva ao descarte da imagem (decisão 12 do `PLANO-REVISAO.md`). Também não dá para reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
 
-Cada revisão grava `revisoes/<nome>.json` (RF13), sobrescrito se a imagem for revisada de novo:
+Cada revisão é uma linha nova no banco (RF13); a API devolve a vigente assim:
 
 ```json
 {"imagem": "foto.jpg", "acao": "salvar", "data": "2026-11-10T00:13:30-03:00",
  "tempo_ativo_s": 6.0, "revisor": null,
- "base": {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny", "classes": "<hash>"},
+ "base": {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny", "classes": "<hash>",
+          "proposta_id": 42, "limiares": {"confianca": 0.2, "confianca_classe": 0.35}},
  "caixas": [{"id": 2, "caixa": [x1, y1, x2, y2], "proposta": 0, "desfecho": "classe_corrigida"}],
  "removidas": [1]}
 ```
 
-O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` quando a classe da proposta estava escondida do revisor, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` quando a classe da proposta estava escondida do revisor, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas visíveis apagadas (calculadas da proposta base, que nunca muda). O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 
-O servidor escuta só em `127.0.0.1` e lê o disco a cada pedido, então mudanças feitas à mão aparecem ao recarregar. Gravações aceitam só o `Host` local, para que um site aberto no navegador não consiga gravar pela porta (DNS rebinding). A API, em JSON, é a mesma que a página usa:
+O servidor escuta só em `127.0.0.1` e lê o banco a cada pedido, então propostas gravadas pelo `anotar.py` com a página aberta aparecem ao recarregar. Ao subir, refaz os arquivos gerados a partir do banco. Gravações aceitam só o `Host` local, para que um site aberto no navegador não consiga gravar pela porta (DNS rebinding). A API, em JSON, é a mesma que a página usa:
 
 | Rota | Resposta |
 |---|---|
 | `GET /api/classes` | `[{id, nome, material}]` |
 | `GET /api/imagens?status=pendente&ordem=incerteza` | `{imagens: [{nome, status, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}` |
-| `GET /api/imagens/<nome>` | `{nome, status, largura, altura, final, propostas: {anotador: [...]}, invalidas, revisao}` |
-| `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", base, tempo_ativo_s, caixas: [{id, caixa, proposta}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado), 409 se a imagem não está pendente |
+| `GET /api/imagens/<nome>` | `{nome, status, largura, altura, final, propostas: {anotador: [...]}, propostas_ids: {anotador: id}, candidatas, invalidas, revisao}` |
+| `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", base, proposta_id, tempo_ativo_s, caixas: [{id, caixa, proposta, origem}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, ou se `proposta_id` não é mais a proposta vigente de `base` (o anotador gravou outra depois que a página abriu) |
 | `GET /images/<nome>` | A imagem |
 
-As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. No `PUT`, `proposta` é o índice da caixa de origem nas propostas de `base`, ou `null` para uma caixa nova. Só imagens que estão no `imagens.csv` são servidas. A gravação segue a ordem `labels/`, `revisoes/` e, por último, o status em `imagens.csv`: interrompida no meio, a imagem continua pendente.
+As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. No `PUT`, `proposta` é o índice da caixa de origem nas propostas de `base`, ou `null` para uma caixa nova. Só imagens registradas no banco são servidas. Conferir o status, gravar a revisão e mudar o status são uma transação só; o `.txt` vem depois, e, se faltar, a próxima abertura do servidor o refaz.
 
 ## Novo anotador
 
-Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dicionário `ANOTADORES`. Ela define `nome` (o valor de `--anotador` e a pasta em `propostas/`) e `MODELO_PADRAO`, e implementa só:
+Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dicionário `ANOTADORES`. Ela define `nome` (o valor de `--anotador`, e o nome das propostas sem `--nome`) e `MODELO_PADRAO`, e implementa só:
 
 - `carregar()`: carrega o modelo `self.versao` em `self.dispositivo` (se `None`, o detector escolhe);
 - `pontuar(imagem)`: recebe a imagem PIL em RGB e devolve `(pontuacoes, caixas)`, a pontuação de cada classe (na ordem de `classes.yaml`) em cada caixa bruta, como lista de listas ou tensor, e as caixas `(x1, y1, x2, y2)` normalizadas de 0 a 1.

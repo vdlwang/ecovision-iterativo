@@ -23,7 +23,7 @@ O código do voto aceita N anotadores, mas cada um a mais custa uma integração
 
 ## 2. Estado de cada imagem
 
-O framework (T1) grava as propostas de cada anotador separadas das anotações finais, e um `imagens.csv` com o status de cada imagem. O sistema completo acrescenta colunas a esse arquivo, que continua sendo a fonte do estado:
+O framework (T1) grava as propostas de cada anotador separadas das anotações finais, e o status de cada imagem, num banco SQLite (`anotacoes.sqlite`, desde 2026-11-13; antes, `imagens.csv`), que é a fonte do estado. A tabela `imagens` já tem as colunas do sistema completo:
 
 - `lote`: sessão de captura de onde a imagem veio.
 - `conjunto`: `treino` ou `teste`, sorteado por lote na entrada e nunca mais alterado.
@@ -388,8 +388,8 @@ Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ult
 O fluxo do diagrama v3, do lado da anotação, em passos separados que se podem rodar um de cada vez ou encadeados por um `pipeline.py`:
 
 ```
-importar.py lote/   → armazenamento comum (images/), imagens.csv com lote, conjunto, metadados
-anotar.py × N       → propostas/<anotador>/<nome>.json, um anotador por vez (anotadores.yaml)
+importar.py lote/   → armazenamento comum (images/); no banco, a imagem com lote, conjunto, metadados
+anotar.py × N       → propostas no banco, uma execução por anotador e rodada, um anotador por vez (anotadores.yaml)
 treino: votar.py    → aprovadas: labels/ com as caixas de consenso; reprovadas e auditoria: fila de revisão
 teste:  unir.py     → caixas sem classe (união dos N), fila de revisão obrigatória (T9)
 revisar.py          → revisão humana
@@ -423,14 +423,14 @@ Fora da importação, de propósito:
 
 ### `avaliar.py` sobre propostas gravadas
 
-O `avaliar.py` deixa de rodar o modelo: lê `propostas/<anotador>/` de uma saída anotada sobre as fotos de validação (importadas como as outras) e os rótulos da equipe. Mede qualquer anotador pela mesma interface, em segundos e sem GPU, e o voto (T3) é ler N arquivos por foto. Medidas: cobertura sem classe e imagens completas por limiar, caixas a remover, acerto de classe e de material das caixas que cobrem um objeto, precisão e recall. Sai o "não localizadas" sobre as 900 consultas do Grounding DINO: provou que as caixas do modelo eram aproveitáveis, e a cobertura o substitui para qualquer anotador.
+O `avaliar.py` deixa de rodar o modelo: lê as propostas vigentes de um anotador numa saída anotada sobre as fotos de validação (importadas como as outras) e os rótulos da equipe. Mede qualquer anotador pela mesma interface, em segundos e sem GPU, e o voto (T3) é ler N arquivos por foto. Medidas: cobertura sem classe e imagens completas por limiar, caixas a remover, acerto de classe e de material das caixas que cobrem um objeto, precisão e recall. Sai o "não localizadas" sobre as 900 consultas do Grounding DINO: provou que as caixas do modelo eram aproveitáveis, e a cobertura o substitui para qualquer anotador.
 
 ### Paralelismo (possível, não necessário)
 
 Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, liberar a memória, o próximo). O formato já permite paralelizar sem mudança:
-- **Unidade de trabalho**: (imagem, anotador). Cada anotador grava só em `propostas/<anotador>/`, com gravação atômica, e pula o que já tem: N anotadores podem rodar em processos ou GPUs diferentes, e uma rodada interrompida continua de onde parou.
+- **Unidade de trabalho**: (imagem, anotador). Cada anotador grava as suas propostas no banco, uma transação por imagem, e pula o que já tem: N anotadores podem rodar em processos ou GPUs diferentes, e uma rodada interrompida continua de onde parou.
 - **O voto espera**: só vota uma imagem com proposta de todos os N anotadores configurados; a incompleta fica para a próxima rodada, não é reprovada.
-- **Um escritor por vez no `imagens.csv`**: `importar.py`, `votar.py` e o `revisar.py` escrevem nele. Até o SQLite (fase 3b do T1), um arquivo de trava enquanto a pipeline escreve, e o `revisar.py` recusa gravar enquanto ele existir.
+- **Vários escritores**: `importar.py`, `anotar.py`, `votar.py` e o `revisar.py` gravam no mesmo banco. Desde o SQLite (fase 3b do T1, 2026-11-13), cada gravação é uma transação com a trava de escrita desde o início (`BEGIN IMMEDIATE`), e quem chega depois espera; não é preciso arquivo de trava.
 
 ### Voto e revisão
 
@@ -447,8 +447,8 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); vários prompts por classe, adotados (2026-11-13: classe do DINO 57% → 63%, do OWLv2 76% → 79%, imagens completas 73% → 86% e 85% → 92%); YOLO da equipe como terceiro anotador, medido (2026-11-13: classe 87%, mas cobre só 43% dos objetos); ficam como alternativas a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
 | T3 | [x] `4341c97` | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5); `--voto` com o NooN estrito por imagem e o consenso por caixa (2026-11-13). Medido: por imagem, 1–5% de aprovação com qualquer YOLO; por caixa, 97–99% certas em ~29% dos objetos. Regra: por imagem (decisão 18) | T2 | pytest com caixas sintéticas; tabelas |
 | T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
-| T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o `imagens.csv`, com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
-| T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores; trava do `imagens.csv` (seção 6) | T1, T3, T5 | pytest do voto com caixas sintéticas |
+| T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o registra (hoje no banco SQLite), com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
+| T6 | [ ] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores e registra quais propostas usou; grava no banco SQLite (fase 3b do T1, feita), numa transação | T1, T3, T5 | pytest do voto com caixas sintéticas |
 | T7 | [ ] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs. Até lá a página fica como está (2026-11-12), com três pendências: a base da edição é o primeiro anotador em ordem alfabética (hoje o Grounding DINO, pior em classe que o OWLv2); a ordem por incerteza mistura as confianças de todos os anotadores, em escalas diferentes; e o registro da revisão só mede a base | T1, T6 | pytest da API; teste manual |
 | T8 | [ ] | **Auditoria**: amostra das aprovadas (ex.: 5%) na fila de revisão, sem o revisor saber | T6, T7 | pytest |
 | T9 | [ ] | **Modo de teste**: segmentado e sem classe (padrão no teste, seção 4) e sem pré-anotação | T1, T5 | pytest; teste manual |

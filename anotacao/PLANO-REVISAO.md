@@ -7,7 +7,7 @@ Escopo atual do projeto (tarefa T1 do [`OBJETIVO.md`](../OBJETIVO.md), que descr
 **Status**: `[ ]` pendente · `[x]` feito (com hash) · `[~]` parcial
 
 **Ponto de partida**:
-- `anotar.py` (`e502a35`): o Grounding DINO propõe caixas e as grava direto em `labels/`, no formato YOLO. Desde a fase 1 (`8a0253d`), grava propostas em `propostas/<anotador>/` e o status em `imagens.csv`.
+- `anotar.py` (`e502a35`): o Grounding DINO propõe caixas e as grava direto em `labels/`, no formato YOLO. Desde a fase 1 (`8a0253d`), grava propostas em `propostas/<anotador>/` e o status em `imagens.csv`; desde a fase 3b (2026-11-13), tudo no banco SQLite (seção 6).
 - `visualizar.py` (`3084516`): página estática (`file://`, só leitura) com as caixas de `labels/`; desde a fase 1, também as propostas.
 - `avaliar.py` (`b70ac8a`): mede um anotador contra os rótulos da equipe em `legado/database`.
 
@@ -17,7 +17,7 @@ A ideia é separar o que o anotador propõe do que o revisor aprova, e evoluir a
 
 ## 1. Propostas separadas das anotações finais
 
-Formato das fases 1 a 3. Na fase 3b, `imagens.csv`, `propostas/` e `revisoes/` passam para um banco SQLite (seção 6); a separação entre proposta e rótulo final continua a mesma.
+Formato das fases 1 a 3, guardado aqui como histórico. **Desde a fase 3b (2026-11-13)**, `imagens.csv`, `propostas/`, `revisoes/` e `lotes.yaml` estão num banco SQLite (seção 6), e `labels/`, `revisadas.txt` e `data.yaml` são gerados dele; a separação entre proposta e rótulo final continua a mesma. O formato em vigor está no `anotacao/README.md` ("Saída").
 
 Gravar as propostas em `labels/` mistura duas coisas: o Ultralytics trata imagem sem objetos como fundo (uma imagem não revisada entraria no treino como negativo falso), e a proposta original se perde, o que impede medir o anotador (RF13).
 
@@ -76,13 +76,13 @@ Caixa proposta aparece tracejada e com a confiança; depois de tocada pelo revis
 
 ## 5. Registro da revisão (RF13)
 
-`revisoes/<nome>.json` guarda:
+O registro da revisão (até a fase 3, `revisoes/<nome>.json`; desde a 3b, as tabelas `revisoes` e `caixas_revisao`) guarda:
 
 - **Tempo ativo**: o cronômetro pausa quando a aba perde o foco ou depois de 60 s sem interação.
 - **Desfecho de cada caixa**: `aceita`, `classe_corrigida`, `classe_atribuida` (a classe da proposta estava escondida do revisor, abaixo de `confianca_classe`; 2026-11-11) ou `adicionada` (com `origem`: `candidata`, e `desenho` na fase 4); as propostas que sumiram vão em `removidas`. `caixa_ajustada` fica para a fase 4 (ver abaixo).
 - **Versões** do anotador de base e das classes que geraram as propostas.
 - **Revisor**: campo já previsto, mesmo com um revisor só (ver decisão 3).
-- **Só a última revisão** (decidido em 2026-11-09): o arquivo é sobrescrito a cada revisão. Com o SQLite (fase 3b, seção 6), todas as sessões ficam guardadas.
+- **Todas as sessões** (desde a fase 3b, 2026-11-13): cada revisão é uma linha nova, e a vigente é a mais recente. Até a fase 3, só a última ficava (o arquivo era sobrescrito, decisão de 2026-11-09).
 
 O servidor calcula os desfechos comparando cada caixa com a proposta de origem, que a página indica pelo índice. Enquanto as caixas não se movem, ele recusa uma caixa que diz vir de uma proposta mas tem outras coordenadas, para que o registro nunca chame de `aceita` uma caixa alterada.
 
@@ -154,9 +154,9 @@ anotacoes/
 - Um arquivo binário só: um banco corrompido perde tudo. Cópia de segurança antes de cada `anotar.py` (`anotacoes.sqlite.bak`, via `backup`), barata para o tamanho esperado (milhares de imagens, poucos MB).
 - Esforço estimado: ~1 a 1,5 dia, a maior parte reescrevendo os testes do `saida.py` e do `revisar.py` para o banco.
 
-### Ajustes antes de implementar (2026-11-13, checkpoint)
+### Ajustes antes de implementar (2026-11-13)
 
-Revisto antes do T6 (`votar.py`), que seria o terceiro escritor do `imagens.csv`. A implementação **não começou**: o código ainda é o das fases 1 a 3, e `anotacao/anotacoes/` pode ser recriada do zero (sem importador; as 3 revisões de teste se perdem, decidido em 2026-11-13).
+Revisto antes do T6 (`votar.py`), que seria o terceiro escritor do `imagens.csv`, e **implementado no mesmo dia** (ver "Feito" abaixo). `anotacao/anotacoes/` foi recriada do zero, sem importador.
 
 **Esquema, além da tabela acima:**
 - `imagens` já nasce com `lote` (FK `lotes`, pode ser nulo), `voto` (`aprovada`, `falhou` ou nulo) e `motivo`; o `conjunto` vem do lote. `largura` e `altura` gravadas pelo `importar.py` (depois do giro do EXIF).
@@ -180,6 +180,8 @@ Revisto antes do T6 (`votar.py`), que seria o terceiro escritor do `imagens.csv`
 
 **Ordem sugerida:** `saida.py` com o esquema e `test_saida.py`; `importar.py`; `anotar.py`; `revisar.py` e a página; `avaliar.py` e `visualizar.py`; notebook e READMEs; o teste de concorrência e o manual da seção abaixo. Depois, o T6 sobre o banco.
 
+**Feito (2026-11-13)**, com uma diferença do desenho acima: a anotação `final` que as páginas mostram continua lida do `.txt` de `labels/` (gerado do banco), e não da revisão no banco. Assim o `visualizar.py` ainda abre uma pasta YOLO de outra ferramenta, sem banco, e mostra as linhas inválidas de um `.txt`. Também: `abrir(saida)` não cria o banco (quem cria é `preparar()`), e a cópia `anotacoes.sqlite.bak` é feita só quando o `anotar.py` vai de fato anotar. Verificado: 103 testes (com a escrita concorrente de duas threads e o 409 da proposta trocada), e à mão, sobre as 24 fotos de `tcc-0CF`: importar, anotar com o Grounding DINO e o YOLO, revisar duas pela API (troca de classe e descarte), `avaliar.py` lendo do banco, e uma época de treino do YOLO com o `data.yaml` gerado. O notebook do Colab trabalha numa cópia local e grava de volta no Drive (ida e volta testada localmente).
+
 ### Verificação
 
 - pytest do esquema: as `CHECK` recusam estado inválido; `classes` só aceita acréscimo; versão desconhecida é recusada.
@@ -198,7 +200,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 1 | [x] `8a0253d` | Formato da seção 1 e anotadores da seção 2: `anotar.py --anotador` grava `propostas/<anotador>/` e `imagens.csv`; `--aceitar`; `visualizar.py` mostra propostas (com a confiança) e anotações finais | pytest com propostas sintéticas; o Grounding DINO grava o mesmo que hoje |
 | 2 | [x] `ad4170c` | `revisar.py`: servidor e API só de leitura; a página atual servida por ele, com a fila | pytest com o servidor numa thread |
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
-| 3b | [~] | (Desenho revisto em 2026-11-13, ver "Ajustes antes de implementar"; código não iniciado.) Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
+| 3b | [x] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
 | 4 | [~] | Caixa por clique sobre as candidatas do anotador e desfazer/refazer (feitos, 2026-11-11; medição no `OBJETIVO.md`). Adiados pela decisão 12: desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta) e `caixa_ajustada` | pytest da API; teste no Chrome headless pelo protocolo de depuração |
 | 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
 
