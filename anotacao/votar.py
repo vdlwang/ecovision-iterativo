@@ -10,8 +10,11 @@ labels/ e entra no treino.txt; a que falha fica pendente, para a revisão.
     python anotacao/anotar.py -o anotacoes --anotador grounding-dino   # e owlv2, yolo
     python anotacao/votar.py anotacoes [--anotadores grounding-dino owlv2 yolo]
 
-Só vota imagens pendentes de lotes de treino com proposta de todos os
-anotadores; as de teste vão à revisão sem pré-anotação (seção 4). Cada
+Só vota imagens pendentes com proposta de todos os anotadores. Nos lotes de
+teste não há voto de classe: grava a união das caixas dos anotadores, sem
+classe, e todas vão à revisão (seção 4). Nas de treino que falham, guarda as
+caixas que tiveram consenso, de onde a revisão parte. Toda revisão parte de um
+voto: imagem não votada não é revisável. Cada
 anotador é lido no limiar de leitura gravado na proposta (--limiares troca),
 com a classe sugerida mesmo abaixo de confianca_classe: ela só é escondida do
 revisor. Rodar de novo vota as imagens novas e as que ganharam proposta nova;
@@ -49,12 +52,12 @@ def casar_mesma_classe(a, b, limiar_iou=IOU_VOTO):
     return casados
 
 
-def consenso_por_caixa(listas, limiar_iou=IOU_VOTO):
+def consenso_com_membros(listas, limiar_iou=IOU_VOTO):
     """
     As caixas em que os N anotadores concordam, sem exigir a imagem inteira:
     cada caixa do primeiro que casa (mesma classe, IoU >= limiar_iou) com uma
     de cada um dos outros, e essas entre si. [(classe, menor confiança,
-    mediana de cada coordenada)].
+    mediana de cada coordenada, [(anotador, posição da caixa na lista dele)])].
     """
     base = listas[0]
     casamentos = [casar_mesma_classe(base, outra, limiar_iou) for outra in listas[1:]]
@@ -62,13 +65,34 @@ def consenso_por_caixa(listas, limiar_iou=IOU_VOTO):
     for i, (classe, conf, caixa) in enumerate(base):
         if not all(i in c for c in casamentos):
             continue
-        grupo = [(conf, caixa)] + [(l[c[i]][1], l[c[i]][2]) for l, c in zip(listas[1:], casamentos)]
-        caixas = [g[1] for g in grupo]
+        membros = [(0, i)] + [(a, c[i]) for a, c in enumerate(casamentos, 1)]
+        grupo = [listas[a][j] for a, j in membros]
+        caixas = [g[2] for g in grupo]
         if any(iou(x, y) < limiar_iou for k, x in enumerate(caixas) for y in caixas[k + 1:]):
             continue
-        consenso.append((classe, min(g[0] for g in grupo),
-                         tuple(median(c[k] for c in caixas) for k in range(4))))
+        consenso.append((classe, min(g[1] for g in grupo),
+                         tuple(median(c[k] for c in caixas) for k in range(4)), membros))
     return consenso
+
+
+def consenso_por_caixa(listas, limiar_iou=IOU_VOTO):
+    """consenso_com_membros sem os membros: [(classe, menor confiança, mediana)]."""
+    return [c[:3] for c in consenso_com_membros(listas, limiar_iou)]
+
+
+def motivo_falha(listas, consenso):
+    """
+    Por que o voto NooN estrito reprova a imagem, ou None se aprova: "vazia"
+    (ninguém achou nada), "quantidade" (números de caixas diferentes) ou
+    "caixas" (alguma caixa sem par na mesma classe).
+    """
+    if not any(listas):
+        return "vazia"
+    if len({len(l) for l in listas}) > 1:
+        return "quantidade"
+    if len(consenso) != len(listas[0]):
+        return "caixas"
+    return None
 
 
 def voto_estrito(listas, limiar_iou=IOU_VOTO):
@@ -78,32 +102,64 @@ def voto_estrito(listas, limiar_iou=IOU_VOTO):
     mesmo número de caixas e cada caixa do primeiro casa (mesma classe, IoU >=
     limiar_iou) com uma de cada um dos outros, e essas também casam entre si.
     Imagem sem caixa não passa. Devolve (motivo, consenso): motivo None se
-    passou, senão "vazia", "quantidade" ou "caixas"; consenso, [(classe, menor
-    confiança, mediana de cada coordenada)] quando passa.
+    passou (motivo_falha); consenso, [(classe, menor confiança, mediana de
+    cada coordenada)] quando passa.
     """
-    if not any(listas):
-        return "vazia", []
-    if len({len(l) for l in listas}) > 1:
-        return "quantidade", []
-    consenso = consenso_por_caixa(listas, limiar_iou)
-    if len(consenso) != len(listas[0]):
-        return "caixas", []
-    return None, consenso
+    consenso = consenso_por_caixa(listas, limiar_iou) if any(listas) else []
+    motivo = motivo_falha(listas, consenso)
+    return motivo, ([] if motivo else consenso)
+
+
+def unir(listas, limiar_iou=IOU_VOTO):
+    """
+    União das caixas dos N anotadores, sem classe (OBJETIVO.md, seção 4): da
+    mais confiante para a menos, cada caixa entra no primeiro grupo cujo
+    primeiro membro tem IoU >= limiar_iou com ela e que ainda não tem caixa do
+    mesmo anotador; senão, abre um grupo. [(None, maior confiança, mediana de
+    cada coordenada, [(anotador, posição na lista dele)])].
+    """
+    todas = sorted(((conf, a, j, caixa) for a, l in enumerate(listas)
+                    for j, (_, conf, caixa) in enumerate(l)), key=lambda t: -t[0])
+    grupos = []
+    for conf, a, j, caixa in todas:
+        grupo = next((g for g in grupos if a not in {m[0] for m in g["membros"]}
+                      and iou(g["caixas"][0], caixa) >= limiar_iou), None)
+        if grupo is None:
+            grupos.append({"conf": conf, "caixas": [caixa], "membros": [(a, j)]})
+        else:
+            grupo["caixas"].append(caixa)
+            grupo["membros"].append((a, j))
+    return [(None, g["conf"], tuple(median(c[k] for c in g["caixas"]) for k in range(4)),
+             g["membros"]) for g in grupos]
 
 
 def decisor(limiares=None, limiar_iou=IOU_VOTO):
     """
     A função de decisão que o saida.votar() chama com as propostas de uma
-    imagem. limiares: um por anotador, None para o gravado na proposta.
+    imagem e o conjunto do lote. limiares: um por anotador, None para o
+    gravado na proposta. No treino, o voto NooN estrito, guardando as caixas
+    de consenso mesmo quando falha (a revisão parte delas); no teste, a união
+    sem classe.
     """
-    def decidir(propostas):
-        usados, listas = [], []
+    def decidir(propostas, conjunto):
+        usados, listas, indices = [], [], []
         for proposta, limiar in zip(propostas, limiares or [None] * len(propostas)):
             limiar = formato.limiares(proposta)[0] if limiar is None else limiar
             usados.append(limiar)
-            listas.append([c for c in formato.caixas_normalizadas(proposta) if c[1] >= limiar])
-        motivo, consenso = voto_estrito(listas, limiar_iou)
-        return motivo, consenso, usados
+            visiveis = [(k, c) for k, c in enumerate(formato.caixas_normalizadas(proposta))
+                        if c[1] >= limiar]
+            indices.append([k for k, _ in visiveis])
+            listas.append([c for _, c in visiveis])
+        if conjunto == "teste":
+            caixas, resultado, motivo = unir(listas, limiar_iou), "uniao", None
+        else:
+            caixas = consenso_com_membros(listas, limiar_iou) if any(listas) else []
+            motivo = motivo_falha(listas, caixas)
+            resultado = "falhou" if motivo else "aprovada"
+        # posição na lista filtrada -> índice da caixa na proposta
+        caixas = [(classe, conf, caixa, [(a, indices[a][j]) for a, j in membros])
+                  for classe, conf, caixa, membros in caixas]
+        return resultado, motivo, caixas, usados
     return decidir
 
 
@@ -159,7 +215,8 @@ def main(argv=None):
     r = votar(args.saida, args.anotadores, limiares, args.iou, args.revotar)
     votadas = len(r["aprovadas"]) + len(r["falhou"])
     print(f"Voto {len(args.anotadores)}oo{len(args.anotadores)} de "
-          f"{', '.join(args.anotadores)}: {votadas} imagem(ns) votada(s)")
+          f"{', '.join(args.anotadores)}: {votadas} imagem(ns) de treino votada(s), "
+          f"{len(r['uniao'])} de teste unida(s) sem classe")
     if votadas:
         motivos = {}
         for m in r["falhou"].values():
@@ -169,7 +226,7 @@ def main(argv=None):
               + (f" ({', '.join(f'{m} {q}' for m, q in sorted(motivos.items()))})"
                  if motivos else ""))
     print(f"  puladas: {r['ja_votadas']} já votada(s) com as mesmas propostas, "
-          f"{r['incompletas']} sem proposta de todos, {r['teste']} de teste")
+          f"{r['incompletas']} sem proposta de todos")
     linhas = (args.saida / "treino.txt").read_text(encoding="utf-8").splitlines()
     print(f"treino.txt: {len(linhas)} imagem(ns) (aprovadas e revisadas)")
 

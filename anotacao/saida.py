@@ -35,9 +35,12 @@ from PIL import Image
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 STATUS = ("pendente", "revisada", "descartada")
 CONJUNTOS = ("treino", "teste")
-VOTOS = ("aprovada", "falhou")
+# aprovada e falhou: o voto NooN, nos lotes de treino; uniao: a união das caixas
+# dos anotadores, sem classe, nos de teste (OBJETIVO.md, seção 4)
+VOTOS = ("aprovada", "falhou", "uniao")
+ORIGENS = ("voto", "proposta", "candidata")  # de onde vem uma caixa da revisão
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 3
+VERSAO_ESQUEMA = 4
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -96,27 +99,37 @@ CREATE TABLE caixas_propostas (
     CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
     PRIMARY KEY (proposta_id, indice)
 );
+-- Toda revisão parte de um voto (o vigente quando a página abriu a imagem)
 CREATE TABLE revisoes (
     id INTEGER PRIMARY KEY,
     imagem_id INTEGER NOT NULL REFERENCES imagens (id),
-    proposta_id INTEGER REFERENCES propostas (id),
+    voto_id INTEGER NOT NULL REFERENCES votos (id),
     acao TEXT NOT NULL CHECK (acao IN ('salvar', 'descartar')),
     data TEXT NOT NULL,
     tempo_ativo_s REAL NOT NULL CHECK (tempo_ativo_s >= 0),
     revisor TEXT
 );
 CREATE INDEX revisoes_imagem ON revisoes (imagem_id);
+-- Cada caixa final vem de uma caixa do voto (voto_indice) ou de uma caixa de
+-- uma proposta usada pelo voto (proposta_id, proposta_indice): uma visível que
+-- não entrou no voto (origem proposta) ou uma abaixo do limiar (candidata)
 CREATE TABLE caixas_revisao (
     revisao_id INTEGER NOT NULL REFERENCES revisoes (id),
     indice INTEGER NOT NULL CHECK (indice >= 0),
     classe_id INTEGER NOT NULL REFERENCES classes (id),
     x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL,
+    origem TEXT NOT NULL CHECK (origem IN {ORIGENS}),
+    voto_indice INTEGER,
+    proposta_id INTEGER,
     proposta_indice INTEGER,
     desfecho TEXT NOT NULL CHECK (desfecho IN
         ('aceita', 'classe_corrigida', 'classe_atribuida', 'adicionada')),
-    origem TEXT CHECK (origem IN ('candidata')),
     CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
-    CHECK ((desfecho = 'adicionada') = (proposta_indice IS NULL)),
+    CHECK ((origem = 'voto') = (voto_indice IS NOT NULL)),
+    CHECK ((origem = 'voto') = (proposta_id IS NULL)),
+    CHECK ((proposta_id IS NULL) = (proposta_indice IS NULL)),
+    CHECK ((origem = 'voto') = (desfecho != 'adicionada')),
+    FOREIGN KEY (proposta_id, proposta_indice) REFERENCES caixas_propostas (proposta_id, indice),
     PRIMARY KEY (revisao_id, indice)
 );
 -- A proposta vigente de cada anotador em cada imagem
@@ -125,8 +138,11 @@ SELECT p.id, p.imagem_id, e.anotador FROM propostas p JOIN execucoes e ON e.id =
 WHERE p.id = (SELECT MAX(p2.id) FROM propostas p2 JOIN execucoes e2 ON e2.id = p2.execucao_id
               WHERE p2.imagem_id = p.imagem_id AND e2.anotador = e.anotador);
 -- Voto (T6, votar.py): uma votação por rodada; um voto por imagem votada, com
--- as propostas que usou e, se aprovada, as caixas de consenso. O voto vigente
--- de uma imagem é o de maior id, e imagens.voto/motivo repetem o resultado dele.
+-- as propostas que usou e as caixas: no treino, as de consenso (todas, se
+-- aprovada; as que houver, se falhou); no teste, a união sem classe. Cada
+-- caixa guarda de quais caixas das propostas veio (caixas_voto_membros). O
+-- voto vigente de uma imagem é o de maior id, e imagens.voto/motivo repetem o
+-- resultado dele.
 CREATE TABLE votacoes (
     id INTEGER PRIMARY KEY,
     anotadores TEXT NOT NULL,
@@ -139,7 +155,7 @@ CREATE TABLE votos (
     imagem_id INTEGER NOT NULL REFERENCES imagens (id),
     resultado TEXT NOT NULL CHECK (resultado IN {VOTOS}),
     motivo TEXT,
-    CHECK ((resultado = 'aprovada') = (motivo IS NULL))
+    CHECK ((resultado = 'falhou') = (motivo IS NOT NULL))
 );
 CREATE INDEX votos_imagem ON votos (imagem_id);
 CREATE TABLE votos_propostas (
@@ -148,14 +164,24 @@ CREATE TABLE votos_propostas (
     limiar REAL NOT NULL CHECK (limiar BETWEEN 0 AND 1),
     PRIMARY KEY (voto_id, proposta_id)
 );
+-- classe_id nula: união do teste, ou consenso numa classe fora da tabela
 CREATE TABLE caixas_voto (
     voto_id INTEGER NOT NULL REFERENCES votos (id),
     indice INTEGER NOT NULL CHECK (indice >= 0),
-    classe_id INTEGER NOT NULL REFERENCES classes (id),
+    classe_id INTEGER REFERENCES classes (id),
     confianca REAL NOT NULL CHECK (confianca BETWEEN 0 AND 1),
     x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL,
     CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
     PRIMARY KEY (voto_id, indice)
+);
+CREATE TABLE caixas_voto_membros (
+    voto_id INTEGER NOT NULL,
+    indice INTEGER NOT NULL,
+    proposta_id INTEGER NOT NULL,
+    proposta_indice INTEGER NOT NULL,
+    FOREIGN KEY (voto_id, indice) REFERENCES caixas_voto (voto_id, indice),
+    FOREIGN KEY (proposta_id, proposta_indice) REFERENCES caixas_propostas (proposta_id, indice),
+    PRIMARY KEY (voto_id, proposta_id, proposta_indice)
 );
 """
 
@@ -285,9 +311,9 @@ def preparar(saida, nomes):
     """
     Cria as pastas e o banco, se preciso, e grava as classes (nomes, na ordem
     dos ids) e o data.yaml. Classes novas no fim são acrescentadas; outra
-    ordem ou classes removidas só se nenhuma revisão guarda caixas (as
-    propostas guardam a classe pelo nome; fundo e descarte não têm caixas),
-    senão os ids não bateriam. Recusa as saídas de formatos anteriores.
+    ordem ou classes removidas só se nenhuma revisão guarda caixas e nenhum
+    voto guarda caixa com classe (as propostas guardam a classe pelo nome;
+    fundo, descarte e a união do teste não têm ids), senão os ids não bateriam. Recusa as saídas de formatos anteriores.
     """
     saida = Path(saida)
     if not existe(saida):
@@ -310,9 +336,11 @@ def preparar(saida, nomes):
             if atuais != nomes:
                 if atuais == nomes[:len(atuais)]:
                     novas = list(enumerate(nomes))[len(atuais):]
-                elif con.execute("SELECT 1 FROM caixas_revisao LIMIT 1").fetchone():
+                elif con.execute("SELECT 1 FROM caixas_revisao UNION ALL SELECT 1 FROM "
+                                 "caixas_voto WHERE classe_id IS NOT NULL LIMIT 1").fetchone():
                     raise ValueError(f"{saida} tem outras classes ({', '.join(atuais)}) e já há "
-                                     "revisões com caixas; os ids não bateriam. Só é possível "
+                                     "revisões ou votos com caixas de classe; os ids não "
+                                     "bateriam. Só é possível "
                                      "acrescentar classes no fim. Use outro diretório de saída.")
                 else:
                     con.execute("DELETE FROM classes")
@@ -706,48 +734,37 @@ def caixa_json(id_classe, nome, confianca, caixa):
             "caixa": [round(v, 6) for v in caixa]}
 
 
-def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado, com_candidatas=False):
+def ler_imagem(saida, nome, nomes, anotadores_saida, linha_estado):
     """
     O que as páginas mostram de uma imagem: status (None se não registrada),
     caixas finais (do .txt de labels/, gerado do banco; None sem .txt), linhas
-    inválidas do .txt, as propostas vigentes visíveis de cada anotador
+    inválidas do .txt e as propostas vigentes visíveis de cada anotador
     (separar()), no formato de caixa_json mais o "indice" na proposta (a de
-    classe escondida vem com id e nome None), e propostas_ids {anotador: id},
-    que a página devolve ao salvar. com_candidatas: também as candidatas de
-    cada anotador, {"indice", "conf", "caixa"} (só a página de revisão as usa;
-    na estática, pesariam no HTML).
+    classe escondida vem com id e nome None).
     """
     saida = Path(saida)
     ids = {n: i for i, n in nomes.items()}
     finais, invalidas = ler_rotulos(saida / "labels" / f"{Path(nome).stem}.txt")
-    propostas, candidatas, propostas_ids = {}, {}, {}
+    propostas = {}
     if anotadores_saida and existe(saida):
         with abrir(saida) as con:
             for anotador in anotadores_saida:
                 proposta = _proposta(con, anotador, nome)
                 if proposta is None:
                     continue
-                visiveis, abaixo = separar(proposta)
-                propostas_ids[anotador] = proposta["id"]
+                visiveis, _ = separar(proposta)
                 propostas[anotador] = [
                     dict(caixa_json(ids.get(classe) if mostra else None,
                                     classe if mostra else None, conf, caixa), indice=k)
                     for k, (classe, conf, caixa, mostra) in visiveis.items()]
-                candidatas[anotador] = [{"indice": k, "conf": conf,
-                                         "caixa": [round(v, 6) for v in caixa]}
-                                        for k, conf, caixa in abaixo]
-    dados = {
+    return {
         "nome": nome,
         "status": linha_estado["status"] if linha_estado else None,
         "final": None if finais is None else [
             caixa_json(i, nomes.get(i, f"classe {i}"), None, c) for i, c in finais],
         "invalidas": invalidas,
         "propostas": propostas,
-        "propostas_ids": propostas_ids,
     }
-    if com_candidatas:
-        dados["candidatas"] = candidatas
-    return dados
 
 
 def tamanho_imagem(caminho):
@@ -756,255 +773,33 @@ def tamanho_imagem(caminho):
         return imagem.size
 
 
-# --- revisão (PLANO-REVISAO.md, seção 5) ------------------------------------
-
-ACOES = ("salvar", "descartar")
-ORIGENS = ("candidata",)  # de onde veio uma caixa adicionada; "desenho" na fase 4
-TOLERANCIA_CAIXA = 1e-5  # caixa "igual" à da proposta, em coordenadas normalizadas
-
-
-class RevisaoInvalida(ValueError):
-    """Pedido de revisão recusado; status sugere o código HTTP."""
-
-    def __init__(self, mensagem, status=400):
-        super().__init__(mensagem)
-        self.status = status
-
-
-def validar_caixas(caixas, nomes, visiveis, candidatas=()):
-    """
-    Confere as caixas finais vindas da página e devolve-as como
-    [(id, (x1, y1, x2, y2), índice da proposta ou None, origem ou None)].
-    visiveis e candidatas: as do anotador de base, de separar(). Uma caixa que
-    vem de uma proposta cita o índice dela, que tem de ser de uma visível.
-    Enquanto a página não move caixas, ela tem de ter as coordenadas da
-    proposta, e uma adicionada com origem "candidata", as de uma candidata.
-    """
-    if not isinstance(caixas, list):
-        raise RevisaoInvalida("'caixas' deve ser uma lista")
-    usadas, resultado = set(), []
-    for i, c in enumerate(caixas):
-        try:
-            id_classe, caixa, proposta = c["id"], c["caixa"], c.get("proposta")
-            origem = c.get("origem")
-            caixa = tuple(float(v) for v in caixa)
-        except (KeyError, TypeError, ValueError, AttributeError):
-            raise RevisaoInvalida(f"caixa {i} inválida: {c!r}") from None
-        if not isinstance(id_classe, int) or isinstance(id_classe, bool) or id_classe not in nomes:
-            raise RevisaoInvalida(f"caixa {i}: classe {id_classe!r} fora do data.yaml")
-        if len(caixa) != 4 or not (0 <= caixa[0] < caixa[2] <= 1 and 0 <= caixa[1] < caixa[3] <= 1):
-            raise RevisaoInvalida(f"caixa {i}: coordenadas fora de [0, 1] ou invertidas: {caixa}")
-        if proposta is not None:
-            if (not isinstance(proposta, int) or isinstance(proposta, bool)
-                    or proposta not in visiveis):
-                raise RevisaoInvalida(f"caixa {i}: proposta {proposta!r} não existe")
-            if proposta in usadas:
-                raise RevisaoInvalida(f"caixa {i}: proposta {proposta} usada duas vezes")
-            usadas.add(proposta)
-            original = visiveis[proposta][2]
-            if any(abs(a - b) > TOLERANCIA_CAIXA for a, b in zip(caixa, original)):
-                raise RevisaoInvalida(f"caixa {i}: coordenadas diferentes das da proposta "
-                                      f"{proposta} (mover caixas está adiado, decisão 12)")
-            caixa = original  # sem o arredondamento da página
-            if origem is not None:
-                raise RevisaoInvalida(f"caixa {i}: caixa de proposta não tem origem")
-        elif origem is not None:
-            if origem not in ORIGENS:
-                raise RevisaoInvalida(f"caixa {i}: origem {origem!r} desconhecida")
-            iguais = [c for _, _, c in candidatas
-                      if all(abs(a - b) <= TOLERANCIA_CAIXA for a, b in zip(caixa, c))]
-            if not iguais:
-                raise RevisaoInvalida(f"caixa {i}: não é nenhuma das candidatas do anotador "
-                                      "de base (mover caixas está adiado, decisão 12)")
-            caixa = iguais[0]
-        resultado.append((id_classe, caixa, proposta, origem))
-    return resultado
-
-
-def desfechos(caixas, visiveis, ids):
-    """
-    Desfecho de cada caixa final frente à proposta de origem: 'aceita',
-    'classe_corrigida', 'classe_atribuida' (a classe da proposta estava
-    escondida do revisor) ou 'adicionada' (sem proposta). ids: {nome da classe: id}.
-    """
-    resultado = []
-    for id_classe, caixa, proposta, origem in caixas:
-        if proposta is None:
-            desfecho = "adicionada"
-        elif not visiveis[proposta][3]:
-            desfecho = "classe_atribuida"
-        elif ids.get(visiveis[proposta][0]) == id_classe:
-            desfecho = "aceita"
-        else:
-            desfecho = "classe_corrigida"
-        resultado.append((id_classe, caixa, proposta, origem, desfecho))
-    return resultado
-
-
-def _gravar_revisao(con, imagem, proposta_id, acao, agora, tempo, revisor, caixas):
-    """Insere a revisão e as caixas [(id, caixa, proposta, origem, desfecho)] e muda o status."""
-    revisao = con.execute(
-        "INSERT INTO revisoes (imagem_id, proposta_id, acao, data, tempo_ativo_s, revisor) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (imagem["id"], proposta_id, acao, agora, round(float(tempo), 1), revisor)).lastrowid
-    con.executemany(
-        "INSERT INTO caixas_revisao (revisao_id, indice, classe_id, x1, y1, x2, y2, "
-        "proposta_indice, desfecho, origem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [(revisao, k, i, *c, p, d, o) for k, (i, c, p, o, d) in enumerate(caixas)])
-    con.execute("UPDATE imagens SET status = ? WHERE id = ?",
-                ("revisada" if acao == "salvar" else "descartada", imagem["id"]))
-    return revisao
-
-
-def revisar(saida, nome, pedido, agora):
-    """
-    Aplica a revisão de uma imagem pendente (aprovada pelo voto ou não). pedido: {acao, base, proposta_id,
-    caixas, tempo_ativo_s}, como a página envia; proposta_id, se vier, tem de
-    ser a proposta vigente do anotador base (senão, outra foi gravada depois
-    que a página a abriu: 409). Grava a revisão e o status numa transação e
-    depois o .txt e o revisadas.txt. Devolve o registro (ler_revisao).
-    """
-    saida = Path(saida)
-    if not isinstance(pedido, dict) or pedido.get("acao") not in ACOES:
-        raise RevisaoInvalida(f"'acao' deve ser uma de {', '.join(ACOES)}")
-    tempo = pedido.get("tempo_ativo_s", 0)
-    if not isinstance(tempo, (int, float)) or isinstance(tempo, bool) or tempo < 0:
-        raise RevisaoInvalida("'tempo_ativo_s' deve ser um número não negativo")
-    base, proposta_id = pedido.get("base"), pedido.get("proposta_id")
-    if base is not None and not isinstance(base, str):
-        raise RevisaoInvalida("'base' deve ser o nome de um anotador")
-    if proposta_id is not None and (base is None or not isinstance(proposta_id, int)
-                                    or isinstance(proposta_id, bool)):
-        raise RevisaoInvalida("'proposta_id' deve ser um inteiro, com 'base'")
-
-    with abrir(saida) as con:
-        with transacao(con):
-            imagem = _imagem(con, nome)
-            if imagem is None:
-                raise RevisaoInvalida(f"imagem '{nome}' não está registrada", 404)
-            if imagem["status"] != "pendente":
-                raise RevisaoInvalida(f"'{nome}' está {imagem['status']}; só pendentes são "
-                                      "editáveis (reabrir é a fase 5)", 409)
-            nomes = _nomes(con)
-            proposta, visiveis, candidatas = None, {}, []
-            if base is not None:
-                proposta = _proposta(con, base, nome)
-                if proposta is None:
-                    raise RevisaoInvalida(f"'{nome}' não tem proposta de '{base}'")
-                if proposta_id is not None and proposta_id != proposta["id"]:
-                    raise RevisaoInvalida(
-                        f"a proposta {proposta_id} de '{base}' não é mais a vigente (é a "
-                        f"{proposta['id']}): o anotador gravou outra depois que a página foi "
-                        "aberta; recarregue", 409)
-                visiveis, candidatas = separar(proposta)
-            if pedido["acao"] == "salvar":
-                caixas = desfechos(validar_caixas(pedido.get("caixas", []), nomes, visiveis,
-                                                  candidatas),
-                                   visiveis, {n: i for i, n in nomes.items()})
-            else:
-                caixas = []
-            _gravar_revisao(con, imagem, None if proposta is None else proposta["id"],
-                            pedido["acao"], agora, tempo, None, caixas)
-        _exportar_rotulo(con, saida, _imagem(con, nome))
-        exportar_listas(con, saida)
-    return ler_revisao(saida, nome)
-
-
-def ler_revisao(saida, nome):
-    """
-    A revisão vigente da imagem, ou None: {imagem, acao, data, tempo_ativo_s,
-    revisor, base: {anotador, versao, classes, limiares, proposta_id} ou None,
-    caixas: [{id, caixa, proposta, desfecho[, origem]}], removidas}. As
-    removidas são as caixas visíveis da proposta base que nenhuma caixa cita.
-    """
-    if not existe(saida):
-        return None
-    with abrir(saida) as con:
-        imagem = _imagem(con, nome)
-        revisao = None if imagem is None else _revisao_vigente(con, imagem["id"])
-        if revisao is None:
-            return None
-        caixas = []
-        for c in _caixas_revisao(con, revisao["id"]):
-            item = {"id": c["classe_id"], "caixa": [round(c[k], 6) for k in ("x1", "y1", "x2", "y2")],
-                    "proposta": c["proposta_indice"], "desfecho": c["desfecho"]}
-            if c["origem"] is not None:
-                item["origem"] = c["origem"]
-            caixas.append(item)
-        base, removidas = None, []
-        if revisao["proposta_id"] is not None:
-            proposta = _propostas(con, "p.id = ?", (revisao["proposta_id"],))[0]
-            usadas = {c["proposta"] for c in caixas if c["proposta"] is not None}
-            removidas = [k for k in separar(proposta)[0] if k not in usadas]
-            base = {"anotador": proposta["anotador"], "versao": proposta["versao"],
-                    "classes": proposta["classes"], "proposta_id": proposta["id"],
-                    "limiares": dict(zip(("confianca", "confianca_classe"), limiares(proposta)))}
-        return {"imagem": nome, "acao": revisao["acao"], "data": revisao["data"],
-                "tempo_ativo_s": revisao["tempo_ativo_s"], "revisor": revisao["revisor"],
-                "base": base, "caixas": caixas, "removidas": removidas}
-
-
-def aceitar(saida, anotador, nomes=None, agora=None):
-    """
-    Grava as propostas vigentes do anotador como revisão (revisor "aceitar",
-    tempo 0) e marca as imagens como revisadas: o comportamento antigo,
-    proposta direto como rótulo. Só as caixas visíveis (separar()); só mexe
-    nas pendentes (nomes=None: todas). Imagem com caixa de classe escondida
-    fica pendente: a classe dela é do revisor. Devolve (quantas aceitou,
-    [imagens deixadas pendentes por caixa sem classe]).
-    """
-    agora = agora or agora_iso()
-    aceitas, sem_classe = [], []
-    with abrir(saida) as con:
-        with transacao(con):
-            ids = {n: i for i, n in _nomes(con).items()}
-            for proposta in _propostas(con, f"{VIGENTE} AND i.status = 'pendente'", (anotador,)):
-                nome = proposta["imagem"]
-                if nomes is not None and nome not in nomes:
-                    continue
-                visiveis, _ = separar(proposta)
-                if not all(mostra for _, _, _, mostra in visiveis.values()):
-                    sem_classe.append(nome)
-                    continue
-                fora = [classe for classe, _, _, _ in visiveis.values() if classe not in ids]
-                if fora:
-                    raise ValueError(f"proposta de {anotador} em {nome}: classe '{fora[0]}' "
-                                     "fora do data.yaml")
-                caixas = [(ids[classe], caixa, k, None, "aceita")
-                          for k, (classe, _, caixa, _) in visiveis.items()]
-                _gravar_revisao(con, _imagem(con, nome), proposta["id"], "salvar", agora, 0,
-                                "aceitar", caixas)
-                aceitas.append(nome)
-        for nome in aceitas:
-            _exportar_rotulo(con, saida, _imagem(con, nome))
-        exportar_listas(con, saida)
-    return len(aceitas), sem_classe
-
-
-# --- voto (OBJETIVO.md, seção 3; T6) -----------------------------------------
+# --- voto (OBJETIVO.md, seções 3 e 4; T6) ------------------------------------
 
 def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None):
     """
-    Vota, numa transação, as imagens pendentes de lotes de treino com proposta vigente de todos os anotadores. Pula as que já têm voto
-    sobre essas mesmas propostas, a não ser com revotar; as de teste não são
-    votadas (vão à união sem classe e à revisão, T9).
+    Vota, numa transação, as imagens pendentes com proposta vigente de todos
+    os anotadores. Pula as que já têm voto sobre essas mesmas propostas, a não
+    ser com revotar.
 
-    decidir(propostas) recebe as propostas vigentes, na ordem de anotadores, e
-    devolve (motivo, consenso, limiares): motivo None se aprovada;
-    consenso [(nome da classe, confianca, caixa normalizada)]; limiares, o de
-    leitura que usou em cada proposta. Uma caixa de consenso de classe fora da
-    tabela classes reprova a imagem ("classe_fora"): não teria id no .txt.
+    decidir(propostas, conjunto) recebe as propostas vigentes, na ordem de
+    anotadores, e o conjunto do lote, e devolve (resultado, motivo, caixas,
+    limiares): resultado em VOTOS; motivo só em "falhou"; caixas [(nome da
+    classe ou None, confianca, caixa normalizada, membros)], com membros
+    [(posição do anotador, índice da caixa na proposta dele)]; limiares, o de
+    leitura que usou em cada proposta. Uma caixa de classe fora da tabela
+    classes fica sem classe, e a imagem aprovada com ela passa a "falhou"
+    ("classe_fora"): não teria id no .txt.
 
-    Grava a votação, um voto por imagem com as propostas que usou e as caixas
-    de consenso, e voto/motivo em imagens; depois, os .txt das votadas e as
-    listas. Devolve {aprovadas: [nomes], falhou: {nome: motivo}, incompletas,
-    ja_votadas, teste} (os três últimos, contagens).
+    Grava a votação, um voto por imagem com as propostas que usou, as caixas
+    e os membros de cada uma, e voto/motivo em imagens; depois, os .txt das
+    votadas e as listas. Devolve {aprovadas: [nomes], falhou: {nome: motivo},
+    uniao: [nomes], incompletas, ja_votadas} (os dois últimos, contagens).
     """
     anotadores = list(anotadores)
     if len(set(anotadores)) != len(anotadores) or len(anotadores) < 2:
         raise ValueError("o voto precisa de ao menos dois anotadores, sem repetição")
     agora = agora or agora_iso()
-    resultado = {"aprovadas": [], "falhou": {}, "incompletas": 0, "ja_votadas": 0, "teste": 0}
+    resultado = {"aprovadas": [], "falhou": {}, "uniao": [], "incompletas": 0, "ja_votadas": 0}
     with abrir(saida) as con:
         with transacao(con):
             ids = {n: i for i, n in _nomes(con).items()}
@@ -1017,9 +812,6 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
             votacao = None
             for imagem in imagens:
                 nome = imagem["nome"]
-                if imagem["conjunto"] == "teste":
-                    resultado["teste"] += 1
-                    continue
                 if not all(nome in v for v in vigentes):
                     resultado["incompletas"] += 1
                     continue
@@ -1031,9 +823,9 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
                             (anterior["id"],))} == {p["id"] for p in propostas}:
                     resultado["ja_votadas"] += 1
                     continue
-                motivo, consenso, limiares_usados = decidir(propostas)
-                if motivo is None and any(c[0] not in ids for c in consenso):
-                    motivo, consenso = "classe_fora", []
+                final, motivo, caixas, limiares_usados = decidir(propostas, imagem["conjunto"])
+                if final == "aprovada" and any(c[0] not in ids for c in caixas):
+                    final, motivo = "falhou", "classe_fora"
                 if votacao is None:
                     votacao = con.execute(
                         "INSERT INTO votacoes (anotadores, parametros, data) VALUES (?, ?, ?)",
@@ -1042,35 +834,66 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
                          agora)).lastrowid
                 voto = con.execute(
                     "INSERT INTO votos (votacao_id, imagem_id, resultado, motivo) "
-                    "VALUES (?, ?, ?, ?)",
-                    (votacao, imagem["id"], "falhou" if motivo else "aprovada",
-                     motivo)).lastrowid
+                    "VALUES (?, ?, ?, ?)", (votacao, imagem["id"], final, motivo)).lastrowid
                 con.executemany(
                     "INSERT INTO votos_propostas (voto_id, proposta_id, limiar) VALUES (?, ?, ?)",
                     [(voto, p["id"], float(l)) for p, l in zip(propostas, limiares_usados)])
                 con.executemany(
                     "INSERT INTO caixas_voto (voto_id, indice, classe_id, confianca, "
                     "x1, y1, x2, y2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    [(voto, k, ids[classe], round(float(conf), 4),
+                    [(voto, k, ids.get(classe), round(float(conf), 4),
                       *(round(float(v), 6) for v in caixa))
-                     for k, (classe, conf, caixa) in enumerate(consenso)])
+                     for k, (classe, conf, caixa, _) in enumerate(caixas)])
+                con.executemany(
+                    "INSERT INTO caixas_voto_membros (voto_id, indice, proposta_id, "
+                    "proposta_indice) VALUES (?, ?, ?, ?)",
+                    [(voto, k, propostas[a]["id"], i)
+                     for k, (*_, membros) in enumerate(caixas) for a, i in membros])
                 con.execute("UPDATE imagens SET voto = ?, motivo = ? WHERE id = ?",
-                            ("falhou" if motivo else "aprovada", motivo, imagem["id"]))
-                if motivo:
+                            (final, motivo, imagem["id"]))
+                if final == "falhou":
                     resultado["falhou"][nome] = motivo
-                else:
+                elif final == "aprovada":
                     resultado["aprovadas"].append(nome)
-        for nome in [*resultado["aprovadas"], *resultado["falhou"]]:
+                else:
+                    resultado["uniao"].append(nome)
+        for nome in [*resultado["aprovadas"], *resultado["falhou"], *resultado["uniao"]]:
             _exportar_rotulo(con, saida, _imagem(con, nome))
         exportar_listas(con, saida)
     return resultado
 
 
+def _contexto_voto(con, voto):
+    """
+    O que um voto usou: (votacao, [(proposta, limiar)] na ordem dos
+    anotadores da votação, caixas [{indice, classe_id, conf, caixa, membros:
+    [(anotador, índice na proposta)]}]).
+    """
+    votacao = con.execute("SELECT * FROM votacoes WHERE id = ?", (voto["votacao_id"],)).fetchone()
+    limiares_usados = {r["proposta_id"]: r["limiar"] for r in con.execute(
+        "SELECT proposta_id, limiar FROM votos_propostas WHERE voto_id = ?", (voto["id"],))}
+    por_anotador = {p["anotador"]: p for p in _propostas(
+        con, f"p.id IN ({','.join('?' * len(limiares_usados))})", tuple(limiares_usados))}
+    propostas = [(por_anotador[a], limiares_usados[por_anotador[a]["id"]])
+                 for a in json.loads(votacao["anotadores"])]
+    anotador_de = {p["id"]: p["anotador"] for p, _ in propostas}
+    membros = {}
+    for r in con.execute("SELECT indice, proposta_id, proposta_indice FROM caixas_voto_membros "
+                         "WHERE voto_id = ? ORDER BY proposta_id, proposta_indice", (voto["id"],)):
+        membros.setdefault(r["indice"], []).append((anotador_de[r["proposta_id"]],
+                                                    r["proposta_indice"]))
+    caixas = [{"indice": c["indice"], "classe_id": c["classe_id"], "conf": c["confianca"],
+               "caixa": (c["x1"], c["y1"], c["x2"], c["y2"]),
+               "membros": membros.get(c["indice"], [])}
+              for c in _caixas_voto(con, voto["id"])]
+    return votacao, propostas, caixas
+
+
 def ler_voto(saida, nome):
     """
-    O voto vigente da imagem, ou None: {imagem, resultado, motivo, data,
-    anotadores, parametros, propostas: [{id, anotador, limiar}], caixas:
-    [{id, conf, caixa}]}.
+    O voto vigente da imagem, ou None: {id, imagem, resultado, motivo, data,
+    anotadores, parametros, propostas: [{id, anotador, limiar}], caixas: [{id,
+    conf, caixa, membros: [{anotador, indice}]}]}.
     """
     if not existe(saida):
         return None
@@ -1079,17 +902,264 @@ def ler_voto(saida, nome):
         voto = None if imagem is None else _voto_vigente(con, imagem["id"])
         if voto is None:
             return None
-        votacao = con.execute("SELECT * FROM votacoes WHERE id = ?",
-                              (voto["votacao_id"],)).fetchone()
-        propostas = [{"id": r["proposta_id"], "anotador": r["anotador"], "limiar": r["limiar"]}
-                     for r in con.execute(
-                         "SELECT vp.proposta_id, vp.limiar, e.anotador FROM votos_propostas vp "
-                         "JOIN propostas p ON p.id = vp.proposta_id "
-                         "JOIN execucoes e ON e.id = p.execucao_id WHERE vp.voto_id = ? "
-                         "ORDER BY vp.proposta_id", (voto["id"],))]
-        return {"imagem": nome, "resultado": voto["resultado"], "motivo": voto["motivo"],
-                "data": votacao["data"], "anotadores": json.loads(votacao["anotadores"]),
-                "parametros": json.loads(votacao["parametros"]), "propostas": propostas,
-                "caixas": [{"id": c["classe_id"], "conf": c["confianca"],
-                            "caixa": [round(c[k], 6) for k in ("x1", "y1", "x2", "y2")]}
-                           for c in _caixas_voto(con, voto["id"])]}
+        votacao, propostas, caixas = _contexto_voto(con, voto)
+        return {"id": voto["id"], "imagem": nome, "resultado": voto["resultado"],
+                "motivo": voto["motivo"], "data": votacao["data"],
+                "anotadores": json.loads(votacao["anotadores"]),
+                "parametros": json.loads(votacao["parametros"]),
+                "propostas": [{"id": p["id"], "anotador": p["anotador"], "limiar": l}
+                              for p, l in propostas],
+                "caixas": [{"id": c["classe_id"], "conf": c["conf"],
+                            "caixa": [round(v, 6) for v in c["caixa"]],
+                            "membros": [{"anotador": a, "indice": i} for a, i in c["membros"]]}
+                           for c in caixas]}
+
+
+IOU_CANDIDATA_REPETIDA = 0.9  # candidatas de anotadores diferentes quase iguais: uma só
+
+
+def voto_para_revisao(saida, nome, nomes):
+    """
+    A base da revisão de uma imagem, do voto vigente; None sem voto:
+    - caixas: as do voto, [{indice, id, nome, conf, caixa, anotadores}]; no
+      teste (união), sem classe, confiança nem anotadores (seção 4);
+    - propostas: {anotador: [{indice, id, nome, conf, caixa}]}, as caixas
+      visíveis de cada proposta usada que não entraram em nenhuma caixa do
+      voto, que a página mostra para incluir com um clique; abaixo de
+      confianca_classe, sem a classe (id e nome None);
+    - candidatas: [{anotador, indice, conf, caixa}], as caixas abaixo do
+      limiar de leitura de todas as propostas, sem as quase iguais a uma mais
+      confiante, para a caixa por clique.
+    """
+    if not existe(saida):
+        return None
+    ids = {n: i for i, n in nomes.items()}
+    with abrir(saida) as con:
+        imagem = con.execute("SELECT i.id, l.conjunto FROM imagens i JOIN lotes l "
+                             "ON l.nome = i.lote WHERE i.nome = ?", (nome,)).fetchone()
+        voto = None if imagem is None else _voto_vigente(con, imagem["id"])
+        if voto is None:
+            return None
+        _, propostas, caixas_voto = _contexto_voto(con, voto)
+    uniao = voto["resultado"] == "uniao"
+    usadas = {m for c in caixas_voto for m in c["membros"]}
+    fora, candidatas = {}, []
+    for proposta, limiar in propostas:
+        a = proposta["anotador"]
+        classe_visivel = limiares(proposta)[1]
+        fora[a] = []
+        for k, (classe, conf, caixa) in enumerate(proposta["caixas"]):
+            if conf < limiar:
+                candidatas.append({"anotador": a, "indice": k, "conf": conf,
+                                   "caixa": [round(v, 6) for v in caixa]})
+            elif (a, k) not in usadas:
+                mostra = conf >= classe_visivel and not uniao
+                fora[a].append(dict(caixa_json(ids.get(classe) if mostra else None,
+                                               classe if mostra else None, conf, caixa),
+                                    indice=k))
+    unicas = []
+    for c in sorted(candidatas, key=lambda c: c["conf"], reverse=True):
+        if all(_iou(c["caixa"], u["caixa"]) < IOU_CANDIDATA_REPETIDA for u in unicas):
+            unicas.append(c)
+    return {
+        "id": voto["id"], "resultado": voto["resultado"], "motivo": voto["motivo"],
+        "conjunto": imagem["conjunto"],
+        "caixas": [dict(caixa_json(None, None, None, c["caixa"]), indice=c["indice"],
+                        anotadores=[]) if uniao else
+                   dict(caixa_json(c["classe_id"], nomes.get(c["classe_id"]), c["conf"],
+                                   c["caixa"]), indice=c["indice"],
+                        anotadores=sorted({a for a, _ in c["membros"]}))
+                   for c in caixas_voto],
+        "propostas": {a: l for a, l in fora.items() if l},
+        "candidatas": unicas,
+    }
+
+
+def _iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    uniao = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / uniao if uniao > 0 else 0.0
+
+
+# --- revisão (PLANO-REVISAO.md, seção 5) ------------------------------------
+
+ACOES = ("salvar", "descartar")
+TOLERANCIA_CAIXA = 1e-5  # caixa "igual" à da origem, em coordenadas normalizadas
+
+
+class RevisaoInvalida(ValueError):
+    """Pedido de revisão recusado; status sugere o código HTTP."""
+
+    def __init__(self, mensagem, status=400):
+        super().__init__(mensagem)
+        self.status = status
+
+
+def _inteiro(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def validar_caixas(caixas, nomes, propostas, caixas_voto):
+    """
+    Confere as caixas finais vindas da página e devolve-as como linhas de
+    caixas_revisao: [(classe_id, caixa, origem, voto_indice, proposta_id,
+    proposta_indice, desfecho)]. Cada caixa diz de onde vem (origem):
+    - "voto", com o indice de uma caixa do voto: 'aceita' se a classe é a do
+      voto, 'classe_corrigida' se não, 'classe_atribuida' se o voto não tinha
+      classe (união do teste);
+    - "proposta" ou "candidata", com o anotador e o indice de uma caixa de uma
+      proposta usada pelo voto, visível (no limiar do voto ou acima) ou
+      candidata (abaixo dele): 'adicionada'.
+    Enquanto a página não move caixas, as coordenadas têm de ser as da origem.
+    propostas: [(proposta, limiar)] do voto; caixas_voto: as de _contexto_voto.
+    """
+    if not isinstance(caixas, list):
+        raise RevisaoInvalida("'caixas' deve ser uma lista")
+    do_voto = {c["indice"]: c for c in caixas_voto}
+    por_anotador = {p["anotador"]: (p, l) for p, l in propostas}
+    usadas, resultado = set(), []
+    for i, c in enumerate(caixas):
+        try:
+            id_classe, origem, indice = c["id"], c["origem"], c["indice"]
+            caixa = tuple(float(v) for v in c["caixa"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise RevisaoInvalida(f"caixa {i} inválida: {c!r}") from None
+        if not _inteiro(id_classe) or id_classe not in nomes:
+            raise RevisaoInvalida(f"caixa {i}: classe {id_classe!r} fora do data.yaml")
+        if len(caixa) != 4 or not (0 <= caixa[0] < caixa[2] <= 1 and 0 <= caixa[1] < caixa[3] <= 1):
+            raise RevisaoInvalida(f"caixa {i}: coordenadas fora de [0, 1] ou invertidas: {caixa}")
+        if origem not in ORIGENS:
+            raise RevisaoInvalida(f"caixa {i}: origem {origem!r} desconhecida")
+        if not _inteiro(indice):
+            raise RevisaoInvalida(f"caixa {i}: indice {indice!r} inválido")
+        if origem == "voto":
+            if indice not in do_voto:
+                raise RevisaoInvalida(f"caixa {i}: o voto não tem a caixa {indice}")
+            chave, original = ("voto", indice), do_voto[indice]["caixa"]
+            classe_voto = do_voto[indice]["classe_id"]
+            desfecho = ("classe_atribuida" if classe_voto is None else
+                        "aceita" if classe_voto == id_classe else "classe_corrigida")
+            linha = (None, None)
+        else:
+            anotador = c.get("anotador")
+            if anotador not in por_anotador:
+                raise RevisaoInvalida(f"caixa {i}: o voto não usou proposta de {anotador!r}")
+            proposta, limiar = por_anotador[anotador]
+            if not 0 <= indice < len(proposta["caixas"]):
+                raise RevisaoInvalida(f"caixa {i}: a proposta de {anotador} não tem a caixa "
+                                      f"{indice}")
+            _, conf, original = proposta["caixas"][indice]
+            if (conf >= limiar) != (origem == "proposta"):
+                raise RevisaoInvalida(f"caixa {i}: a caixa {indice} de {anotador} não é "
+                                      f"{'visível' if origem == 'proposta' else 'candidata'}")
+            chave, desfecho, linha = (anotador, indice), "adicionada", (proposta["id"], indice)
+        if chave in usadas:
+            raise RevisaoInvalida(f"caixa {i}: a mesma origem usada duas vezes")
+        usadas.add(chave)
+        if any(abs(a - b) > TOLERANCIA_CAIXA for a, b in zip(caixa, original)):
+            raise RevisaoInvalida(f"caixa {i}: coordenadas diferentes das da origem "
+                                  "(mover caixas está adiado, decisão 12)")
+        resultado.append((id_classe, tuple(original), origem,
+                          indice if origem == "voto" else None, *linha, desfecho))
+    return resultado
+
+
+def _gravar_revisao(con, imagem, voto_id, acao, agora, tempo, revisor, caixas):
+    """Insere a revisão e as caixas (validar_caixas) e muda o status."""
+    revisao = con.execute(
+        "INSERT INTO revisoes (imagem_id, voto_id, acao, data, tempo_ativo_s, revisor) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (imagem["id"], voto_id, acao, agora, round(float(tempo), 1), revisor)).lastrowid
+    con.executemany(
+        "INSERT INTO caixas_revisao (revisao_id, indice, classe_id, x1, y1, x2, y2, origem, "
+        "voto_indice, proposta_id, proposta_indice, desfecho) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(revisao, k, i, *c, o, v, p, pi, d) for k, (i, c, o, v, p, pi, d) in enumerate(caixas)])
+    con.execute("UPDATE imagens SET status = ? WHERE id = ?",
+                ("revisada" if acao == "salvar" else "descartada", imagem["id"]))
+    return revisao
+
+
+def revisar(saida, nome, pedido, agora):
+    """
+    Aplica a revisão de uma imagem pendente, a partir do voto vigente dela
+    (sem voto, não há revisão: 409). pedido: {acao, voto_id, caixas,
+    tempo_ativo_s}, como a página envia; voto_id é o voto que a página
+    mostrou e tem de ser o vigente (senão, outro voto foi gravado depois que
+    ela abriu: 409). Grava a revisão e o status numa transação e depois o .txt
+    e as listas. Devolve o registro (ler_revisao).
+    """
+    saida = Path(saida)
+    if not isinstance(pedido, dict) or pedido.get("acao") not in ACOES:
+        raise RevisaoInvalida(f"'acao' deve ser uma de {', '.join(ACOES)}")
+    tempo = pedido.get("tempo_ativo_s", 0)
+    if not isinstance(tempo, (int, float)) or isinstance(tempo, bool) or tempo < 0:
+        raise RevisaoInvalida("'tempo_ativo_s' deve ser um número não negativo")
+    voto_id = pedido.get("voto_id")
+    if not _inteiro(voto_id):
+        raise RevisaoInvalida("'voto_id' deve ser o id do voto mostrado")
+
+    with abrir(saida) as con:
+        with transacao(con):
+            imagem = _imagem(con, nome)
+            if imagem is None:
+                raise RevisaoInvalida(f"imagem '{nome}' não está registrada", 404)
+            if imagem["status"] != "pendente":
+                raise RevisaoInvalida(f"'{nome}' está {imagem['status']}; só pendentes são "
+                                      "editáveis (reabrir é a fase 5)", 409)
+            voto = _voto_vigente(con, imagem["id"])
+            if voto is None:
+                raise RevisaoInvalida(f"'{nome}' não foi votada: rode o votar.py antes", 409)
+            if voto["id"] != voto_id:
+                raise RevisaoInvalida(
+                    f"o voto {voto_id} não é mais o vigente de '{nome}' (é o {voto['id']}): "
+                    "a imagem foi votada de novo depois que a página a abriu; recarregue", 409)
+            caixas = []
+            if pedido["acao"] == "salvar":
+                _, propostas, caixas_voto = _contexto_voto(con, voto)
+                caixas = validar_caixas(pedido.get("caixas", []), _nomes(con), propostas,
+                                        caixas_voto)
+            _gravar_revisao(con, imagem, voto["id"], pedido["acao"], agora, tempo, None, caixas)
+        _exportar_rotulo(con, saida, _imagem(con, nome))
+        exportar_listas(con, saida)
+    return ler_revisao(saida, nome)
+
+
+def ler_revisao(saida, nome):
+    """
+    A revisão vigente da imagem, ou None: {imagem, acao, data, tempo_ativo_s,
+    revisor, voto_id, caixas: [{id, caixa, origem, indice, anotador,
+    desfecho}], removidas}. indice: na caixa do voto (origem voto) ou na
+    proposta do anotador; removidas: os índices das caixas do voto que
+    nenhuma caixa final cita.
+    """
+    if not existe(saida):
+        return None
+    with abrir(saida) as con:
+        imagem = _imagem(con, nome)
+        revisao = None if imagem is None else _revisao_vigente(con, imagem["id"])
+        if revisao is None:
+            return None
+        anotador_de = {r["id"]: r["anotador"] for r in con.execute(
+            "SELECT p.id, e.anotador FROM votos_propostas vp JOIN propostas p "
+            "ON p.id = vp.proposta_id JOIN execucoes e ON e.id = p.execucao_id "
+            "WHERE vp.voto_id = ?", (revisao["voto_id"],))}
+        caixas = []
+        for c in _caixas_revisao(con, revisao["id"]):
+            de_voto = c["origem"] == "voto"
+            caixas.append({"id": c["classe_id"],
+                           "caixa": [round(c[k], 6) for k in ("x1", "y1", "x2", "y2")],
+                           "origem": c["origem"],
+                           "indice": c["voto_indice"] if de_voto else c["proposta_indice"],
+                           "anotador": None if de_voto else anotador_de[c["proposta_id"]],
+                           "desfecho": c["desfecho"]})
+        do_voto = [r[0] for r in con.execute(
+            "SELECT indice FROM caixas_voto WHERE voto_id = ? ORDER BY indice",
+            (revisao["voto_id"],))]
+        usadas = {c["indice"] for c in caixas if c["origem"] == "voto"}
+        return {"imagem": nome, "acao": revisao["acao"], "data": revisao["data"],
+                "tempo_ativo_s": revisao["tempo_ativo_s"], "revisor": revisao["revisor"],
+                "voto_id": revisao["voto_id"], "caixas": caixas,
+                "removidas": [k for k in do_voto if k not in usadas]}

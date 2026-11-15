@@ -18,7 +18,8 @@ No Linux, o torch do PyPI já vem com CUDA; no Windows, ele é só para CPU, e p
 python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a   # copia para anotacoes/images
 python anotacao/anotar.py -o anotacoes --previa          # anota as pendentes ainda sem proposta
 python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
-python anotacao/anotar.py -o anotacoes --aceitar         # propostas viram rótulos, sem revisão
+python anotacao/votar.py anotacoes                       # voto entre os anotadores
+python anotacao/revisar.py anotacoes --abrir             # revisão, a partir do voto
 ```
 
 ### Importar
@@ -53,9 +54,8 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
 | `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
 | `--exportar` | — | Só refaz do banco os arquivos gerados (`data.yaml`, `labels/`, as listas) e sai |
-| `--aceitar` | — | Grava as propostas do anotador como uma revisão sem mudança (revisor `aceitar`), copia-as para `labels/` e marca as imagens como `revisada`; só mexe nas `pendente`, só as caixas visíveis (a partir de `--confianca`), e deixa pendentes as que têm caixa de classe escondida. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
-Opções de detecção, comuns a todo detector. A proposta guarda **todas** as caixas a partir de `--piso`, sempre com a classe; `--confianca` e `--confianca-classe` são gravados nela e aplicados por quem lê (a página, o `aceitar`, depois o voto), então dá para mudá-los sem rodar o modelo de novo (decisão 16 do `OBJETIVO.md`).
+Opções de detecção, comuns a todo detector. A proposta guarda **todas** as caixas a partir de `--piso`, sempre com a classe; `--confianca` e `--confianca-classe` são gravados nela e aplicados por quem lê (o voto e a página), então dá para mudá-los sem rodar o modelo de novo (decisão 16 do `OBJETIVO.md`).
 
 | Opção | Padrão | |
 |---|---|---|
@@ -76,7 +76,10 @@ Opções de um anotador só:
 
 ### Votar
 
-O `votar.py` aplica o voto NooN estrito (`OBJETIVO.md`, seção 3; o trio é o da decisão 17) às imagens **pendentes de lotes de treino** com proposta vigente de todos os anotadores. A imagem é aprovada se todos propõem o mesmo número de caixas e cada caixa casa, com a mesma classe e IoU ≥ 0,5, com uma de cada um dos outros. A aprovada recebe como rótulo as **caixas de consenso** (a mediana de cada coordenada, com a menor das confianças) e entra no `treino.txt`. A que falha continua `pendente`, com o motivo (`quantidade`, `caixas`, `vazia` ou `classe_fora`), e vai para a revisão.
+O `votar.py` decide, para cada imagem **pendente** com proposta vigente de todos os anotadores (o trio é o da decisão 17), de onde a revisão parte. **Toda revisão parte de um voto**: imagem não votada não é revisável.
+
+- **Treino**: o voto NooN estrito (`OBJETIVO.md`, seção 3). A imagem é aprovada se todos propõem o mesmo número de caixas e cada caixa casa, com a mesma classe e IoU ≥ 0,5, com uma de cada um dos outros. A aprovada recebe como rótulo as **caixas de consenso** (a mediana de cada coordenada, com a menor das confianças) e entra no `treino.txt`, sem passar pela revisão. A que falha continua `pendente`, com o motivo (`quantidade`, `caixas`, `vazia` ou `classe_fora`), e vai para a revisão com as caixas que tiveram consenso.
+- **Teste**: não há voto de classe (seção 4). O voto grava a **união** das caixas dos anotadores, sem classe: da mais confiante para a menos, as que se sobrepõem (IoU ≥ 0,5, de anotadores diferentes) viram uma só, na mediana. Toda imagem de teste vai para a revisão, e o revisor dá a classe de cada caixa.
 
 ```bash
 python anotacao/votar.py anotacoes                                  # grounding-dino, owlv2 e yolo
@@ -84,9 +87,9 @@ python anotacao/votar.py anotacoes --anotadores grounding-dino yolo --limiares g
 ```
 
 - Cada anotador é lido no limiar de leitura gravado na proposta (`confianca`), ou no de `--limiares` (`g` mantém o gravado). Vale a classe do anotador mesmo abaixo de `confianca_classe`: ela só é escondida do revisor.
-- As imagens de teste não são votadas, porque passam pela revisão sem pré-anotação (seção 4 do `OBJETIVO.md`, T9).
+- Cada caixa do voto guarda de quais caixas das propostas veio. A revisão usa isso para separar as propostas que ficaram de fora.
 - Rodar de novo vota só as imagens novas e as que ganharam proposta nova de algum anotador. `--revotar` vota de novo todas as pendentes (por exemplo, com outros `--limiares`). Cada voto é uma linha nova no banco, com as propostas e os limiares que usou.
-- A revisão humana vale mais que o voto: uma aprovada que o revisor salva passa a ter o rótulo dele, e o voto não mexe mais nela. Por enquanto a página de revisão ainda lista as aprovadas entre as pendentes. A fila só das reprovadas é o T7.
+- A revisão humana vale mais que o voto: uma aprovada que o revisor salva passa a ter o rótulo dele, e o voto não mexe mais nela.
 
 | Opção | Padrão | O que faz |
 |---|---|---|
@@ -119,19 +122,19 @@ O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels
 
 | Tabela | O que guarda |
 |---|---|
-| `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão guarda caixas |
+| `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão ou algum voto guarda caixa com classe |
 | `lotes` | Conjunto (`treino` ou `teste`), região de interesse e data de cada lote |
 | `imagens` | Nome, tamanho, lote, status (`pendente`, `revisada`, `descartada`) e, para o voto (T6), `voto` e `motivo` |
 | `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
 | `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
-| `revisoes`, `caixas_revisao` | Cada sessão de revisão: ação, data, tempo ativo, revisor, a proposta que serviu de base e as caixas finais com o desfecho |
-| `votacoes`, `votos`, `votos_propostas`, `caixas_voto` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado, o motivo, as propostas usadas com o limiar de cada uma e as caixas de consenso das aprovadas. O resultado do voto vigente é repetido em `imagens.voto` e `imagens.motivo`. |
+| `votacoes`, `votos`, `votos_propostas`, `caixas_voto`, `caixas_voto_membros` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado (`aprovada`, `falhou`, `uniao`), o motivo, as propostas usadas com o limiar de cada uma, as caixas (de consenso no treino, da união sem classe no teste) e de quais caixas das propostas cada uma veio. O resultado do voto vigente é repetido em `imagens.voto` e `imagens.motivo` |
+| `revisoes`, `caixas_revisao` | Cada sessão de revisão: ação, data, tempo ativo, revisor, o voto de onde partiu e as caixas finais, cada uma com a origem (uma caixa do voto, uma proposta fora dele ou uma candidata) e o desfecho |
 
 As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada com `.txt` entraria no treino como negativo falso. E, sem a proposta original, não dá para medir quanto o revisor corrigiu cada anotador (RF13). Por isso o `data.yaml` aponta para as listas, e não para `images/`.
 
-**Nada é sobrescrito.** Anotar de novo (`--sobrescrever`) grava uma proposta nova, e a vigente de um anotador numa imagem é a mais recente; as anteriores continuam no banco, e a revisão guarda qual versão viu. Cada revisão é uma linha nova, e a vigente é a mais recente. A proposta guarda a classe pelo nome (o anotador pode propor classe fora do `data.yaml`) e as caixas da mais confiante para a menos. Quem lê aplica os limiares de leitura gravados nos parâmetros da execução (`confianca`, `confianca_classe`): a página mostra a partir de `confianca`, esconde a classe abaixo de `confianca_classe` e oferece as de baixo como candidatas. O registro da revisão cita cada caixa pelo índice na proposta, que não muda com os limiares. Uma imagem entra como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
+**Nada é sobrescrito.** Anotar de novo (`--sobrescrever`) grava uma proposta nova, e a vigente de um anotador numa imagem é a mais recente; as anteriores continuam no banco, e o voto guarda quais versões usou. Cada revisão é uma linha nova, e a vigente é a mais recente. A proposta guarda a classe pelo nome (o anotador pode propor classe fora do `data.yaml`) e as caixas da mais confiante para a menos. Quem lê aplica os limiares de leitura gravados nos parâmetros da execução (`confianca`, `confianca_classe`): a página mostra a partir de `confianca`, esconde a classe abaixo de `confianca_classe` e oferece as de baixo como candidatas. O registro da revisão cita cada caixa pelo índice na lista do voto ou na proposta, que não muda com os limiares. Uma imagem entra como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
-Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão guarda caixas (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, só com `labels/`, ou um banco de outra versão do esquema) são recusadas, sem migração: importe de novo numa saída nova. Toda imagem entra pelo `importar.py`, num lote, que dá o conjunto; não há imagem sem lote.
+Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão nem voto guarda caixa com classe (as propostas guardam a classe pelo nome; fundo, descarte e a união do teste não têm ids); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, só com `labels/`, ou um banco de outra versão do esquema) são recusadas, sem migração: importe de novo numa saída nova. Toda imagem entra pelo `importar.py`, num lote, que dá o conjunto; não há imagem sem lote.
 
 **Treino e teste** são divididos por lote (sessão de captura, nunca por imagem; monografia, seção 5.3.5), no `importar.py`. O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`: a validação do YOLO é feita nas imagens de teste, anotadas por humanos sem a classe proposta (seção 4 do `OBJETIVO.md`). Enquanto nenhuma imagem de teste foi revisada, o `teste.txt` fica vazio e o Ultralytics não treina, de propósito.
 
@@ -162,20 +165,26 @@ python anotacao/revisar.py anotacoes --abrir      # http://127.0.0.1:8000/
 python anotacao/revisar.py anotacoes --porta 8001
 ```
 
-A página mostra a fila das imagens `pendente`, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os filtros trocam o status (`revisada`, `descartada`, todas) e a ordem (por nome). As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
+A revisão parte do voto (`votar.py`). A fila padrão, **a revisar**, tem as imagens pendentes que falharam no voto e as de teste, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os outros filtros mostram as **aprovadas** pelo voto (já rotuladas; revisá-las troca o rótulo pelo do revisor), as **sem voto** (só para ver: rode o `votar.py`), as revisadas, as descartadas e todas; a ordem também pode ser por nome. As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
 
 ### Edição
 
-Numa imagem `pendente`, com "mostrar" em "automático (edição)", as caixas propostas pelo anotador (o primeiro em ordem alfabética, se houver vários) podem ser corrigidas. Proposta intocada aparece tracejada, com a confiança; caixa corrigida, em linha contínua. Caixa proposta sem classe (confiança baixa) aparece em vermelho como "sem classe": a imagem só pode ser salva depois que cada uma recebe classe ou é removida.
+Numa imagem pendente e votada, com "mostrar" em "automático (edição)", a edição começa com as **caixas do voto**:
+
+- **Treino**: as caixas de consenso, com a classe e a menor confiança dos anotadores. As **propostas de um modelo que não entraram no voto** (achadas por um ou dois anotadores, ou com classes diferentes) aparecem pontilhadas, com o nome do anotador, a classe e a confiança; um clique inclui a caixa na edição, com a classe proposta (abaixo de `confianca_classe`, sem classe). A caixa "propostas dos modelos" esconde as pontilhadas.
+- **Teste**: as caixas da união, todas "sem classe", sem confiança nem quem propôs (seção 4 do `OBJETIVO.md`). O revisor dá a classe de cada uma, remove as que sobram e acrescenta as que faltam pela caixa por clique.
+
+Caixa do voto intocada aparece tracejada, com a confiança; caixa corrigida ou incluída, em linha contínua. Caixa sem classe aparece em vermelho: a imagem só pode ser salva depois que cada uma recebe classe ou é removida.
 
 | Ação | Mouse | Teclado |
 |---|---|---|
 | Selecionar caixa | clique (já abre a busca) | `Tab` / `Shift+Tab`, em ordem de leitura |
+| Incluir uma proposta de um modelo fora do voto | clique na caixa pontilhada | — |
 | Trocar a classe | escrever no campo de busca e clicar na opção | com a caixa selecionada, escrever (a primeira letra já abre a busca); `↑`/`↓` e `Enter` escolhem |
 | Trocar para uma classe do anotador | — | `1`–`9`, na ordem de `classes` no `classes.yaml` |
 | Remover caixa | "Remover caixa" | `Del` |
 | Desfazer a seleção | clique fora das caixas | `Esc` |
-| Desfazer e refazer | — | `Ctrl+Z`; `Ctrl+Shift+Z` ou `Ctrl+Y` (`Cmd` no Mac). Valem para trocar classe, remover e adicionar caixa, na imagem atual; na busca com texto, ficam com o campo |
+| Desfazer e refazer | — | `Ctrl+Z`; `Ctrl+Shift+Z` ou `Ctrl+Y` (`Cmd` no Mac). Valem para trocar classe, remover, incluir e adicionar caixa, na imagem atual; na busca com texto, ficam com o campo |
 | Nova caixa por clique | "Nova caixa" e um clique no objeto | `N` (sem caixa selecionada), clique no objeto, `Tab`/`Shift+Tab` ou a roda do mouse trocam a candidata, `Enter` confirma, `Esc` cancela |
 | Salvar e ir para a próxima | "Salvar e próxima" | `Enter`, que pede confirmação (`Enter` confirma, `Esc` cancela); `Ctrl+S` (`Cmd+S` no Mac) salva direto, também com a busca aberta |
 | Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` sem caixa selecionada (com uma selecionada, o `d` vai para a busca); sempre pede confirmação |
@@ -184,26 +193,27 @@ O `Tab` segue a ordem de leitura pelos centros das caixas: linhas de cima para b
 
 A busca oferece qualquer classe do `data.yaml` e mostra até 9 opções. Não diferencia maiúsculas nem acentos e casa, nesta ordem: o início do nome, o início de uma palavra ("can" → `Drink can`), as iniciais ("cpb" → `Clear plastic bottle`), um trecho qualquer e o material, em português ou inglês ("vidro" → as classes de vidro do anotador; só elas têm material). Nos empates, vêm antes as classes usadas há pouco e as do anotador. Com o campo vazio, a lista mostra essas mesmas. Na busca, `Esc` fecha sem trocar e `Tab` passa para a caixa seguinte.
 
-A confirmação do `Enter` resume o que vai ser gravado: as classes das caixas, quantas foram corrigidas e removidas, e o aviso de fundo quando não sobra nenhuma caixa. Salvar pelo botão ou por `Ctrl+S` não pede confirmação.
+A confirmação do `Enter` resume o que vai ser gravado: as classes das caixas, quantas foram corrigidas, adicionadas e removidas, e o aviso de fundo quando não sobra nenhuma caixa. Salvar pelo botão ou por `Ctrl+S` não pede confirmação.
 
-Salvar sem mudar nada aceita as propostas como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava a revisão no banco, gera `labels/<nome>.txt` e marca a imagem como `revisada`; descartar grava a revisão, apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila de pendentes. Trocar de imagem com alterações não salvas pede confirmação.
+Salvar sem mudar nada aceita as caixas do voto como estão. Salvar uma imagem sem caixas a grava como fundo (`.txt` vazio). Salvar grava a revisão no banco, gera `labels/<nome>.txt` e marca a imagem como `revisada`; descartar grava a revisão, apaga o `.txt`, se houver, e a marca como `descartada`. Nos dois casos, a imagem sai da fila. Trocar de imagem com alterações não salvas pede confirmação.
 
-**Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as caixas da proposta abaixo de `--confianca` (de `--piso` para cima); as quase iguais a uma caixa já presente (IoU ≥ 0,9) ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto.
+**Nova caixa por clique.** Para um objeto sem caixa: `N`, depois um clique no objeto. A página mostra, tracejada em branco, a candidata mais confiante que contém o ponto, entre as caixas abaixo do limiar do voto (de `--piso` para cima) de **todos** os anotadores; das quase iguais entre si (IoU ≥ 0,9) fica só a mais confiante, e as quase iguais a uma caixa já presente ficam de fora. `Tab` ou a roda passam às seguintes; `Enter` confirma, e a caixa nasce sem classe, com a busca já aberta. Se nenhuma candidata servir, clique em outra parte do objeto. No teste, a confiança das candidatas não aparece.
 
-Desfazer tudo volta às propostas como chegaram, e a imagem deixa de contar como alterada. Ainda não dá para desenhar à mão, mover ou redimensionar caixas: um objeto que nenhuma candidata cobre leva ao descarte da imagem (decisão 12 do `PLANO-REVISAO.md`). Também não dá para reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e status são só para ver.
+Desfazer tudo volta às caixas do voto como chegaram, e a imagem deixa de contar como alterada. Ainda não dá para desenhar à mão, mover ou redimensionar caixas: um objeto que nenhuma candidata cobre leva ao descarte da imagem (decisão 12 do `PLANO-REVISAO.md`). Também não dá para reabrir uma imagem revisada ou descartada (fase 5): as outras camadas e filas são só para ver.
 
 Cada revisão é uma linha nova no banco (RF13); a API devolve a vigente assim:
 
 ```json
-{"imagem": "foto.jpg", "acao": "salvar", "data": "2026-11-10T00:13:30-03:00",
- "tempo_ativo_s": 6.0, "revisor": null,
- "base": {"anotador": "grounding-dino", "versao": "IDEA-Research/grounding-dino-tiny", "classes": "<hash>",
-          "proposta_id": 42, "limiares": {"confianca": 0.2, "confianca_classe": 0.35}},
- "caixas": [{"id": 2, "caixa": [x1, y1, x2, y2], "proposta": 0, "desfecho": "classe_corrigida"}],
+{"imagem": "foto.jpg", "acao": "salvar", "data": "2026-11-15T00:13:30-03:00",
+ "tempo_ativo_s": 6.0, "revisor": null, "voto_id": 42,
+ "caixas": [{"id": 2, "caixa": [x1, y1, x2, y2], "origem": "voto", "indice": 0,
+             "anotador": null, "desfecho": "classe_corrigida"},
+            {"id": 5, "caixa": [x1, y1, x2, y2], "origem": "proposta", "indice": 3,
+             "anotador": "owlv2", "desfecho": "adicionada"}],
  "removidas": [1]}
 ```
 
-O desfecho de cada caixa (`aceita`, `classe_corrigida`, `classe_atribuida` quando a classe da proposta estava escondida do revisor, `adicionada`) é calculado pelo servidor frente à proposta de origem; uma caixa adicionada por clique leva `"origem": "candidata"`, e o servidor confere que ela é mesmo uma das candidatas do anotador de base, e `removidas` lista os índices das propostas visíveis apagadas (calculadas da proposta base, que nunca muda). O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O servidor confere a origem de cada caixa: uma caixa do voto (`origem: "voto"`, `indice` na lista do voto), uma proposta visível de um anotador usado pelo voto (`"proposta"`) ou uma candidata dele (`"candidata"`), estas duas com `anotador` e o `indice` na proposta; as coordenadas têm de ser as da origem. O desfecho é calculado por ele: `aceita` ou `classe_corrigida` frente à classe da caixa do voto, `classe_atribuida` quando a caixa do voto não tinha classe (teste), e `adicionada` para as que vêm de uma proposta ou candidata. `removidas` lista as caixas do voto apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 
@@ -212,12 +222,12 @@ O servidor escuta só em `127.0.0.1` e lê o banco a cada pedido, então propost
 | Rota | Resposta |
 |---|---|
 | `GET /api/classes` | `[{id, nome, material}]` |
-| `GET /api/imagens?status=pendente&ordem=incerteza` | `{imagens: [{nome, status, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}` |
-| `GET /api/imagens/<nome>` | `{nome, status, largura, altura, final, propostas: {anotador: [...]}, propostas_ids: {anotador: id}, candidatas, invalidas, revisao}` |
-| `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", base, proposta_id, tempo_ativo_s, caixas: [{id, caixa, proposta, origem}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, ou se `proposta_id` não é mais a proposta vigente de `base` (o anotador gravou outra depois que a página abriu) |
+| `GET /api/imagens?status=a_revisar&ordem=incerteza` | `{imagens: [{nome, status, situacao, voto, motivo, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}`; `status` é a situação: `a_revisar`, `aprovada`, `sem_voto`, `revisada`, `descartada` ou `todas`. Nas de teste pendentes, sem anotadores nem confiança |
+| `GET /api/imagens/<nome>` | `{nome, status, situacao, conjunto, largura, altura, final, propostas: {anotador: [...]}, voto, invalidas, revisao}`; `voto` (nulo sem voto): `{id, resultado, motivo, conjunto, caixas: [{indice, id, nome, conf, caixa, anotadores}], propostas: {anotador: [...]} (as fora do voto), candidatas: [{anotador, indice, conf, caixa}]}`. No teste pendente, `propostas` vem vazio e as caixas do voto sem classe nem confiança |
+| `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", voto_id, tempo_ativo_s, caixas: [{id, caixa, origem, indice, anotador}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, não foi votada, ou se `voto_id` não é mais o voto vigente (a imagem foi votada de novo depois que a página abriu) |
 | `GET /images/<nome>` | A imagem |
 
-As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. No `PUT`, `proposta` é o índice da caixa de origem nas propostas de `base`, ou `null` para uma caixa nova. Só imagens registradas no banco são servidas. Conferir o status, gravar a revisão e mudar o status são uma transação só; o `.txt` vem depois, e, se faltar, a próxima abertura do servidor o refaz.
+As caixas vão como `{id, nome, conf, caixa: [x1, y1, x2, y2]}`, normalizadas de 0 a 1, com `conf` nula na anotação final e `id` nulo para classe fora do `data.yaml`. Só imagens registradas no banco são servidas. Conferir o status, gravar a revisão e mudar o status são uma transação só; o `.txt` vem depois, e, se faltar, a próxima abertura do servidor o refaz.
 
 ## Novo anotador
 

@@ -11,6 +11,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import saida as formato  # noqa: E402
 import visualizar  # noqa: E402
+from auxiliar import pedido, votar_imagens  # noqa: E402
 
 
 @pytest.fixture
@@ -49,14 +50,15 @@ def test_coletar_propostas_e_status(tmp_path):
         Image.new("RGB", (8, 4)).save(saida / "images" / nome)
     formato.preparar(saida, ["Garrafa", "Lata"])
     formato.registrar(saida, [("a.jpg", 8, 4), ("sem.jpg", 8, 4)], "l1", {"conjunto": "treino"})
-    formato.revisar(saida, "a.jpg", {"acao": "salvar", "caixas": []}, "t")
+    votar_imagens(saida, ["a.jpg"])
+    formato.revisar(saida, "a.jpg", pedido(saida, "a.jpg"), "t")
     formato.nova_proposta(saida, "falso", "sem.jpg", [
         ("Lata", 0.7, (0.25, 0.25, 0.75, 0.75)), ("Pneu", 0.6, (0, 0, 1, 1)),
         ("Lata", 0.3, (0, 0, 0.5, 1)), ("Lata", 0.1, (0.5, 0, 1, 1))],
         {"confianca": 0.2, "confianca_classe": 0.5})
     _, anotadores, imagens = visualizar.coletar(saida)
     por_nome = {im["nome"]: im for im in imagens}
-    assert anotadores == ["falso"]
+    assert anotadores == ["falso", "v1", "v2"]
     assert por_nome["a.jpg"]["status"] == "revisada"
     assert por_nome["b c.png"]["status"] is None
     # Só as visíveis (>= 0,2); abaixo de 0,5, sem classe; Pneu: fora do data.yaml.

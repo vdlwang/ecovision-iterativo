@@ -28,7 +28,8 @@
   #fila .nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #fila .info { color: var(--suave); flex: none; font-variant-numeric: tabular-nums; }
   #fila .vazia { color: var(--suave); cursor: default; }
-  .st-pendente { color: var(--alerta); } .st-revisada { color: var(--destaque); }
+  .st-a_revisar { color: var(--alerta); } .st-aprovada { color: #60a5fa; }
+  .st-sem_voto { color: var(--suave); } .st-revisada { color: var(--destaque); }
   .st-descartada { color: var(--suave); text-decoration: line-through; }
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .barra { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
@@ -47,6 +48,9 @@
   .quadro img { display: block; max-width: 100%; }
   .caixa { position: absolute; border: 2px solid; }
   .caixa.proposta { border-style: dashed; }
+  /* Proposta de um modelo fora do voto: clique inclui na edição */
+  .caixa.modelo { border-style: dotted; opacity: .8; }
+  .caixa.modelo:hover { opacity: 1; }
   .editando .caixa { cursor: pointer; }
   .caixa.selecionada { border-width: 3px; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,.6); }
   .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
@@ -102,9 +106,11 @@
     <h1>Revisão</h1>
     <small id="resumo">carregando…</small>
     <div class="filtros">
-      <label>status
+      <label>fila
         <select id="status">
-          <option value="pendente">pendentes</option>
+          <option value="a_revisar">a revisar</option>
+          <option value="aprovada">aprovadas pelo voto</option>
+          <option value="sem_voto">sem voto</option>
           <option value="revisada">revisadas</option>
           <option value="descartada">descartadas</option>
           <option value="todas">todas</option>
@@ -126,6 +132,8 @@
     <label>mostrar <select id="camada"></select></label>
     <label><input type="checkbox" id="mostrar-rotulos" checked> nomes</label>
     <label><input type="checkbox" id="mostrar-caixas" checked> caixas</label>
+    <label title="Propostas de cada modelo que não entraram no voto"><input type="checkbox"
+      id="mostrar-modelos" checked> propostas dos modelos</label>
     <button id="anterior" title="Seta para a esquerda">&larr;</button>
     <button id="proxima" title="Seta para a direita">&rarr;</button>
   </div>
@@ -144,7 +152,8 @@
       <span class="dica">Selecione uma caixa (clique ou <kbd>Tab</kbd>) e escreva a classe;
         <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
         confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
-        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.
+        <kbd>Esc</kbd> desfaz a seleção. Pontilhadas: propostas de um modelo fora do voto,
+        um clique inclui. <kbd>N</kbd> e um clique no objeto: nova caixa.
         <kbd>Ctrl+Z</kbd> desfaz; <kbd>Ctrl+Shift+Z</kbd>, refaz.</span>
     </div>
   </div>
@@ -168,9 +177,11 @@ let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
-// {base, caixas: [{id, caixa, proposta, tocada, origem}], sel, sujo, novo, desfazer,
-// refazer} se editável; novo: modo "nova caixa", {ponto, lista de candidatas no
-// ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel} desta imagem
+// {voto, teste, caixas: [{id, caixa, origem, indice, anotador, tocada}], sel, sujo,
+// novo, desfazer, refazer} se editável (pendente e votada); voto: o id do voto
+// mostrado; origem: "voto" (indice na lista do voto), "proposta" ou "candidata"
+// (indice na proposta do anotador); novo: modo "nova caixa", {ponto, lista de
+// candidatas no ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel}
 let edicao = null;
 let pedido = 0;       // descarta respostas de pedidos já superados
 let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recente antes
@@ -178,6 +189,11 @@ const nomeClasse = id => classes.find(c => c.id === id)?.nome;
 // Rótulo de uma caixa sem id: proposta sem classe (nome null) ou classe fora do data.yaml
 const semId = nome => nome == null ? "sem classe" : `${nome} (fora do data.yaml)`;
 const AVISO_SEM_ID = "Há caixa sem classe ou com classe fora do data.yaml: dê a classe ou remova.";
+const SITUACOES = { a_revisar: "a revisar", aprovada: "aprovada", sem_voto: "sem voto",
+                    revisada: "revisada", descartada: "descartada" };
+const MOTIVOS = { quantidade: "os modelos acharam números de objetos diferentes",
+                  caixas: "há caixa ou classe sem par", vazia: "nenhum modelo achou objeto",
+                  classe_fora: "classe fora do data.yaml" };
 
 async function api(rota, opcoes) {
   const resposta = await fetch(rota, opcoes);
@@ -216,18 +232,19 @@ async function carregarFila(manter) {
   const seletor = $("camada"), escolhida = seletor.value;
   seletor.replaceChildren();
   for (const [valor, texto] of [["auto", "automático (edição)"], ["final", "anotação final"],
+                                ["voto", "voto"],
                                 ...dados.anotadores.map(a => [a, `propostas: ${a}`])])
     seletor.add(new Option(texto, valor));
   if ([...seletor.options].some(o => o.value === escolhida)) seletor.value = escolhida;
 
   $("resumo").textContent = Object.entries(dados.contagem)
-    .map(([s, n]) => `${n} ${s}${n === 1 ? "" : "s"}`).join(", ");
+    .map(([s, n]) => `${n} ${SITUACOES[s] ?? s}`).join(", ");
 
   const lista = $("fila");
   lista.replaceChildren();
   if (!fila.length) {
     lista.append(Object.assign(document.createElement("li"),
-      { className: "vazia", textContent: "Nenhuma imagem com esse status." }));
+      { className: "vazia", textContent: "Nenhuma imagem nessa fila." }));
   }
   fila.forEach((im, i) => {
     const li = document.createElement("li");
@@ -236,13 +253,15 @@ async function carregarFila(manter) {
     const info = document.createElement("span");
     info.className = "info";
     const total = Object.values(im.n_caixas).reduce((a, b) => a + b, 0);
-    info.textContent = im.anotadores.length
+    info.textContent = im.voto === "uniao" && im.status === "pendente" ? "teste "
+      : im.anotadores.length
       ? `${total} cx · ${im.confianca_min === null ? "—" : im.confianca_min.toFixed(2)} `
       : "sem proposta ";
     info.append(Object.assign(document.createElement("span"),
-      { className: `st-${im.status}`, textContent: im.status }));
+      { className: `st-${im.situacao}`, textContent: SITUACOES[im.situacao] }));
     li.title = im.nome + (im.anotadores.length
-      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
+      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "")
+      + (im.motivo ? `\nvoto falhou: ${MOTIVOS[im.motivo] ?? im.motivo}` : "");
     li.append(nome, info);
     li.onclick = () => { if (podeSair()) mostrar(i); };
     lista.append(li);
@@ -266,14 +285,12 @@ async function mostrar(i) {
     if (meu !== pedido) return;
     detalhe = dados;
     edicao = null;
-    if (dados.status === "pendente") {
-      // Base da edição: o primeiro anotador (em ordem alfabética) com proposta;
-      // o seletor de anotador é a fase 5
-      const base = Object.keys(dados.propostas).sort()[0] ?? null;
-      edicao = { base, sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
-        // proposta: o índice da caixa na proposta gravada, não a posição na lista
-        caixas: (base ? dados.propostas[base] : []).map(c =>
-          ({ id: c.id, caixa: c.caixa, proposta: c.indice, tocada: false })) };
+    if (dados.status === "pendente" && dados.voto) {
+      // A edição parte das caixas do voto: consenso no treino, união sem classe no teste
+      edicao = { voto: dados.voto.id, teste: dados.voto.resultado === "uniao",
+        sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
+        caixas: dados.voto.caixas.map(c =>
+          ({ id: c.id, caixa: c.caixa, origem: "voto", indice: c.indice, tocada: false })) };
       tempo.ativo = 0;
       tempo.ultima = Date.now();
     }
@@ -286,14 +303,17 @@ async function mostrar(i) {
 
 const editando = () => edicao && $("camada").value === "auto";
 
-// "auto": a edição se a imagem é pendente; senão a anotação final, ou a
-// proposta do primeiro anotador se não houver .txt
+// "auto": a edição se a imagem é pendente e votada; senão a anotação final,
+// ou o voto, ou a proposta do primeiro anotador
 function camada(im) {
   const escolhida = $("camada").value;
   if (escolhida === "final") return { tipo: "final", caixas: im.final };
+  if (escolhida === "voto") return { tipo: "voto", caixas: im.voto?.caixas ?? null };
   if (escolhida !== "auto") return { tipo: escolhida, caixas: im.propostas[escolhida] ?? null };
   const anotadores = Object.keys(im.propostas).sort();
-  if (im.final || !anotadores.length) return { tipo: "final", caixas: im.final };
+  if (im.final) return { tipo: "final", caixas: im.final };
+  if (im.voto) return { tipo: "voto", caixas: im.voto.caixas };
+  if (!anotadores.length) return { tipo: "final", caixas: im.final };
   return { tipo: anotadores[0], caixas: im.propostas[anotadores[0]] };
 }
 
@@ -325,7 +345,8 @@ function desenhar() {
     return;
   }
   const im = detalhe;
-  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · ${im.status}`
+  $("titulo").textContent = `${atual + 1}/${fila.length} · ${im.nome} · `
+    + `${SITUACOES[im.situacao]}${im.conjunto === "teste" ? " (teste)" : ""}`
     + (edicao?.sujo ? " · alterada" : "");
 
   if (editando()) return desenharEdicao();
@@ -336,7 +357,9 @@ function desenhar() {
                              + (conf === null ? "" : ` ${conf.toFixed(2)}`), caixa, conf !== null));
   atualizarVisibilidade();
 
-  legenda.replaceChildren(tipo === "final" ? "Anotação final. " : `Propostas de ${tipo}. `);
+  legenda.replaceChildren(tipo === "final" ? "Anotação final. "
+    : tipo === "voto" ? `Caixas do voto (${im.voto?.resultado ?? "sem voto"}). `
+    : `Propostas de ${tipo}. `);
   const contagem = new Map();
   for (const { id, nome } of caixas ?? []) {
     const chave = `${id}\u0000${nome}`;
@@ -350,28 +373,65 @@ function desenhar() {
     item.append(amostra, `${id === "null" ? semId(nome === "null" ? null : nome) : nome}: ${n}`);
     legenda.append(item);
   }
-  if (caixas === null) legenda.append(tipo === "final"
-    ? "Sem rótulos em labels/ (não revisada)." : "Sem proposta deste anotador.");
+  if (caixas === null) legenda.append(tipo === "final" ? "Sem rótulos em labels/."
+    : tipo === "voto" ? "Imagem não votada." : "Sem proposta deste anotador.");
   else if (!caixas.length) legenda.append("Nenhum objeto.");
   if (tipo === "final" && im.invalidas)
     legenda.append(` ${im.invalidas} linha(s) inválida(s) ignorada(s).`);
   if (im.status !== "pendente")
     legenda.append(` Só pendentes são editáveis (reabrir: fase 5).`);
+  else if (!im.voto)
+    legenda.append(" Sem voto: rode o votar.py; só imagens votadas são revisáveis.");
   else if (!editando())
     legenda.append(" Só visualização; escolha \"automático\" para editar.");
 }
 
+// A caixa de onde veio uma caixa da edição: do voto, de uma proposta ou candidata
+function origemDe(c) {
+  const v = detalhe.voto;
+  if (c.origem === "voto") return v.caixas.find(x => x.indice === c.indice);
+  if (c.origem === "proposta") return v.propostas[c.anotador]?.find(x => x.indice === c.indice);
+  return v.candidatas.find(x => x.anotador === c.anotador && x.indice === c.indice);
+}
+
+// Propostas dos modelos que não entraram no voto e ainda não foram incluídas
+function propostasFora() {
+  const incluidas = new Set(edicao.caixas.filter(c => c.origem === "proposta")
+    .map(c => `${c.anotador}\u0000${c.indice}`));
+  return Object.entries(detalhe.voto.propostas).flatMap(([anotador, lista]) => lista
+    .filter(p => !incluidas.has(`${anotador}\u0000${p.indice}`)).map(p => ({ anotador, p })));
+}
+
+function incluir(anotador, p) {
+  if (!editando()) return;
+  guardar();
+  edicao.caixas.push({ id: p.id, caixa: p.caixa, origem: "proposta", anotador,
+                       indice: p.indice, tocada: true });
+  edicao.sel = edicao.caixas.length - 1;
+  desenhar();
+  if (p.id === null) abrirBusca();
+}
+
 function desenharEdicao() {
   const quadro = $("quadro");
-  const propostas = new Map((edicao.base ? detalhe.propostas[edicao.base] : [])
-    .map(p => [p.indice, p]));
-  // As maiores primeiro, para as pequenas ficarem por cima e clicáveis
+  // Por baixo, as propostas fora do voto; as maiores primeiro, para as
+  // pequenas ficarem por cima e clicáveis
+  if ($("mostrar-modelos").checked)
+    for (const { anotador, p } of propostasFora().sort((a, b) => area(b.p.caixa) - area(a.p.caixa))) {
+      const div = caixaDiv(p.id, `${anotador}: ${p.id === null ? semId(p.nome) : p.nome} `
+                                 + p.conf.toFixed(2), p.caixa, true);
+      div.classList.add("modelo");
+      div.title = `Proposta de ${anotador} fora do voto: clique para incluir`;
+      div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); incluir(anotador, p); };
+      quadro.append(div);
+    }
   const ordem = edicao.caixas.map((c, k) => k).sort((a, b) => area(edicao.caixas[b].caixa)
                                                        - area(edicao.caixas[a].caixa));
   for (const k of ordem) {
     const c = edicao.caixas[k];
-    const conf = c.proposta === null ? null : propostas.get(c.proposta).conf;
-    const nome = nomeClasse(c.id) ?? semId(propostas.get(c.proposta)?.nome);
+    const origem = origemDe(c);
+    const conf = c.origem === "candidata" ? null : origem?.conf ?? null;
+    const nome = nomeClasse(c.id) ?? semId(origem?.nome);
     const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
                          c.caixa, !c.tocada);
     div.classList.toggle("selecionada", edicao.sel === k);
@@ -382,8 +442,8 @@ function desenharEdicao() {
   const novo = edicao.novo;
   if (novo?.lista?.length) {
     const c = novo.lista[novo.i];
-    const div = caixaDiv(0, `candidata ${novo.i + 1}/${novo.lista.length} · ${c.conf.toFixed(2)}`,
-                         c.caixa, true);
+    const div = caixaDiv(0, `candidata ${novo.i + 1}/${novo.lista.length}`
+                            + (edicao.teste ? "" : ` · ${c.conf.toFixed(2)}`), c.caixa, true);
     div.classList.add("candidata");
     quadro.append(div);
   }
@@ -394,10 +454,18 @@ function desenharEdicao() {
   const legenda = $("legenda");
   if (novo) return legenda.replaceChildren(textoNova());
   const { corrigidas, adicionadas, removidas } = contarAlteracoes();
-  legenda.replaceChildren(edicao.base
-    ? `Editando as propostas de ${edicao.base}: ${edicao.caixas.length} caixa(s), `
-      + `${corrigidas} corrigida(s), ${adicionadas} adicionada(s), ${removidas} removida(s).`
-    : "Sem propostas: salve para marcar como fundo (sem objetos) ou descarte.");
+  const v = detalhe.voto;
+  legenda.replaceChildren(edicao.teste
+    ? "Teste: caixas da união dos modelos, sem classe; dê a classe de cada uma. "
+    : v.resultado === "aprovada" ? "Voto aprovado: caixas de consenso. "
+    : `Voto falhou (${MOTIVOS[v.motivo] ?? v.motivo}): caixas de consenso. `);
+  legenda.append(edicao.caixas.length || v.caixas.length
+    ? `${edicao.caixas.length} caixa(s), ${corrigidas} ${edicao.teste ? "com classe dada"
+      : "corrigida(s)"}, ${adicionadas} adicionada(s), ${removidas} removida(s).`
+    : "Nenhuma caixa: salve para marcar como fundo (sem objetos) ou descarte.");
+  const fora = propostasFora().length;
+  if (fora) legenda.append(` ${fora} proposta(s) de modelos fora do voto`
+    + ($("mostrar-modelos").checked ? " (pontilhadas): clique para incluir." : ", ocultas."));
   if (edicao.caixas.some(c => c.id === null))
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
       textContent: " " + AVISO_SEM_ID }));
@@ -418,11 +486,10 @@ const iou = (a, b) => {
 };
 
 function contarAlteracoes() {
-  const propostas = edicao.base ? detalhe.propostas[edicao.base].length : 0;
-  const daProposta = edicao.caixas.filter(c => c.proposta !== null);
-  return { corrigidas: daProposta.filter(c => c.tocada).length,
-           adicionadas: edicao.caixas.length - daProposta.length,
-           removidas: propostas - daProposta.length };
+  const doVoto = edicao.caixas.filter(c => c.origem === "voto");
+  return { corrigidas: doVoto.filter(c => c.tocada).length,
+           adicionadas: edicao.caixas.length - doVoto.length,
+           removidas: detalhe.voto.caixas.length - doVoto.length };
 }
 
 // A imagem ocupa o espaço livre da .area, qualquer que seja a altura do rodapé
@@ -447,11 +514,12 @@ function selecionar(k) {
 }
 
 // --- nova caixa por clique ---------------------------------------------------
-// A proposta guarda as caixas do anotador desde um piso baixo; as abaixo do
-// limiar de exibição chegam à página como candidatas. Um clique no objeto mostra a mais confiante que contém o
+// As propostas guardam as caixas dos anotadores desde um piso baixo; as abaixo
+// do limiar do voto chegam à página como candidatas, de todos os anotadores,
+// sem as repetidas. Um clique no objeto mostra a mais confiante que contém o
 // ponto; Tab ou a roda passam às seguintes. A caixa confirmada nasce sem classe.
 
-const candidatasBase = () => (edicao.base ? detalhe.candidatas?.[edicao.base] ?? [] : []);
+const candidatasBase = () => detalhe.voto?.candidatas ?? [];
 
 function iniciarNova() {
   if (!editando()) return;
@@ -491,7 +559,8 @@ function confirmarNova() {
   const c = edicao.novo?.lista?.[edicao.novo.i];
   if (!c) return;
   guardar();
-  edicao.caixas.push({ id: null, caixa: c.caixa, proposta: null, tocada: true, origem: "candidata" });
+  edicao.caixas.push({ id: null, caixa: c.caixa, origem: "candidata", anotador: c.anotador,
+                       indice: c.indice, tocada: true });
   edicao.sel = edicao.caixas.length - 1;
   edicao.novo = null;
   desenhar();
@@ -501,14 +570,14 @@ function confirmarNova() {
 function textoNova() {
   const novo = edicao.novo;
   if (!candidatasBase().length)
-    return "O anotador não propôs nenhuma caixa abaixo das mostradas (candidatas). Esc sai.";
+    return "Nenhum modelo propôs caixa abaixo das mostradas (candidatas). Esc sai.";
   if (!novo.lista) return "Nova caixa: clique no objeto. Esc cancela.";
   if (!novo.lista.length)
     return "Nenhuma candidata nova contém esse ponto: clique em outra parte do objeto "
       + "(desenhar à mão é a fase 4). Esc cancela.";
-  return `Candidata ${novo.i + 1} de ${novo.lista.length} (confiança `
-    + `${novo.lista[novo.i].conf.toFixed(2)}): Tab ou a roda do mouse trocam, Enter confirma, `
-    + "Esc cancela.";
+  return `Candidata ${novo.i + 1} de ${novo.lista.length}`
+    + (edicao.teste ? "" : ` (confiança ${novo.lista[novo.i].conf.toFixed(2)})`)
+    + ": Tab ou a roda do mouse trocam, Enter confirma, Esc cancela.";
 }
 
 function trocarClasse(id) {
@@ -713,12 +782,11 @@ async function enviar(acao, pedirConfirmacao = false) {
       `Descartar ${detalhe.nome}?\nEla não vai para o treino.`, "Descartar", true)) return;
   if (acao === "salvar" && pedirConfirmacao && !await confirmar(resumoSalvar(), "Salvar e próxima"))
     return;
-  // proposta_id: a versão que a página mostrou; se o anotador gravou outra
-  // depois, o servidor recusa (409) em vez de aplicar índices de outra proposta
-  const corpo = { acao, base: edicao.base, tempo_ativo_s: tempo.ativo,
-    proposta_id: edicao.base ? detalhe.propostas_ids?.[edicao.base] ?? null : null,
-    caixas: edicao.caixas.map(({ id, caixa, proposta, origem }) =>
-      ({ id, caixa, proposta, origem: origem ?? null })) };
+  // voto_id: o voto que a página mostrou; se a imagem foi votada de novo
+  // depois, o servidor recusa (409) em vez de aplicar índices de outro voto
+  const corpo = { acao, voto_id: edicao.voto, tempo_ativo_s: tempo.ativo,
+    caixas: edicao.caixas.map(({ id, caixa, origem, indice, anotador }) =>
+      ({ id, caixa, origem, indice, anotador: anotador ?? null })) };
   $("salvar").disabled = $("descartar").disabled = true;
   try {
     await api(`/api/imagens/${encodeURIComponent(detalhe.nome)}`, {
@@ -726,7 +794,8 @@ async function enviar(acao, pedirConfirmacao = false) {
       body: JSON.stringify(corpo) });
     edicao.sujo = false;
     const proxima = fila[atual + 1]?.nome ?? fila[atual - 1]?.nome;
-    await carregarFila($("status").value === "pendente" ? proxima : detalhe.nome);
+    await carregarFila(["a_revisar", "aprovada"].includes($("status").value)
+      ? proxima : detalhe.nome);
   } catch (e) { erro(e); }
   finally { $("salvar").disabled = $("descartar").disabled = false; }
 }
@@ -739,6 +808,7 @@ $("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
 $("camada").onchange = desenhar;
 $("mostrar-caixas").onchange = atualizarVisibilidade;
 $("mostrar-rotulos").onchange = atualizarVisibilidade;
+$("mostrar-modelos").onchange = desenhar;
 $("anterior").onclick = () => { if (podeSair()) mostrar(atual - 1); };
 $("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
 $("salvar").onclick = () => enviar("salvar");
@@ -847,8 +917,8 @@ document.addEventListener("keydown", e => {
   }
 });
 
-// #<nome> no endereço abre essa imagem; se ela não estiver entre as
-// pendentes, a fila passa a mostrar todas
+// #<nome> no endereço abre essa imagem; se ela não estiver na fila a
+// revisar, a fila passa a mostrar todas
 async function iniciar() {
   classes = await api("/api/classes");
   const pedida = decodeURIComponent(location.hash.slice(1));

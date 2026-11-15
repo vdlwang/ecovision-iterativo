@@ -8,9 +8,15 @@ refaz do banco os arquivos gerados (saida.exportar). Escuta só em 127.0.0.1.
 
     GET /                          a página
     GET /api/classes               [{id, nome, material, atalho}]
-    GET /api/imagens?status=&ordem= fila, anotadores e contagem por status
-    GET /api/imagens/<nome>        propostas, anotação final, status e revisão
-    PUT /api/imagens/<nome>        salva ou descarta uma pendente (saida.revisar)
+    GET /api/imagens?status=&ordem= fila, anotadores e contagem por situação
+    GET /api/imagens/<nome>        voto (a base da edição), propostas, anotação
+                                   final, status e revisão
+    PUT /api/imagens/<nome>        salva ou descarta uma pendente votada (saida.revisar)
+
+A revisão parte do voto (votar.py): as caixas de consenso (treino) ou da união
+sem classe (teste) são a edição inicial, e as propostas dos anotadores que não
+entraram nelas são oferecidas para incluir. A fila padrão é a das pendentes a
+revisar: as que falharam no voto e as de teste. Imagem sem voto não é editável.
     GET /images/<arquivo>          a imagem
 
 Uso:
@@ -33,7 +39,11 @@ import saida as formato
 from anotar import DIR_SCRIPT, carregar_classes
 
 PAGINA = DIR_SCRIPT / "revisar.html"
-FILTROS = (*formato.STATUS, "todas")
+# Situação de uma imagem na fila: a_revisar (pendente que falhou no voto, ou de
+# teste), aprovada (pendente aprovada pelo voto), sem_voto (pendente ainda não
+# votada), revisada e descartada
+SITUACOES = ("a_revisar", "aprovada", "sem_voto", "revisada", "descartada")
+FILTROS = (*SITUACOES, "todas")
 ORDENS = ("incerteza", "nome")
 TAMANHO_MAXIMO_PEDIDO = 1 << 20
 
@@ -56,12 +66,21 @@ def listar_classes(saida, classes):
             for i, n in sorted(formato.nomes_classes(saida).items())]
 
 
-def resumir(dados):
-    """Linha da fila a partir de saida.ler_imagem."""
+def situacao(linha):
+    if linha["status"] != "pendente":
+        return linha["status"]
+    return {None: "sem_voto", "aprovada": "aprovada"}.get(linha["voto"], "a_revisar")
+
+
+def resumir(dados, linha):
+    """Linha da fila a partir de saida.ler_imagem e da linha do estado."""
     confiancas = [c["conf"] for caixas in dados["propostas"].values() for c in caixas]
     return {
         "nome": dados["nome"],
         "status": dados["status"],
+        "situacao": situacao(linha),
+        "voto": linha["voto"],
+        "motivo": linha["motivo"],
         "anotadores": sorted(dados["propostas"]),
         "n_caixas": {a: len(c) for a, c in dados["propostas"].items()},
         "confianca_min": min(confiancas) if confiancas else None,
@@ -69,9 +88,10 @@ def resumir(dados):
     }
 
 
-def montar_fila(saida, status="pendente", ordem="incerteza"):
+def montar_fila(saida, status="a_revisar", ordem="incerteza"):
     """
-    Imagens registradas com o status pedido. Ordem 'incerteza' (RF10): menor
+    Imagens registradas na situação pedida (status, o nome do parâmetro, é a
+    situação). Ordem 'incerteza' (RF10): menor
     confiança entre as caixas propostas, crescente; imagens sem nenhuma caixa
     proposta vêm antes, porque são as que mais podem ter objeto não achado.
     """
@@ -82,16 +102,21 @@ def montar_fila(saida, status="pendente", ordem="incerteza"):
     nomes = formato.nomes_classes(saida)
     anotadores = formato.anotadores(saida)
     estado = formato.ler_estado(saida)
-    contagem = {s: 0 for s in formato.STATUS}
+    contagem = {s: 0 for s in SITUACOES}
     fila = []
     for nome, linha in estado.items():
-        contagem[linha["status"]] = contagem.get(linha["status"], 0) + 1
-        if status == "todas" or linha["status"] == status:
-            fila.append(resumir(formato.ler_imagem(saida, nome, nomes, anotadores, linha)))
+        contagem[situacao(linha)] += 1
+        if status == "todas" or situacao(linha) == status:
+            fila.append(resumir(formato.ler_imagem(saida, nome, nomes, anotadores, linha), linha))
     if ordem == "incerteza":
         fila.sort(key=lambda i: (i["confianca_min"] is not None, i["confianca_min"] or 0))
     else:
         fila.sort(key=lambda i: i["nome"])
+    for item in fila:
+        linha = estado[item["nome"]]
+        if linha["conjunto"] == "teste" and linha["status"] == "pendente":
+            # Ordenada pela confiança, mas sem mostrá-la (seção 4 do OBJETIVO.md)
+            item.update(anotadores=[], n_caixas={}, confianca_min=None)
     return {"imagens": fila, "anotadores": anotadores, "contagem": contagem}
 
 
@@ -109,12 +134,19 @@ def nome_valido(saida, bruto):
 
 def detalhar(saida, bruto):
     nome, linha = nome_valido(saida, bruto)
-    dados = formato.ler_imagem(saida, nome, formato.nomes_classes(saida),
-                               formato.anotadores(saida), linha, com_candidatas=True)
+    nomes = formato.nomes_classes(saida)
+    dados = formato.ler_imagem(saida, nome, nomes, formato.anotadores(saida), linha)
     caminho = Path(saida) / "images" / nome
     if not caminho.is_file():
         raise ErroHTTP(HTTPStatus.NOT_FOUND, f"{caminho} não existe")
     dados["largura"], dados["altura"] = formato.tamanho_imagem(caminho)
+    if linha["conjunto"] == "teste" and linha["status"] == "pendente":
+        # Teste a revisar: o revisor não vê classe nem confiança dos modelos
+        # (OBJETIVO.md, seção 4), nem pelas camadas de propostas
+        dados["propostas"] = {}
+    dados["situacao"] = situacao(linha)
+    dados["conjunto"] = linha["conjunto"]
+    dados["voto"] = formato.voto_para_revisao(saida, nome, nomes)
     dados["revisao"] = formato.ler_revisao(saida, nome)
     return dados
 
@@ -134,7 +166,7 @@ def criar_servidor(saida, classes, host="127.0.0.1", porta=8000):
                 elif url.path == "/api/classes":
                     self.enviar_json(listar_classes(saida, classes))
                 elif url.path == "/api/imagens":
-                    self.enviar_json(montar_fila(saida, consulta.get("status", "pendente"),
+                    self.enviar_json(montar_fila(saida, consulta.get("status", "a_revisar"),
                                                  consulta.get("ordem", "incerteza")))
                 elif url.path.startswith("/api/imagens/"):
                     self.enviar_json(detalhar(saida, url.path[len("/api/imagens/"):]))

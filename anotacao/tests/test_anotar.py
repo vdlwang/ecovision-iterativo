@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import anotar  # noqa: E402
 import importar  # noqa: E402
 import saida as formato  # noqa: E402
+import votar  # noqa: E402
+from auxiliar import pedido, votar_imagens  # noqa: E402
 
 CLASSES = [
     {"nome": "Garrafa", "prompt": "Plastic bottle", "material": "plastic"},
@@ -336,7 +338,8 @@ def test_main_anota_as_importadas_sem_copiar(ambiente, capsys):
 def test_main_so_anota_pendentes(ambiente, capsys):
     _, saida, base = ambiente
     anotar.main(base)
-    formato.revisar(saida, "l1_b.png", {"acao": "descartar"}, "t")
+    votar_imagens(saida, ["l1_b.png"])
+    formato.revisar(saida, "l1_b.png", pedido(saida, "l1_b.png", "descartar"), "t")
     anotar.main(base + ["--sobrescrever", "--falso-versao", "v2"])
     assert proposta_de(saida, "l1_a.jpg")["versao"] == "v2"
     assert proposta_de(saida, "l1_b.png")["versao"] == "v1"  # descartada: intocada
@@ -355,23 +358,22 @@ def test_main_regiao_de_interesse_pelo_centro(tmp_path, ambiente):
     assert [c[0] for c in proposta_de(saida, "l2_a.jpg")["caixas"]] == ["Lata"]
 
 
-def test_main_aceitar_reproduz_os_rotulos_de_antes(ambiente):
+def test_main_votado_reproduz_os_rotulos_de_antes(ambiente):
     _, saida, base = ambiente
     anotar.main(base)
-    anotar.main(base + ["--aceitar"])
-    # Os mesmos .txt que o anotar.py gravava antes, direto das detecções, com
-    # o id de cada classe em NOMES
-    for stem, deteccoes in DETECCOES.items():
-        esperado = "".join(anotar.linha_yolo(NOMES.index(CLASSES[c]["nome"]), caixa) + "\n"
-                           for c, _, caixa in deteccoes)
-        assert (saida / "labels" / f"l1_{stem}.txt").read_text() == esperado
-    assert estado_de(saida) == [("l1_a.jpg", "revisada", "l1", "treino"),
-                                ("l1_b.png", "revisada", "l1", "treino")]
-    assert (saida / "revisadas.txt").read_text() == "./images/l1_a.jpg\n./images/l1_b.png\n"
+    anotar.main(base + ["--nome", "falso-b"])
+    votar.votar(saida, ["falso", "falso-b"])
+    # Dois anotadores iguais: a aprovada tem os mesmos .txt que o anotar.py
+    # gravava antes, direto das detecções, com o id de cada classe em NOMES
+    esperado = "".join(anotar.linha_yolo(NOMES.index(CLASSES[c]["nome"]), caixa) + "\n"
+                       for c, _, caixa in DETECCOES["a"])
+    assert (saida / "labels" / "l1_a.txt").read_text() == esperado
+    assert not (saida / "labels" / "l1_b.txt").exists()   # sem objeto: falhou (vazia)
+    assert (saida / "treino.txt").read_text() == "./images/l1_a.jpg\n"
     # --exportar refaz os rótulos do banco
     (saida / "labels" / "l1_a.txt").unlink()
     anotar.main(base + ["--exportar"])
-    assert (saida / "labels" / "l1_a.txt").exists()
+    assert (saida / "labels" / "l1_a.txt").read_text() == esperado
 
 
 def test_main_grava_tudo_e_os_limiares_de_leitura(ambiente):
@@ -386,8 +388,6 @@ def test_main_grava_tudo_e_os_limiares_de_leitura(ambiente):
     visiveis, candidatas = formato.separar(proposta)
     assert list(visiveis) == [0] and visiveis[0][3] is False  # 0,91 < 0,95: sem classe
     assert [k for k, _, _ in candidatas] == [1]
-    anotar.main(base + ["--aceitar"])  # l1_a tem caixa de classe escondida: continua pendente
-    assert formato.ler_estado(saida)["l1_a.jpg"]["status"] == "pendente"
 
 
 def test_main_recusa_limiares_invertidos(ambiente):

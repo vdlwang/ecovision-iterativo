@@ -34,7 +34,7 @@ anotacoes/
 
 - **Proposta**: `{"anotador", "versao", "classes": <hash do classes.yaml>, "caixas": [{"classe", "confianca", "caixa": [x1, y1, x2, y2]}]}`, com a caixa em pixels da imagem gravada. Guardar a confiança é o que permite ordenar a fila pela incerteza (RF10), o que os `.txt` de hoje não fazem.
 - **`imagens.csv`** é a fonte do estado. O sistema completo acrescenta colunas (lote, conjunto, voto; `OBJETIVO.md`, seção 2) sem mudar as do framework.
-- **Compatibilidade**: `anotar.py --aceitar` copia as propostas de um anotador para `labels/` e marca a imagem como `revisada`, para quem quiser o comportamento de hoje (proposta direto como rótulo).
+- **Compatibilidade**: `anotar.py --aceitar` copiava as propostas de um anotador para `labels/` e marcava a imagem como `revisada` (proposta direto como rótulo). Saiu em 2026-11-15: toda revisão parte de um voto (T7).
 
 ## 2. Anotadores intercambiáveis
 
@@ -202,7 +202,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 3 | [x] `7b123b9` | Edição básica: trocar classe, remover, aceitar, salvar e próxima, descartar (apaga o `.txt`); registro da revisão. `revisadas.txt` e `data.yaml` já vêm da fase 1. Só pendentes são editáveis | pytest da API; teste manual |
 | 3b | [x] | Armazenamento em SQLite (seção 6): `anotacoes.sqlite` no lugar de `imagens.csv`, `propostas/` e `revisoes/`; `labels/`, `revisadas.txt` e `data.yaml` gerados do banco; propostas versionadas; `--exportar`. Antes da fase 4, para o registro mudar de formato uma vez só | as da seção 6 |
 | 4 | [~] | Caixa por clique sobre as candidatas do anotador e desfazer/refazer (feitos, 2026-11-11; medição no `OBJETIVO.md`). Adiados pela decisão 12: desenhar à mão (arrastar, com lupa), mover e redimensionar (alças, setas, `C` para a próxima candidata sobreposta) e `caixa_ajustada` | pytest da API; teste no Chrome headless pelo protocolo de depuração |
-| 5 | [ ] | Reabrir revisadas; seletor de anotador; atalhos completos da seção 4 | teste manual |
+| 5 | [ ] | Reabrir revisadas; atalhos completos da seção 4. O seletor de anotador saiu: desde o T7 (2026-11-15), a edição parte do voto, com as propostas de todos os anotadores | teste manual |
 
 ## Decisões
 

@@ -14,14 +14,13 @@ chamada. Antes, copia o banco para anotacoes.sqlite.bak. Grava também:
 Só anota imagens pendentes, e não copia nem muda imagens. Caixas com o centro
 fora da região de interesse do lote são descartadas.
 
-As propostas não são rótulos: labels/ só recebe as caixas depois da revisão,
-ou com --aceitar, que as grava como uma revisão sem mudança.
+As propostas não são rótulos: labels/ só recebe as caixas aprovadas pelo
+voto (votar.py) ou salvas na revisão, que parte do voto.
 
 Uso:
     python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a
     python anotacao/anotar.py -o anotacoes --previa      # as pendentes ainda sem proposta
     python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
-    python anotacao/anotar.py -o anotacoes --aceitar     # aceita as pendentes
     python anotacao/anotar.py -o anotacoes --exportar    # refaz labels/ e data.yaml do banco
 """
 
@@ -624,13 +623,9 @@ def main(argv=None):
     parser.add_argument("--sobrescrever", action="store_true",
                         help="anota de novo imagens pendentes que já têm proposta deste "
                              "anotador (grava uma proposta nova; a anterior fica no banco)")
-    parser.add_argument("--aceitar", action="store_true",
-                        help="grava as propostas do anotador como revisão (labels/) e marca "
-                             "as imagens como revisadas (só as pendentes; sem imagens na "
-                             "linha de comando, todas)")
     parser.add_argument("--exportar", action="store_true",
                         help="só refaz do banco os arquivos gerados (data.yaml, labels/, "
-                             "revisadas.txt) e sai")
+                             "as listas) e sai")
     deteccao = parser.add_argument_group(
         "detecção", "a proposta guarda todas as caixas a partir do piso; --confianca e "
                     "--confianca-classe são gravados nela e aplicados por quem lê")
@@ -676,7 +671,7 @@ def main(argv=None):
     linhas = formato.ler_estado(args.saida)
     lotes = formato.ler_lotes(args.saida)
     alvo = escolher_imagens(parser, args, linhas)
-    if not alvo and not args.aceitar:
+    if not alvo:
         print(f"Nada a anotar com {args.pasta} em {args.saida}.")
 
     if alvo:
@@ -711,15 +706,6 @@ def main(argv=None):
             f"{conf:.2f}" for c, conf in visiveis)
         print(f"{nome}: {len(visiveis)} objeto(s){': ' + resumo if resumo else ''} "
               f"(+{len(deteccoes) - len(visiveis)} candidata(s))")
-
-    if args.aceitar:
-        escolhidas = set(alvo) if args.imagens else None
-        aceitas, sem_classe = formato.aceitar(args.saida, args.pasta, escolhidas)
-        print(f"{aceitas} imagem(ns) aceita(s): propostas de {args.pasta} gravadas como "
-              "revisão e copiadas para labels/")
-        if sem_classe:
-            print(f"{len(sem_classe)} imagem(ns) continuam pendentes, com caixa sem classe "
-                  f"(revise-as na página): {', '.join(sem_classe)}")
 
     pagina = gerar_pagina(args.saida)
     print(f"Anotações em {args.saida.resolve()}")

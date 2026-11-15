@@ -12,6 +12,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import saida as formato  # noqa: E402
+from auxiliar import do_voto, pedido, votar_imagens  # noqa: E402
 
 CLASSES = [
     {"nome": "Garrafa", "prompt": "plastic bottle", "material": "plastic"},
@@ -40,20 +41,31 @@ def test_preparar_cria_banco_classes_e_arquivos(tmp_path):
         assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
-def test_preparar_acrescenta_no_fim_ou_refaz_sem_revisoes_com_caixas(tmp_path):
-    criar(tmp_path, ["Garrafa", "Lata"], ["a.jpg", "b.jpg"])
+def test_preparar_acrescenta_no_fim_ou_refaz_sem_ids_gravados(tmp_path):
+    criar(tmp_path, ["Garrafa", "Lata"], ["a.jpg", "b.jpg", "c.jpg"])
     formato.preparar(tmp_path, ["Garrafa", "Lata", "Tampa"])   # acréscimo no fim
     assert formato.nomes_classes(tmp_path) == {0: "Garrafa", 1: "Lata", 2: "Tampa"}
-    formato.preparar(tmp_path, ["Lata", "Garrafa"])            # sem revisões: refeito
+    formato.preparar(tmp_path, ["Lata", "Garrafa"])            # sem ids gravados: refeito
     assert formato.nomes_classes(tmp_path) == {0: "Lata", 1: "Garrafa"}
-    # Fundo (revisão sem caixas) e descarte não guardam ids
-    formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "caixas": []}, "t")
+    # Voto sem caixas, fundo e descarte não guardam ids; a candidata vira caixa
+    # só na revisão
+    candidata = ("Lata", 0.1, (0.1, 0.1, 0.5, 0.5))
+    votar_imagens(tmp_path, ["a.jpg", "b.jpg"], [candidata])
+    formato.revisar(tmp_path, "a.jpg", pedido(tmp_path, "a.jpg"), "t")
     formato.preparar(tmp_path, ["Garrafa", "Lata"])
-    formato.revisar(tmp_path, "b.jpg", {"acao": "salvar", "caixas": [
-        {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5]}]}, "t")
+    formato.revisar(tmp_path, "b.jpg", pedido(tmp_path, "b.jpg", caixas=[
+        {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "origem": "candidata", "anotador": "v1",
+         "indice": 0}]), "t")
     with pytest.raises(ValueError, match="outras classes"):
         formato.preparar(tmp_path, ["Lata", "Garrafa"])
     formato.preparar(tmp_path, ["Garrafa", "Lata", "Tampa"])   # acréscimo continua valendo
+
+
+def test_preparar_recusa_reordenar_com_voto_de_classe(tmp_path):
+    criar(tmp_path)
+    votar_imagens(tmp_path, ["a.jpg"], [("Lata", 0.9, (0.1, 0.1, 0.5, 0.5))])
+    with pytest.raises(ValueError, match="votos com caixas de classe"):
+        formato.preparar(tmp_path, ["Lata", "Garrafa"])
 
 
 def test_preparar_recusa_formatos_anteriores(tmp_path):
@@ -154,81 +166,41 @@ def test_separar_aplica_os_limiares_da_proposta():
     assert all(v[3] for v in visiveis.values())
 
 
-def test_aceitar_so_pendentes_e_escolhidas(tmp_path):
-    criar(tmp_path, ["Fundo", "Garrafa", "Lata"], ["a.jpg", "b.jpg", "c.jpg", "d.jpg"])
-    formato.revisar(tmp_path, "c.jpg", {"acao": "descartar"}, "t")
-    for nome in ("a.jpg", "b.jpg", "c.jpg"):  # d.jpg sem proposta de falso
-        formato.nova_proposta(tmp_path, "falso", nome, [("Lata", 0.9, (0.1, 0.2, 0.5, 0.6))])
-    formato.nova_proposta(tmp_path, "outro", "d.jpg", [])
-
-    assert formato.aceitar(tmp_path, "falso", {"a.jpg"}) == (1, [])
-    assert formato.aceitar(tmp_path, "falso") == (1, [])  # só b.jpg sobra
-    estado = formato.ler_estado(tmp_path)
-    assert {n: l["status"] for n, l in estado.items()} == {
-        "a.jpg": "revisada", "b.jpg": "revisada", "c.jpg": "descartada", "d.jpg": "pendente"}
-    assert (tmp_path / "labels" / "a.txt").read_text() == \
-        "2 0.300000 0.400000 0.400000 0.400000\n"
-    assert not (tmp_path / "labels" / "c.txt").exists()
-    assert (tmp_path / "revisadas.txt").read_text() == "./images/a.jpg\n./images/b.jpg\n"
-    revisao = formato.ler_revisao(tmp_path, "a.jpg")
-    assert revisao["revisor"] == "aceitar" and revisao["tempo_ativo_s"] == 0
-    assert revisao["caixas"] == [{"id": 2, "caixa": [0.1, 0.2, 0.5, 0.6], "proposta": 0,
-                                  "desfecho": "aceita"}]
-
-
-def test_aceitar_recusa_classe_desconhecida_sem_gravar(tmp_path):
-    criar(tmp_path, ["Garrafa"])
-    formato.nova_proposta(tmp_path, "falso", "a.jpg", [("Lata", 0.9, (0.1, 0.2, 0.5, 0.6))])
-    with pytest.raises(ValueError, match="Lata"):
-        formato.aceitar(tmp_path, "falso")
-    assert formato.ler_estado(tmp_path)["a.jpg"]["status"] == "pendente"
-    assert formato.ler_revisao(tmp_path, "a.jpg") is None
-
-
-def test_aceitar_so_as_visiveis_e_deixa_pendente_a_de_classe_escondida(tmp_path):
-    criar(tmp_path, imagens=("a.jpg", "b.jpg"))
-    for nome, conf in (("a.jpg", 0.9), ("b.jpg", 0.25)):
-        formato.nova_proposta(tmp_path, "falso", nome, [
-            ("Lata", 0.9, (0.1, 0.2, 0.5, 0.6)), ("Garrafa", conf, (0.6, 0.2, 0.9, 0.6)),
-            ("Garrafa", 0.1, (0.0, 0.0, 0.1, 0.1))], LIMIARES)
-    assert formato.aceitar(tmp_path, "falso") == (1, ["b.jpg"])
-    assert formato.ler_estado(tmp_path)["b.jpg"]["status"] == "pendente"
-    assert not (tmp_path / "labels" / "b.txt").exists()
-    # a candidata (0,1) não vira rótulo
-    assert len((tmp_path / "labels" / "a.txt").read_text().splitlines()) == 2
-
-
 def test_revisao_guarda_todas_as_sessoes_e_o_vigente_e_a_ultima(tmp_path):
     criar(tmp_path)
-    formato.nova_proposta(tmp_path, "falso", "a.jpg", [("Lata", 0.9, (0.1, 0.2, 0.5, 0.6))])
-    formato.revisar(tmp_path, "a.jpg", {"acao": "descartar", "base": "falso"}, "t1")
+    votar_imagens(tmp_path, ["a.jpg"], [("Lata", 0.9, (0.1, 0.2, 0.5, 0.6))])
+    formato.revisar(tmp_path, "a.jpg", pedido(tmp_path, "a.jpg", "descartar"), "t1")
     # reabrir é a fase 5; aqui, direto no banco, para conferir o histórico
     with formato.abrir(tmp_path) as con, formato.transacao(con):
         con.execute("UPDATE imagens SET status = 'pendente'")
-    registro = formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "base": "falso",
-                                                   "caixas": []}, "t2")
+    registro = formato.revisar(tmp_path, "a.jpg", pedido(tmp_path, "a.jpg"), "t2")
     assert registro["acao"] == "salvar" and registro["removidas"] == [0]
     with formato.abrir(tmp_path) as con:
         assert [r[0] for r in con.execute("SELECT acao FROM revisoes ORDER BY id")] == \
             ["descartar", "salvar"]
 
 
-def test_proposta_id_antiga_e_recusada(tmp_path):
+def test_revisao_exige_o_voto_vigente(tmp_path):
     criar(tmp_path)
-    p1 = formato.nova_proposta(tmp_path, "falso", "a.jpg", [("Lata", 0.9, (0.1, 0.2, 0.5, 0.6))])
-    formato.nova_proposta(tmp_path, "falso", "a.jpg", [])
-    with pytest.raises(formato.RevisaoInvalida, match="não é mais a vigente") as erro:
-        formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "base": "falso",
-                                            "proposta_id": p1, "caixas": []}, "t")
+    with pytest.raises(formato.RevisaoInvalida, match="não foi votada") as erro:
+        formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "voto_id": 1}, "t")
     assert erro.value.status == 409
-    with pytest.raises(formato.RevisaoInvalida, match="com 'base'"):
-        formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "proposta_id": p1}, "t")
+    antigo = votar_imagens(tmp_path, ["a.jpg"])["a.jpg"]
+    novo = votar_imagens(tmp_path, ["a.jpg"])["a.jpg"]   # propostas novas: outro voto
+    assert novo != antigo
+    with pytest.raises(formato.RevisaoInvalida, match="não é mais o vigente") as erro:
+        formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "voto_id": antigo}, "t")
+    assert erro.value.status == 409
+    with pytest.raises(formato.RevisaoInvalida, match="voto_id"):
+        formato.revisar(tmp_path, "a.jpg", {"acao": "salvar"}, "t")
+    assert formato.ler_estado(tmp_path)["a.jpg"]["status"] == "pendente"
 
 
 def test_exportar_refaz_os_arquivos_do_banco(tmp_path):
     criar(tmp_path, imagens=("a.jpg", "b.jpg"))
-    formato.revisar(tmp_path, "a.jpg", {"acao": "salvar", "caixas": [
-        {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5]}]}, "t")
+    votar_imagens(tmp_path, ["a.jpg"], [("Garrafa", 0.9, (0.1, 0.1, 0.5, 0.5))])
+    formato.revisar(tmp_path, "a.jpg", pedido(tmp_path, "a.jpg", caixas=[
+        do_voto(tmp_path, "a.jpg", 0, 1)]), "t")
     texto = (tmp_path / "labels" / "a.txt").read_text()
     (tmp_path / "labels" / "a.txt").unlink()
     (tmp_path / "labels" / "b.txt").write_text("0 0.5 0.5 0.1 0.1\n")   # b não está revisada
@@ -253,6 +225,7 @@ def test_escritas_concorrentes_nao_se_perdem(tmp_path):
     """Duas threads gravando ao mesmo tempo (o servidor e o anotar.py): nada se perde."""
     nomes = [f"{i}.jpg" for i in range(40)]
     criar(tmp_path, imagens=nomes)
+    votos = votar_imagens(tmp_path, nomes)
     erros = []
 
     def anotar():
@@ -265,7 +238,8 @@ def test_escritas_concorrentes_nao_se_perdem(tmp_path):
     def revisar():
         try:
             for nome in nomes[::2]:
-                formato.revisar(tmp_path, nome, {"acao": "descartar"}, "t")
+                formato.revisar(tmp_path, nome, {"acao": "descartar",
+                                                 "voto_id": votos[nome]}, "t")
         except Exception as erro:  # pragma: no cover
             erros.append(erro)
 

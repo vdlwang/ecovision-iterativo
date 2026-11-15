@@ -10,6 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import saida as formato  # noqa: E402
 import votar  # noqa: E402
+from auxiliar import pedido  # noqa: E402
 
 NOMES = ["Garrafa", "Lata", "Tampa"]
 LIMIARES = {"confianca": 0.2, "confianca_classe": 0.35}
@@ -80,8 +81,8 @@ def test_aprovada_grava_consenso_rotulo_e_treino(tmp_path):
     saida = criar(tmp_path)
     ids = concordam(saida, "l1_x.jpg")
     r = votar.votar(saida, TRIO, agora="t")
-    assert r == {"aprovadas": ["l1_x.jpg"], "falhou": {}, "incompletas": 0, "ja_votadas": 0,
-                 "teste": 0}
+    assert r == {"aprovadas": ["l1_x.jpg"], "falhou": {}, "uniao": [], "incompletas": 0,
+                 "ja_votadas": 0}
     estado = formato.ler_estado(saida)["l1_x.jpg"]
     assert (estado["status"], estado["voto"], estado["motivo"]) == ("pendente", "aprovada", None)
     # consenso: a mediana das coordenadas, a menor confiança, na ordem do primeiro
@@ -99,6 +100,10 @@ def test_aprovada_grava_consenso_rotulo_e_treino(tmp_path):
         [(a, ids[a], 0.2) for a in TRIO]
     assert [c["id"] for c in voto["caixas"]] == [0, 1]
     assert voto["caixas"][0]["conf"] == pytest.approx(0.9)
+    # cada caixa de consenso guarda de quais caixas das propostas veio
+    assert voto["caixas"][0]["membros"] == [{"anotador": "a", "indice": 0},
+                                            {"anotador": "b", "indice": 1},
+                                            {"anotador": "c", "indice": 0}]
 
 
 def test_falhou_fica_pendente_sem_rotulo(tmp_path):
@@ -115,25 +120,54 @@ def test_falhou_fica_pendente_sem_rotulo(tmp_path):
         "l1_z.jpg": ("pendente", "falhou", "vazia")}
     assert not list((saida / "labels").glob("*.txt"))
     assert linhas(saida, "treino.txt") == []
-    assert formato.ler_voto(saida, "l1_x.jpg")["caixas"] == []
+    # a que falhou guarda o consenso que houve (a garrafa), base da revisão
+    assert [c["id"] for c in formato.ler_voto(saida, "l1_x.jpg")["caixas"]] == [0]
+    assert formato.ler_voto(saida, "l1_y.jpg")["caixas"] == []
 
 
-def test_so_treino_pendente_e_com_proposta_de_todos(tmp_path):
+def test_so_pendentes_com_proposta_de_todos_e_teste_unido(tmp_path):
     saida = criar(tmp_path, {"l1": "treino", "t1": "teste"}, ("x.jpg", "y.jpg", "z.jpg"))
     for nome in ("l1_x.jpg", "l1_y.jpg", "l1_z.jpg", "t1_x.jpg"):
         concordam(saida, nome)
-    formato.revisar(saida, "l1_z.jpg", {"acao": "descartar"}, "t")
-    formato.nova_proposta(saida, "a", "t1_y.jpg", [GARRAFA], LIMIARES)
+    votar.votar(saida, TRIO)
+    formato.revisar(saida, "l1_z.jpg", pedido(saida, "l1_z.jpg", "descartar"), "t")
     formato.nova_proposta(saida, "a", "l1_y.jpg", [GARRAFA], LIMIARES)  # nova vigente de a
     r = votar.votar(saida, TRIO)
-    # t1_x e t1_y: teste; t1_z sem proposta nenhuma também é de teste
-    assert r["teste"] == 3 and r["aprovadas"] == ["l1_x.jpg"]
     assert r["falhou"] == {"l1_y.jpg": "quantidade"}   # a vigente de a tem uma caixa só
-    assert formato.ler_estado(saida)["l1_z.jpg"]["voto"] is None
+    assert r["ja_votadas"] == 2 and r["incompletas"] == 2   # l1_x, t1_x; t1_y, t1_z
+    assert formato.ler_estado(saida)["l1_z.jpg"]["status"] == "descartada"
+    # teste: união sem classe, nunca aprovada nem rotulada
+    estado = formato.ler_estado(saida)["t1_x.jpg"]
+    assert (estado["voto"], estado["motivo"]) == ("uniao", None)
+    assert not (saida / "labels/t1_x.txt").exists()
     # sem proposta de um dos anotadores, a imagem espera
-    formato.registrar(saida, [("l1_w.jpg", 100, 50)], "l1")
-    propor(saida, "l1_w.jpg", {"a": [GARRAFA], "b": [GARRAFA]})
-    assert votar.votar(saida, TRIO)["incompletas"] == 1
+    propor(saida, "t1_y.jpg", {"a": [GARRAFA], "b": [GARRAFA]})
+    assert votar.votar(saida, TRIO)["incompletas"] == 2
+
+
+def test_uniao_funde_as_sobrepostas_sem_classe(tmp_path):
+    saida = criar(tmp_path, {"t1": "teste"})
+    tampa = ("Tampa", 0.3, (0.8, 0.8, 0.9, 0.9))
+    # a garrafa vem com classes diferentes: na união, a classe não importa
+    propor(saida, "t1_x.jpg", {"a": [GARRAFA, LATA], "b": [perto(LATA, 0.01),
+                                                         ("Lata", 0.6, GARRAFA[2])],
+                               "c": [perto(GARRAFA, 0.02), tampa]})
+    assert votar.votar(saida, TRIO)["uniao"] == ["t1_x.jpg"]
+    voto = formato.ler_voto(saida, "t1_x.jpg")
+    assert [c["id"] for c in voto["caixas"]] == [None, None, None]
+    garrafa, lata, so_c = voto["caixas"]
+    assert garrafa["conf"] == pytest.approx(0.9)            # a maior das fundidas
+    assert garrafa["caixa"] == pytest.approx([0.1, 0.1, 0.3, 0.3])   # a mediana
+    assert {m["anotador"] for m in garrafa["membros"]} == set(TRIO)
+    assert {m["anotador"] for m in lata["membros"]} == {"a", "b"}
+    assert so_c["membros"] == [{"anotador": "c", "indice": 1}]
+
+
+def test_unir_nao_funde_duas_caixas_do_mesmo_anotador():
+    a1 = ("Garrafa", 0.9, (0.1, 0.1, 0.3, 0.3))
+    a2 = ("Garrafa", 0.8, (0.11, 0.1, 0.31, 0.3))
+    uniao = votar.unir([[a1, a2], [a1]])
+    assert [m for *_, m in uniao] == [[(0, 0), (1, 0)], [(0, 1)]]
 
 
 def test_votar_de_novo_so_com_proposta_nova_ou_revotar(tmp_path):
@@ -182,17 +216,93 @@ def test_classe_fora_da_tabela_reprova(tmp_path):
 def test_revisao_humana_vale_mais_que_o_voto(tmp_path):
     saida = criar(tmp_path, {"l1": "treino", "t1": "teste"})
     concordam(saida, "l1_x.jpg")
+    concordam(saida, "t1_x.jpg")
     votar.votar(saida, TRIO)
     # o revisor corrige a aprovada: o rótulo passa a ser o dele
-    formato.revisar(saida, "l1_x.jpg", {"acao": "salvar", "caixas": [
-        {"id": 2, "caixa": [0.1, 0.1, 0.2, 0.2]}]}, "t")
-    assert linhas(saida, "labels/l1_x.txt") == [formato.linha_yolo(2, (0.1, 0.1, 0.2, 0.2))]
+    caixa = formato.ler_voto(saida, "l1_x.jpg")["caixas"][0]["caixa"]
+    formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=[
+        {"id": 2, "caixa": caixa, "origem": "voto", "indice": 0}]), "t")
+    assert linhas(saida, "labels/l1_x.txt") == [formato.linha_yolo(2, caixa)]
     assert votar.votar(saida, TRIO)["aprovadas"] == []     # não é mais pendente
     assert linhas(saida, "treino.txt") == ["./images/l1_x.jpg"]
     # revisada de teste vai ao teste.txt, o val do data.yaml
-    formato.revisar(saida, "t1_x.jpg", {"acao": "salvar", "caixas": []}, "t")
+    formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg"), "t")
     assert linhas(saida, "teste.txt") == ["./images/t1_x.jpg"]
     assert linhas(saida, "revisadas.txt") == ["./images/l1_x.jpg", "./images/t1_x.jpg"]
+
+
+def test_revisao_parte_do_voto_e_registra_a_origem(tmp_path):
+    saida = criar(tmp_path)
+    fora = ("Tampa", 0.3, (0.8, 0.8, 0.9, 0.9))       # só b: visível, sem classe mostrada
+    fraca = ("Lata", 0.1, (0.6, 0.1, 0.7, 0.2))        # candidata de c
+    ids = propor(saida, "l1_x.jpg", {"a": [GARRAFA, LATA], "b": [GARRAFA, fora],
+                                     "c": [GARRAFA, fraca]})
+    assert votar.votar(saida, TRIO)["falhou"] == {"l1_x.jpg": "quantidade"}
+    base = formato.voto_para_revisao(saida, "l1_x.jpg", formato.nomes_classes(saida))
+    assert (base["resultado"], base["motivo"], base["conjunto"]) == ("falhou", "quantidade",
+                                                                  "treino")
+    assert [(c["indice"], c["nome"], c["anotadores"]) for c in base["caixas"]] == \
+        [(0, "Garrafa", TRIO)]
+    # fora do consenso: a lata de a (com classe) e a caixa de b abaixo de 0,35 (sem)
+    assert {a: [(p["indice"], p["nome"]) for p in l] for a, l in base["propostas"].items()} == \
+        {"a": [(1, "Lata")], "b": [(1, None)]}
+    assert [(c["anotador"], c["indice"]) for c in base["candidatas"]] == [("c", 1)]
+
+    caixas = [{"id": 1, "caixa": list(GARRAFA[2]), "origem": "voto", "indice": 0},
+              {"id": 1, "caixa": list(LATA[2]), "origem": "proposta", "anotador": "a",
+               "indice": 1},
+              {"id": 2, "caixa": list(fraca[2]), "origem": "candidata", "anotador": "c",
+               "indice": 1}]
+    registro = formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=caixas,
+                                                         tempo=12), "t")
+    assert [(c["origem"], c["anotador"], c["indice"], c["desfecho"])
+            for c in registro["caixas"]] == [("voto", None, 0, "classe_corrigida"),
+                                             ("proposta", "a", 1, "adicionada"),
+                                             ("candidata", "c", 1, "adicionada")]
+    assert registro["removidas"] == [] and registro["voto_id"] == base["id"]
+    with formato.abrir(saida) as con:
+        assert {r[0] for r in con.execute("SELECT proposta_id FROM caixas_revisao "
+                                          "WHERE proposta_id IS NOT NULL")} == \
+            {ids["a"], ids["c"]}
+    assert len(linhas(saida, "labels/l1_x.txt")) == 3
+
+
+def test_teste_sem_classe_e_classe_atribuida(tmp_path):
+    saida = criar(tmp_path, {"t1": "teste"})
+    concordam(saida, "t1_x.jpg")
+    votar.votar(saida, TRIO)
+    base = formato.voto_para_revisao(saida, "t1_x.jpg", formato.nomes_classes(saida))
+    # o revisor do teste não vê classe, confiança nem quem propôs (seção 4)
+    assert all(c["id"] is None and c["nome"] is None and c["conf"] is None
+               and c["anotadores"] == [] for c in base["caixas"])
+    assert base["propostas"] == {}
+    caixas = [{"id": 1, "caixa": c["caixa"], "origem": "voto", "indice": c["indice"]}
+              for c in base["caixas"]]
+    registro = formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg", caixas=caixas), "t")
+    assert {c["desfecho"] for c in registro["caixas"]} == {"classe_atribuida"}
+
+
+@pytest.mark.parametrize("caixa, trecho", [
+    ({"id": 0, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "voto", "indice": 5}, "não tem a caixa 5"),
+    ({"id": 0, "caixa": [0.1, 0.1, 0.4, 0.3], "origem": "voto", "indice": 0}, "coordenadas"),
+    ({"id": 0, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "desenho", "indice": 0}, "origem"),
+    ({"id": 0, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "proposta", "anotador": "z",
+      "indice": 0}, "não usou proposta"),
+    ({"id": 0, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "candidata", "anotador": "a",
+      "indice": 0}, "não é candidata"),
+    ({"id": 9, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "voto", "indice": 0}, "fora do data.yaml"),
+])
+def test_revisao_recusa_caixa_sem_origem_valida(tmp_path, caixa, trecho):
+    saida = criar(tmp_path)
+    concordam(saida, "l1_x.jpg")
+    votar.votar(saida, TRIO)
+    with pytest.raises(formato.RevisaoInvalida, match=trecho):
+        formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=[caixa]), "t")
+    duas = [{"id": 0, "caixa": [0.1, 0.1, 0.3, 0.3], "origem": "proposta", "anotador": "a",
+             "indice": 0}] * 2
+    with pytest.raises(formato.RevisaoInvalida, match="duas vezes"):
+        formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=duas), "t")
+    assert formato.ler_revisao(saida, "l1_x.jpg") is None
 
 
 def test_exportar_refaz_rotulos_das_aprovadas(tmp_path):
@@ -223,7 +333,7 @@ def test_main_resume_e_recusa_anotador_sem_proposta(tmp_path, capsys):
     concordam(saida, "l1_x.jpg")
     votar.main([str(saida), "--anotadores", *TRIO])
     saida_texto = capsys.readouterr().out
-    assert "1 imagem(ns) votada(s)" in saida_texto and "aprovadas: 1 (100%)" in saida_texto
+    assert "1 imagem(ns) de treino votada(s), 0 de teste" in saida_texto and "aprovadas: 1 (100%)" in saida_texto
     with pytest.raises(ValueError, match="nenhuma proposta de grounding-dino"):
         votar.main([str(saida)])
     with pytest.raises(SystemExit):
