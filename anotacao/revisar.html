@@ -188,9 +188,6 @@ const AVISO_SEM_ID = "Há caixa em conflito, sem classe ou com classe fora do da
   + "dê a classe ou remova.";
 const SITUACOES = { a_revisar: "a revisar", aprovada: "aprovada", sem_voto: "sem voto",
                     revisada: "revisada", descartada: "descartada" };
-const MOTIVOS = { quantidade: "os modelos acharam números de objetos diferentes",
-                  caixas: "há caixa ou classe sem par", vazia: "nenhum modelo achou objeto",
-                  classe_fora: "classe fora do data.yaml" };
 
 async function api(rota, opcoes) {
   const resposta = await fetch(rota, opcoes);
@@ -257,8 +254,8 @@ async function carregarFila(manter) {
     info.append(Object.assign(document.createElement("span"),
       { className: `st-${im.situacao}`, textContent: SITUACOES[im.situacao] }));
     li.title = im.nome + (im.anotadores.length
-      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "")
-      + (im.motivo ? `\nvoto falhou: ${MOTIVOS[im.motivo] ?? im.motivo}` : "");
+      ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
+    // sem o motivo da falha: a auditoria é cega (T8)
     li.append(nome, info);
     li.onclick = () => { if (podeSair()) mostrar(i); };
     lista.append(li);
@@ -432,7 +429,7 @@ function desenharEdicao() {
   legenda.replaceChildren(edicao.teste
     ? "Teste, sem pré-anotação: acrescente cada objeto (N e clique nele) e dê a classe. "
     : v.resultado === "aprovada" ? "Voto aprovado: caixas de consenso. "
-    : `Voto falhou (${MOTIVOS[v.motivo] ?? v.motivo}): uma caixa por objeto. `);
+    : "A revisar: uma caixa por objeto. ");  // sem o motivo: a auditoria é cega (T8)
   legenda.append(edicao.caixas.length || v.caixas.length
     ? (edicao.teste ? `${edicao.caixas.length} caixa(s).`
       : `${edicao.caixas.length} caixa(s), ${corrigidas} corrigida(s), `

@@ -12,7 +12,9 @@
 #           que usou, e a votação grava esta configuração (RNF07).
 #
 # voto: opcional.
-#   iou: IoU mínimo para duas caixas casarem (padrão: 0.5)
+#   iou:       IoU mínimo para duas caixas casarem (padrão: 0.5)
+#   auditoria: fração das aprovadas que vão à revisão como se tivessem
+#              falhado, sem o revisor saber (T8); 0 desliga (padrão: 0.05)
 #
 # O trio é o da decisão 17: Grounding DINO, OWLv2 e o YOLO da equipe. A cada
 # ciclo, o YOLO retreinado (T12) troca o best.pt no terceiro.
@@ -33,3 +35,4 @@ anotadores:
 
 voto:
   iou: 0.5
+  auditoria: 0.05

@@ -99,7 +99,7 @@ def test_registrar_lote_estado_e_colisoes(tmp_path):
     estado = formato.ler_estado(tmp_path)
     assert list(estado) == ["l1_a.jpg", "l1_b.png"]
     assert estado["l1_a.jpg"] == {"nome": "l1_a.jpg", "status": "pendente", "lote": "l1",
-                                  "conjunto": "teste", "voto": None, "motivo": None,
+                                  "conjunto": "teste", "voto": None, "motivo": None, "auditoria": False,
                                   "largura": 40, "altura": 20}
     assert estado["l1_b.png"]["conjunto"] == "treino"   # o conjunto é de cada imagem
     with pytest.raises(ValueError, match="colide"):

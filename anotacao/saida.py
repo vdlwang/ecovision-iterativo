@@ -40,7 +40,7 @@ CONJUNTOS = ("treino", "teste")
 VOTOS = ("aprovada", "falhou", "uniao")
 ORIGENS = ("voto", "proposta", "candidata")  # de onde vem uma caixa da revisão
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 5
+VERSAO_ESQUEMA = 6
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -71,6 +71,7 @@ CREATE TABLE imagens (
     status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN {STATUS}),
     voto TEXT CHECK (voto IN {VOTOS}),
     motivo TEXT,
+    auditoria INTEGER NOT NULL DEFAULT 0 CHECK (auditoria IN (0, 1)),
     criada_em TEXT NOT NULL
 );
 CREATE TABLE execucoes (
@@ -155,7 +156,10 @@ CREATE TABLE votos (
     imagem_id INTEGER NOT NULL REFERENCES imagens (id),
     resultado TEXT NOT NULL CHECK (resultado IN {VOTOS}),
     motivo TEXT,
-    CHECK ((resultado = 'falhou') = (motivo IS NOT NULL))
+    -- auditoria cega (T8): aprovada sorteada que vai à revisão como reprovada
+    auditoria INTEGER NOT NULL DEFAULT 0 CHECK (auditoria IN (0, 1)),
+    CHECK ((resultado = 'falhou') = (motivo IS NOT NULL)),
+    CHECK (auditoria = 0 OR resultado = 'aprovada')
 );
 CREATE INDEX votos_imagem ON votos (imagem_id);
 CREATE TABLE votos_propostas (
@@ -381,14 +385,14 @@ def ler_lotes(saida):
 
 def ler_estado(saida):
     """
-    {nome: {nome, status, lote, conjunto, voto, motivo, largura, altura}}, na
-    ordem de registro; {} sem banco.
+    {nome: {nome, status, lote, conjunto, voto, motivo, auditoria, largura,
+    altura}}, na ordem de registro; {} sem banco. auditoria é bool.
     """
     if not existe(saida):
         return {}
     with abrir(saida) as con:
-        return {r["nome"]: dict(r) for r in con.execute(
-            "SELECT nome, status, lote, conjunto, voto, motivo, largura, altura "
+        return {r["nome"]: dict(r, auditoria=bool(r["auditoria"])) for r in con.execute(
+            "SELECT nome, status, lote, conjunto, voto, motivo, auditoria, largura, altura "
             "FROM imagens ORDER BY id")}
 
 
@@ -778,7 +782,8 @@ def tamanho_imagem(caminho):
 
 # --- voto (OBJETIVO.md, seções 3 e 4; T6) ------------------------------------
 
-def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None):
+def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None,
+          auditar=None):
     """
     Vota, numa transação, as imagens pendentes com proposta vigente de todos
     os anotadores. Pula as que já têm voto sobre essas mesmas propostas, a não
@@ -793,16 +798,22 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
     classes fica sem classe, e a imagem aprovada com ela passa a "falhou"
     ("classe_fora"): não teria id no .txt.
 
+    auditar(nome) -> bool decide, para cada aprovada, se ela entra na
+    auditoria cega (T8): continua aprovada, com rótulo e no treino, mas a
+    revisão a mostra como reprovada. Sem auditar, nenhuma entra.
+
     Grava a votação, um voto por imagem com as propostas que usou, as caixas
     e os membros de cada uma, e voto/motivo em imagens; depois, os .txt das
     votadas e as listas. Devolve {aprovadas: [nomes], falhou: {nome: motivo},
-    uniao: [nomes], incompletas, ja_votadas} (os dois últimos, contagens).
+    uniao: [nomes], auditadas: [nomes, entre as aprovadas], incompletas,
+    ja_votadas} (os dois últimos, contagens).
     """
     anotadores = list(anotadores)
     if len(set(anotadores)) != len(anotadores) or len(anotadores) < 2:
         raise ValueError("o voto precisa de ao menos dois anotadores, sem repetição")
     agora = agora or agora_iso()
-    resultado = {"aprovadas": [], "falhou": {}, "uniao": [], "incompletas": 0, "ja_votadas": 0}
+    resultado = {"aprovadas": [], "falhou": {}, "uniao": [], "auditadas": [], "incompletas": 0,
+                 "ja_votadas": 0}
     with abrir(saida) as con:
         with transacao(con):
             ids = {n: i for i, n in _nomes(con).items()}
@@ -828,6 +839,8 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
                 final, motivo, caixas, limiares_usados = decidir(propostas, imagem["conjunto"])
                 if final == "aprovada" and any(c[0] not in ids for c in caixas):
                     final, motivo = "falhou", "classe_fora"
+                auditoria = int(final == "aprovada" and auditar is not None
+                                and bool(auditar(nome)))
                 if votacao is None:
                     votacao = con.execute(
                         "INSERT INTO votacoes (anotadores, parametros, data) VALUES (?, ?, ?)",
@@ -835,8 +848,9 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
                          json.dumps(parametros or {}, ensure_ascii=False, sort_keys=True),
                          agora)).lastrowid
                 voto = con.execute(
-                    "INSERT INTO votos (votacao_id, imagem_id, resultado, motivo) "
-                    "VALUES (?, ?, ?, ?)", (votacao, imagem["id"], final, motivo)).lastrowid
+                    "INSERT INTO votos (votacao_id, imagem_id, resultado, motivo, auditoria) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (votacao, imagem["id"], final, motivo, auditoria)).lastrowid
                 con.executemany(
                     "INSERT INTO votos_propostas (voto_id, proposta_id, limiar) VALUES (?, ?, ?)",
                     [(voto, p["id"], float(l)) for p, l in zip(propostas, limiares_usados)])
@@ -851,12 +865,14 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
                     "proposta_indice) VALUES (?, ?, ?, ?)",
                     [(voto, k, propostas[a]["id"], i)
                      for k, (*_, membros) in enumerate(caixas) for a, i in membros])
-                con.execute("UPDATE imagens SET voto = ?, motivo = ? WHERE id = ?",
-                            (final, motivo, imagem["id"]))
+                con.execute("UPDATE imagens SET voto = ?, motivo = ?, auditoria = ? WHERE id = ?",
+                            (final, motivo, auditoria, imagem["id"]))
                 if final == "falhou":
                     resultado["falhou"][nome] = motivo
                 elif final == "aprovada":
                     resultado["aprovadas"].append(nome)
+                    if auditoria:
+                        resultado["auditadas"].append(nome)
                 else:
                     resultado["uniao"].append(nome)
         for nome in [*resultado["aprovadas"], *resultado["falhou"], *resultado["uniao"]]:
@@ -893,8 +909,8 @@ def _contexto_voto(con, voto):
 
 def ler_voto(saida, nome):
     """
-    O voto vigente da imagem, ou None: {id, imagem, resultado, motivo, data,
-    anotadores, parametros, propostas: [{id, anotador, limiar}], caixas: [{id,
+    O voto vigente da imagem, ou None: {id, imagem, resultado, motivo,
+    auditoria, data, anotadores, parametros, propostas: [{id, anotador, limiar}], caixas: [{id,
     conf, caixa, membros: [{anotador, indice}]}]}.
     """
     if not existe(saida):
@@ -906,7 +922,8 @@ def ler_voto(saida, nome):
             return None
         votacao, propostas, caixas = _contexto_voto(con, voto)
         return {"id": voto["id"], "imagem": nome, "resultado": voto["resultado"],
-                "motivo": voto["motivo"], "data": votacao["data"],
+                "motivo": voto["motivo"], "auditoria": bool(voto["auditoria"]),
+                "data": votacao["data"],
                 "anotadores": json.loads(votacao["anotadores"]),
                 "parametros": json.loads(votacao["parametros"]),
                 "propostas": [{"id": p["id"], "anotador": p["anotador"], "limiar": l}
@@ -922,7 +939,10 @@ IOU_CANDIDATA_REPETIDA = 0.9  # candidatas de anotadores diferentes quase iguais
 
 def voto_para_revisao(saida, nome, nomes):
     """
-    A base da revisão de uma imagem, do voto vigente; None sem voto:
+    A base da revisão de uma imagem, do voto vigente; None sem voto. É o
+    que a página recebe, e a auditoria é cega (T8): a aprovada sorteada vem
+    como "falhou", e o motivo de uma falha nunca vem (só uma auditada não
+    teria motivo); os dois ficam no banco (ler_voto).
     - caixas: as do voto, uma por objeto, [{indice, id, nome, conf, caixa,
       anotadores, sugestoes}]. No treino, uma caixa sem classe é um conflito
       (os anotadores não a acharam todos, ou discordam da classe), e
@@ -984,7 +1004,8 @@ def voto_para_revisao(saida, nome, nomes):
                     -len(t[1]), -max(q["conf"] for q in t[1])))]
 
     return {
-        "id": voto["id"], "resultado": voto["resultado"], "motivo": voto["motivo"],
+        "id": voto["id"], "resultado": "falhou" if voto["auditoria"] else voto["resultado"],
+        "motivo": None,
         "conjunto": imagem["conjunto"],
         "caixas": [] if teste else
                   [dict(caixa_json(c["classe_id"], nomes.get(c["classe_id"]), c["conf"],

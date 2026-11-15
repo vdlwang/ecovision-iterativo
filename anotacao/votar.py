@@ -19,12 +19,16 @@ fica no banco, para comparar com a revisão, e não vai à página. Toda
 revisão parte de um voto: imagem não votada não é revisável. Cada
 anotador é lido no limiar de leitura gravado na proposta (--limiares troca),
 com a classe sugerida mesmo abaixo de confianca_classe: ela só é escondida do
-revisor. Rodar de novo vota as imagens novas e as que ganharam proposta nova;
+revisor. Auditoria cega (T8): cerca de 5% das aprovadas (--auditoria),
+sorteadas pelo nome, continuam aprovadas, com rótulo e no treino, mas vão à
+fila de revisão como se tivessem falhado, para estimar o erro das aprovadas.
+Rodar de novo vota as imagens novas e as que ganharam proposta nova;
 --revotar vota de novo todas as pendentes. Cada voto fica no banco com as
 propostas que usou; o banco está no saida.py.
 """
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 from statistics import median
@@ -34,6 +38,18 @@ from anotar import iou
 
 TRIO = ["grounding-dino", "owlv2", "yolo"]  # decisão 17 do OBJETIVO.md
 IOU_VOTO = 0.5
+AUDITORIA = 0.05   # fração das aprovadas na auditoria cega (seção 3, T8)
+
+
+def sortear_auditoria(nome, fracao=AUDITORIA):
+    """
+    Se a aprovada entra na auditoria cega: pelo hash do nome, sempre a mesma
+    resposta para a mesma imagem (votar de novo não troca a amostra), e
+    independente do sorteio treino/teste do importar.py (outro prefixo).
+    """
+    valor = int.from_bytes(hashlib.sha256(f"auditoria:{nome}".encode("utf-8")).digest()[:8],
+                           "big")
+    return valor < fracao * 2 ** 64
 
 
 def casar_mesma_classe(a, b, limiar_iou=IOU_VOTO):
@@ -188,20 +204,23 @@ def decisor(limiares=None, limiar_iou=IOU_VOTO):
 
 
 def votar(saida, anotadores=TRIO, limiares=None, limiar_iou=IOU_VOTO, revotar=False,
-          agora=None, configuracao=None):
+          agora=None, configuracao=None, auditoria=AUDITORIA):
     """
     Vota as imagens da saída (saida.votar); devolve o resumo dele.
     configuracao: a dos anotadores (pipeline.py), gravada nos parâmetros da
-    votação (RNF07).
+    votação (RNF07). auditoria: fração das aprovadas na auditoria cega (0
+    desliga).
     """
     if limiares is not None and len(limiares) != len(anotadores):
         raise ValueError("um limiar por anotador")
-    parametros = {"iou": limiar_iou,
+    if not 0 <= auditoria <= 1:
+        raise ValueError("auditoria: fração entre 0 e 1")
+    parametros = {"iou": limiar_iou, "auditoria": auditoria,
                   "limiares": dict(zip(anotadores, limiares or [None] * len(anotadores)))}
     if configuracao is not None:
         parametros["configuracao"] = configuracao
     return formato.votar(saida, anotadores, decisor(limiares, limiar_iou), parametros,
-                         revotar, agora)
+                         revotar, agora, lambda nome: sortear_auditoria(nome, auditoria))
 
 
 def imprimir_resumo(saida, anotadores, r):
@@ -214,7 +233,8 @@ def imprimir_resumo(saida, anotadores, r):
         motivos = {}
         for m in r["falhou"].values():
             motivos[m] = motivos.get(m, 0) + 1
-        print(f"  aprovadas: {len(r['aprovadas'])} ({len(r['aprovadas']) / votadas:.0%}); "
+        print(f"  aprovadas: {len(r['aprovadas'])} ({len(r['aprovadas']) / votadas:.0%}"
+              f"; {len(r['auditadas'])} na auditoria cega); "
               f"falharam: {len(r['falhou'])}"
               + (f" ({', '.join(f'{m} {q}' for m, q in sorted(motivos.items()))})"
                  if motivos else ""))
@@ -236,6 +256,9 @@ def main(argv=None):
                              "gravado na proposta (padrão: todos gravados)")
     parser.add_argument("--iou", type=float, default=IOU_VOTO,
                         help=f"IoU mínimo para duas caixas casarem (padrão: {IOU_VOTO})")
+    parser.add_argument("--auditoria", type=float, default=AUDITORIA,
+                        help="fração das aprovadas que vão à revisão como se tivessem falhado, "
+                             f"sem o revisor saber; 0 desliga (padrão: {AUDITORIA})")
     parser.add_argument("--revotar", action="store_true",
                         help="vota de novo todas as pendentes, mesmo as já votadas com as "
                              "mesmas propostas")
@@ -254,6 +277,8 @@ def main(argv=None):
             parser.error("--limiares: entre 0 e 1")
     if not 0 < args.iou <= 1:
         parser.error("--iou: entre 0 e 1")
+    if not 0 <= args.auditoria <= 1:
+        parser.error("--auditoria: entre 0 e 1")
     if not formato.existe(args.saida):
         raise ValueError(f"{args.saida} não tem banco: importe e anote antes")
     sem_proposta = [a for a in args.anotadores if a not in formato.anotadores(args.saida)]
@@ -262,7 +287,8 @@ def main(argv=None):
                          f"(anotadores com propostas: "
                          f"{', '.join(formato.anotadores(args.saida)) or 'nenhum'})")
 
-    r = votar(args.saida, args.anotadores, limiares, args.iou, args.revotar)
+    r = votar(args.saida, args.anotadores, limiares, args.iou, args.revotar,
+              auditoria=args.auditoria)
     imprimir_resumo(args.saida, args.anotadores, r)
 
 

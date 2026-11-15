@@ -81,7 +81,8 @@ def test_aprovada_grava_consenso_rotulo_e_treino(tmp_path):
     saida = criar(tmp_path)
     ids = concordam(saida, "l1_x.jpg")
     r = votar.votar(saida, TRIO, agora="t")
-    assert r == {"aprovadas": ["l1_x.jpg"], "falhou": {}, "uniao": [], "incompletas": 0,
+    assert r == {"aprovadas": ["l1_x.jpg"], "falhou": {}, "uniao": [], "auditadas": [],
+                 "incompletas": 0,
                  "ja_votadas": 0}
     estado = formato.ler_estado(saida)["l1_x.jpg"]
     assert (estado["status"], estado["voto"], estado["motivo"]) == ("pendente", "aprovada", None)
@@ -95,7 +96,8 @@ def test_aprovada_grava_consenso_rotulo_e_treino(tmp_path):
     assert (dados["train"], dados["val"]) == ("treino.txt", "teste.txt")
     voto = formato.ler_voto(saida, "l1_x.jpg")
     assert voto["anotadores"] == TRIO and voto["data"] == "t"
-    assert voto["parametros"] == {"iou": 0.5, "limiares": {"a": None, "b": None, "c": None}}
+    assert voto["parametros"] == {"iou": 0.5, "auditoria": votar.AUDITORIA,
+                                  "limiares": {"a": None, "b": None, "c": None}}
     assert [(p["anotador"], p["id"], p["limiar"]) for p in voto["propostas"]] == \
         [(a, ids[a], 0.2) for a in TRIO]
     assert [c["id"] for c in voto["caixas"]] == [0, 1]
@@ -241,8 +243,9 @@ def test_revisao_parte_do_voto_e_registra_a_origem(tmp_path):
                                      "c": [GARRAFA, fraca]})
     assert votar.votar(saida, TRIO)["falhou"] == {"l1_x.jpg": "quantidade"}
     base = formato.voto_para_revisao(saida, "l1_x.jpg", formato.nomes_classes(saida))
-    assert (base["resultado"], base["motivo"], base["conjunto"]) == ("falhou", "quantidade",
-                                                                  "treino")
+    # o motivo fica no banco, mas não vai à página (auditoria cega)
+    assert (base["resultado"], base["motivo"], base["conjunto"]) == ("falhou", None, "treino")
+    assert formato.ler_voto(saida, "l1_x.jpg")["motivo"] == "quantidade"
     # uma caixa por objeto: a garrafa é consenso; a lata (só a) e a tampa (só b)
     # são conflitos, com a classe proposta como sugestão, mesmo abaixo de 0,35
     assert [(c["indice"], c["nome"], c["anotadores"]) for c in base["caixas"]] == \
@@ -372,8 +375,59 @@ def test_main_resume_e_recusa_anotador_sem_proposta(tmp_path, capsys):
     concordam(saida, "l1_x.jpg")
     votar.main([str(saida), "--anotadores", *TRIO])
     saida_texto = capsys.readouterr().out
-    assert "1 imagem(ns) de treino votada(s), 0 de teste" in saida_texto and "aprovadas: 1 (100%)" in saida_texto
+    assert "1 imagem(ns) de treino votada(s), 0 de teste" in saida_texto and "aprovadas: 1 (100%; 0 na auditoria cega)" in saida_texto
     with pytest.raises(ValueError, match="nenhuma proposta de grounding-dino"):
         votar.main([str(saida)])
     with pytest.raises(SystemExit):
         votar.main([str(saida), "--anotadores", "a", "b", "--limiares", "0.1"])
+
+
+# --- auditoria cega (T8) --------------------------------------------------------
+
+def test_sorteio_da_auditoria_estavel_e_perto_da_fracao():
+    assert votar.sortear_auditoria("l1_x.jpg") == votar.sortear_auditoria("l1_x.jpg")
+    sorteadas = sum(votar.sortear_auditoria(f"l1_{i}.jpg") for i in range(4000))
+    assert 140 <= sorteadas <= 260   # 5% de 4000 = 200
+    assert not any(votar.sortear_auditoria(f"l1_{i}.jpg", 0) for i in range(500))
+    assert all(votar.sortear_auditoria(f"l1_{i}.jpg", 1) for i in range(500))
+
+
+def test_auditada_continua_aprovada_mas_a_revisao_a_ve_como_falha(tmp_path):
+    saida = criar(tmp_path, por_lote=("x.jpg", "y.jpg"))
+    concordam(saida, "l1_x.jpg")
+    propor(saida, "l1_y.jpg", {"a": [GARRAFA, LATA], "b": [GARRAFA], "c": [GARRAFA]})
+    r = votar.votar(saida, TRIO, auditoria=1)
+    # só aprovada entra na auditoria; a que falhou, não
+    assert r["aprovadas"] == r["auditadas"] == ["l1_x.jpg"]
+    estado = formato.ler_estado(saida)
+    assert (estado["l1_x.jpg"]["voto"], estado["l1_x.jpg"]["auditoria"]) == ("aprovada", True)
+    assert estado["l1_y.jpg"]["auditoria"] is False
+    # no banco e nos arquivos, continua aprovada: rótulo de consenso e no treino
+    assert formato.ler_voto(saida, "l1_x.jpg")["auditoria"] is True
+    assert (saida / "labels" / "l1_x.txt").exists()
+    assert linhas(saida, "treino.txt") == ["./images/l1_x.jpg"]
+    # na revisão, igual a uma reprovada: "falhou", sem motivo, uma caixa por objeto
+    nomes = formato.nomes_classes(saida)
+    auditada = formato.voto_para_revisao(saida, "l1_x.jpg", nomes)
+    reprovada = formato.voto_para_revisao(saida, "l1_y.jpg", nomes)
+    assert (auditada["resultado"], auditada["motivo"]) == ("falhou", None)
+    assert (reprovada["resultado"], reprovada["motivo"]) == ("falhou", None)
+    assert [c["nome"] for c in auditada["caixas"]] == ["Garrafa", "Lata"]
+    assert set(auditada) == set(reprovada)
+    # revisada, o rótulo é o do revisor; o voto continua marcado para as métricas
+    caixas = [{"id": c["id"], "caixa": c["caixa"], "origem": "voto", "indice": c["indice"]}
+              for c in auditada["caixas"]]
+    registro = formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=caixas), "t")
+    assert [c["desfecho"] for c in registro["caixas"]] == ["aceita", "aceita"]
+    assert formato.ler_estado(saida)["l1_x.jpg"]["auditoria"] is True
+
+
+def test_auditoria_sobrevive_ao_revoto_e_zero_desliga(tmp_path):
+    saida = criar(tmp_path)
+    concordam(saida, "l1_x.jpg")
+    assert votar.votar(saida, TRIO, auditoria=1)["auditadas"] == ["l1_x.jpg"]
+    assert votar.votar(saida, TRIO, revotar=True, auditoria=1)["auditadas"] == ["l1_x.jpg"]
+    assert votar.votar(saida, TRIO, revotar=True, auditoria=0)["auditadas"] == []
+    assert formato.ler_estado(saida)["l1_x.jpg"]["auditoria"] is False
+    with pytest.raises(ValueError, match="auditoria"):
+        votar.votar(saida, TRIO, auditoria=1.5)

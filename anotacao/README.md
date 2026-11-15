@@ -97,12 +97,14 @@ python anotacao/votar.py anotacoes --anotadores grounding-dino yolo --limiares g
 - Cada caixa do voto guarda de quais caixas das propostas veio. A revisão usa isso para sugerir as classes de um conflito.
 - Rodar de novo vota só as imagens novas e as que ganharam proposta nova de algum anotador. `--revotar` vota de novo todas as pendentes (por exemplo, com outros `--limiares`). Cada voto é uma linha nova no banco, com as propostas e os limiares que usou.
 - A revisão humana vale mais que o voto: uma aprovada que o revisor salva passa a ter o rótulo dele, e o voto não mexe mais nela.
+- **Auditoria cega** (T8): cerca de 5% das aprovadas (`--auditoria`, `0` desliga), sorteadas pelo hash do nome (sempre as mesmas, mesmo votando de novo), vão à fila "a revisar" como se tivessem falhado, para estimar o erro das aprovadas. No banco continuam aprovadas, marcadas em `votos.auditoria` (e `imagens.auditoria`), com o rótulo de consenso em `labels/` e no `treino.txt` até a revisão. Na página e na API do `revisar.py` nada as distingue de uma reprovada: vêm com o voto `falhou`, sem a anotação final, e, por isso, **o motivo da falha não aparece para nenhuma imagem** (só fica no banco e no resumo do `votar.py`). A página estática (`visualizar.html`) mostra os rótulos de `labels/` e não é cega: o revisor usa só a do `revisar.py`. Fica uma pista que só some mudando o que se mede: uma reprovada quase sempre tem alguma caixa em conflito (vermelha), e uma auditada só tem caixas de consenso.
 
 | Opção | Padrão | O que faz |
 |---|---|---|
 | `--anotadores` | `grounding-dino owlv2 yolo` | Quem vota (ao menos dois); o primeiro dá a ordem das caixas de consenso |
 | `--limiares` | gravados | Um limiar de leitura por anotador, ou `g` |
 | `--iou` | `0.5` | IoU mínimo para duas caixas casarem |
+| `--auditoria` | `0.05` | Fração das aprovadas na auditoria cega; `0` desliga |
 | `--revotar` | — | Vota de novo as já votadas com as mesmas propostas |
 
 ### Pipeline
@@ -150,10 +152,10 @@ O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels
 |---|---|
 | `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão ou algum voto guarda caixa com classe |
 | `lotes` | Região de interesse e data de cada lote (importação); o conjunto (`treino` ou `teste`) é de cada imagem, em `imagens` |
-| `imagens` | Nome, tamanho, lote, status (`pendente`, `revisada`, `descartada`) e, para o voto (T6), `voto` e `motivo` |
+| `imagens` | Nome, tamanho, lote, conjunto, status (`pendente`, `revisada`, `descartada`) e, do voto vigente (T6, T8), `voto`, `motivo` e `auditoria` |
 | `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
 | `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
-| `votacoes`, `votos`, `votos_propostas`, `caixas_voto`, `caixas_voto_membros` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado (`aprovada`, `falhou`, `uniao`), o motivo, as propostas usadas com o limiar de cada uma, as caixas (de consenso no treino, da união sem classe no teste) e de quais caixas das propostas cada uma veio. O resultado do voto vigente é repetido em `imagens.voto` e `imagens.motivo` |
+| `votacoes`, `votos`, `votos_propostas`, `caixas_voto`, `caixas_voto_membros` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado (`aprovada`, `falhou`, `uniao`), o motivo, se entrou na auditoria cega, as propostas usadas com o limiar de cada uma, as caixas (de consenso no treino, da união sem classe no teste) e de quais caixas das propostas cada uma veio. O resultado do voto vigente é repetido em `imagens.voto`, `imagens.motivo` e `imagens.auditoria` |
 | `revisoes`, `caixas_revisao` | Cada sessão de revisão: ação, data, tempo ativo, revisor, o voto de onde partiu e as caixas finais, cada uma com a origem (uma caixa do voto, uma proposta fora dele ou uma candidata) e o desfecho |
 
 As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada com `.txt` entraria no treino como negativo falso. E, sem a proposta original, não dá para medir quanto o revisor corrigiu cada anotador (RF13). Por isso o `data.yaml` aponta para as listas, e não para `images/`.
@@ -191,7 +193,7 @@ python anotacao/revisar.py anotacoes --abrir      # http://127.0.0.1:8000/
 python anotacao/revisar.py anotacoes --porta 8001
 ```
 
-A revisão parte do voto (`votar.py`). A fila padrão, **a revisar**, tem as imagens pendentes que falharam no voto e as de teste, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os outros filtros mostram as **aprovadas** pelo voto (já rotuladas; revisá-las troca o rótulo pelo do revisor), as **sem voto** (só para ver: rode o `votar.py`), as revisadas, as descartadas e todas; a ordem também pode ser por nome. As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
+A revisão parte do voto (`votar.py`). A fila padrão, **a revisar**, tem as imagens pendentes que falharam no voto, as aprovadas sorteadas para a auditoria cega (sem o revisor saber quais) e as de teste, das mais incertas para as mais seguras: a ordem é pela menor confiança entre as caixas propostas, e as imagens sem nenhuma caixa vêm primeiro, porque são as que mais podem ter objeto não achado. Os outros filtros mostram as **aprovadas** pelo voto, menos as da auditoria (já rotuladas; revisá-las troca o rótulo pelo do revisor), as **sem voto** (só para ver: rode o `votar.py`), as revisadas, as descartadas e todas; a ordem também pode ser por nome. As setas `←`/`→` andam pela fila, e `#<nome da imagem>` no endereço abre aquela imagem.
 
 ### Edição
 
@@ -247,7 +249,7 @@ O servidor escuta só em `127.0.0.1` e lê o banco a cada pedido, então propost
 | Rota | Resposta |
 |---|---|
 | `GET /api/classes` | `[{id, nome, material}]` |
-| `GET /api/imagens?status=a_revisar&ordem=incerteza` | `{imagens: [{nome, status, situacao, voto, motivo, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}`; `status` é a situação: `a_revisar`, `aprovada`, `sem_voto`, `revisada`, `descartada` ou `todas`. Nas de teste pendentes, sem anotadores nem confiança |
+| `GET /api/imagens?status=a_revisar&ordem=incerteza` | `{imagens: [{nome, status, situacao, voto, motivo, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}`; `status` é a situação: `a_revisar`, `aprovada`, `sem_voto`, `revisada`, `descartada` ou `todas`. Nas de teste pendentes, sem anotadores nem confiança. `motivo` vem sempre nulo, e a aprovada da auditoria vem como `voto: "falhou"`, `situacao: "a_revisar"` e `tem_final: false` (auditoria cega) |
 | `GET /api/imagens/<nome>` | `{nome, status, situacao, conjunto, largura, altura, final, propostas: {anotador: [...]}, voto, invalidas, revisao}`; `voto` (nulo sem voto): `{id, resultado, motivo, conjunto, caixas: [{indice, id, nome, conf, caixa, anotadores, sugestoes: [{id, nome, anotadores: [{anotador, conf}]}]}], candidatas: [{anotador, indice, origem, conf, caixa}]}`; caixa de treino com `id` nulo é conflito, com as `sugestoes`. No teste pendente, `propostas` e `voto.caixas` vêm vazios, e as candidatas incluem uma caixa visível por objeto da união (`origem: "proposta"`) |
 | `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", voto_id, tempo_ativo_s, caixas: [{id, caixa, origem, indice, anotador}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, não foi votada, ou se `voto_id` não é mais o voto vigente (a imagem foi votada de novo depois que a página abriu) |
 | `GET /images/<nome>` | A imagem |

@@ -39,9 +39,10 @@ import saida as formato
 from anotar import DIR_SCRIPT, carregar_classes
 
 PAGINA = DIR_SCRIPT / "revisar.html"
-# Situação de uma imagem na fila: a_revisar (pendente que falhou no voto, ou de
-# teste), aprovada (pendente aprovada pelo voto), sem_voto (pendente ainda não
-# votada), revisada e descartada
+# Situação de uma imagem na fila: a_revisar (pendente que falhou no voto, de
+# teste, ou aprovada e sorteada para a auditoria cega, T8), aprovada (pendente
+# aprovada pelo voto), sem_voto (pendente ainda não votada), revisada e
+# descartada
 SITUACOES = ("a_revisar", "aprovada", "sem_voto", "revisada", "descartada")
 FILTROS = (*SITUACOES, "todas")
 ORDENS = ("incerteza", "nome")
@@ -69,7 +70,21 @@ def listar_classes(saida, classes):
 def situacao(linha):
     if linha["status"] != "pendente":
         return linha["status"]
+    if linha["voto"] == "aprovada" and linha.get("auditoria"):
+        return "a_revisar"
     return {None: "sem_voto", "aprovada": "aprovada"}.get(linha["voto"], "a_revisar")
+
+
+def cega(dados, linha):
+    """
+    Auditoria cega (T8): nada do que a página recebe distingue uma aprovada
+    sorteada, pendente, de uma reprovada. Ela vem com voto "falhou" e sem a
+    anotação final (o rótulo de consenso que já tem em labels/); o motivo da
+    falha não vem em nenhuma, porque só a auditada não teria motivo.
+    """
+    if linha["status"] == "pendente" and linha.get("auditoria"):
+        dados["final"] = None
+    return dados
 
 
 def resumir(dados, linha):
@@ -79,8 +94,8 @@ def resumir(dados, linha):
         "nome": dados["nome"],
         "status": dados["status"],
         "situacao": situacao(linha),
-        "voto": linha["voto"],
-        "motivo": linha["motivo"],
+        "voto": "falhou" if linha.get("auditoria") else linha["voto"],
+        "motivo": None,   # auditoria cega: ver cega()
         "anotadores": sorted(dados["propostas"]),
         "n_caixas": {a: len(c) for a, c in dados["propostas"].items()},
         "confianca_min": min(confiancas) if confiancas else None,
@@ -107,7 +122,8 @@ def montar_fila(saida, status="a_revisar", ordem="incerteza"):
     for nome, linha in estado.items():
         contagem[situacao(linha)] += 1
         if status == "todas" or situacao(linha) == status:
-            fila.append(resumir(formato.ler_imagem(saida, nome, nomes, anotadores, linha), linha))
+            fila.append(resumir(cega(formato.ler_imagem(saida, nome, nomes, anotadores, linha),
+                                     linha), linha))
     if ordem == "incerteza":
         fila.sort(key=lambda i: (i["confianca_min"] is not None, i["confianca_min"] or 0))
     else:
@@ -135,7 +151,7 @@ def nome_valido(saida, bruto):
 def detalhar(saida, bruto):
     nome, linha = nome_valido(saida, bruto)
     nomes = formato.nomes_classes(saida)
-    dados = formato.ler_imagem(saida, nome, nomes, formato.anotadores(saida), linha)
+    dados = cega(formato.ler_imagem(saida, nome, nomes, formato.anotadores(saida), linha), linha)
     caminho = Path(saida) / "images" / nome
     if not caminho.is_file():
         raise ErroHTTP(HTTPStatus.NOT_FOUND, f"{caminho} não existe")

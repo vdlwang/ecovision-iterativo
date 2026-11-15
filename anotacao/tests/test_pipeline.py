@@ -109,7 +109,7 @@ def test_importa_anota_e_vota(ambiente):
     # a votação grava a configuração usada
     [parametros] = votacoes(saida)
     assert [a["nome"] for a in parametros["configuracao"]["anotadores"]] == ["falso-1", "falso-2"]
-    assert parametros["iou"] == 0.5
+    assert parametros["iou"] == 0.5 and parametros["auditoria"] == 0.05
 
 
 def test_lote_de_teste_vira_uniao(ambiente):
@@ -169,6 +169,8 @@ def test_lote_novo_so_anota_o_novo(ambiente):
      "número ou texto"),
     ({"anotadores": [{"tipo": "falso-1", "extra": 1}, {"tipo": "falso-2"}]}, "desconhecidas"),
     ({"anotadores": [{"tipo": "falso-1"}, {"tipo": "falso-2"}], "voto": {"iou": 2}}, "iou"),
+    ({"anotadores": [{"tipo": "falso-1"}, {"tipo": "falso-2"}], "voto": {"auditoria": -1}},
+     "auditoria"),
     ({"anotadores": [{"tipo": "falso-1"}, {"tipo": "falso-2"}], "outra": 1}, "desconhecidas"),
 ])
 def test_config_invalida(ambiente, dados, erro):

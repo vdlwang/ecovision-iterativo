@@ -55,7 +55,7 @@ def opcoes_permitidas(tipo):
 def carregar_config(caminho):
     """
     Lê e confere o anotadores.yaml: {'anotadores': [{nome, tipo, opcoes}],
-    'voto': {'iou'}}, com os padrões preenchidos. Não confere os valores das
+    'voto': {'iou', 'auditoria'}}, com os padrões preenchidos. Não confere os valores das
     opções; isso é com o anotar.py (argv_anotador e ler_argumentos).
     """
     with open(caminho, encoding="utf-8") as f:
@@ -100,12 +100,17 @@ def carregar_config(caminho):
                                  "ou texto")
         anotadores.append({"nome": nome, "tipo": tipo, "opcoes": dict(opcoes)})
     voto = dados.get("voto") or {}
-    if not isinstance(voto, dict) or set(voto) - {"iou"}:
-        raise ValueError(f"{caminho}: 'voto' só aceita 'iou'")
+    if not isinstance(voto, dict) or set(voto) - {"iou", "auditoria"}:
+        raise ValueError(f"{caminho}: 'voto' só aceita 'iou' e 'auditoria'")
     iou = voto.get("iou", votar.IOU_VOTO)
     if isinstance(iou, bool) or not isinstance(iou, (int, float)) or not 0 < iou <= 1:
         raise ValueError(f"{caminho}: voto.iou entre 0 e 1")
-    return {"anotadores": anotadores, "voto": {"iou": float(iou)}}
+    auditoria = voto.get("auditoria", votar.AUDITORIA)
+    if (isinstance(auditoria, bool) or not isinstance(auditoria, (int, float))
+            or not 0 <= auditoria <= 1):
+        raise ValueError(f"{caminho}: voto.auditoria entre 0 e 1")
+    return {"anotadores": anotadores,
+            "voto": {"iou": float(iou), "auditoria": float(auditoria)}}
 
 
 def argv_anotador(anotador, saida, classes, dispositivo=None, previa=False):
@@ -199,7 +204,8 @@ def main(argv=None):
         liberar_memoria()
 
     print("\n== Voto ==")
-    r = votar.votar(args.saida, nomes, limiar_iou=config["voto"]["iou"], configuracao=config)
+    r = votar.votar(args.saida, nomes, limiar_iou=config["voto"]["iou"], configuracao=config,
+                    auditoria=config["voto"]["auditoria"])
     votar.imprimir_resumo(args.saida, nomes, r)
 
 

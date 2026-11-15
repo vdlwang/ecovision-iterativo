@@ -128,7 +128,7 @@ def test_fila_a_revisar_mais_incertas_antes(servidor):
     assert [i["nome"] for i in dados["imagens"]] == ["d.jpg", "a.jpg", "t.jpg"]
     assert dados["imagens"][1] == {
         "nome": "a.jpg", "status": "pendente", "situacao": "a_revisar", "voto": "falhou",
-        "motivo": "quantidade", "anotadores": DUPLA, "n_caixas": {"falso": 2, "outro": 1},
+        "motivo": None, "anotadores": DUPLA, "n_caixas": {"falso": 2, "outro": 1},
         "confianca_min": 0.6, "tem_final": False}
     # teste: na fila, sem confiança nem anotadores
     assert (dados["imagens"][2]["confianca_min"], dados["imagens"][2]["anotadores"]) == (None, [])
@@ -154,7 +154,7 @@ def test_detalhe_traz_o_voto_como_base(servidor, saida):
     assert status == 200
     assert (dados["situacao"], dados["conjunto"], dados["revisao"]) == ("a_revisar", "treino", None)
     assert dados["voto"] == {
-        "id": voto(saida, "a.jpg"), "resultado": "falhou", "motivo": "quantidade",
+        "id": voto(saida, "a.jpg"), "resultado": "falhou", "motivo": None,
         "conjunto": "treino",
         "caixas": [{"id": 1, "nome": "Lata", "conf": 0.9, "caixa": [0.1, 0.1, 0.5, 0.5],
                     "indice": 0, "anotadores": DUPLA, "sugestoes": []},
@@ -378,3 +378,21 @@ def test_put_sem_voto_e_com_voto_antigo(servidor, saida):
     status, dados = enviar(url, {"acao": "salvar", "caixas": [],
                                  "voto_id": detalhe["voto"]["id"]})
     assert status == 200 and dados["revisao"]["voto_id"] != visto
+
+
+def test_auditada_aparece_como_reprovada(tmp_path):
+    saida = montar(tmp_path)
+    # b c.png foi aprovada; vota de novo com toda aprovada na auditoria
+    votar.votar(saida, DUPLA, revotar=True, auditoria=1)
+    assert formato.ler_estado(saida)["b c.png"]["auditoria"] is True
+    fila = revisar.montar_fila(saida, "a_revisar")
+    item = next(i for i in fila["imagens"] if i["nome"] == "b c.png")
+    assert (item["situacao"], item["voto"], item["motivo"], item["tem_final"]) == (
+        "a_revisar", "falhou", None, False)
+    assert all(i["motivo"] is None for i in fila["imagens"])
+    assert "b c.png" not in [i["nome"] for i in revisar.montar_fila(saida, "aprovada")["imagens"]]
+    dados = revisar.detalhar(saida, "b%20c.png")
+    assert dados["final"] is None and dados["situacao"] == "a_revisar"
+    assert (dados["voto"]["resultado"], dados["voto"]["motivo"]) == ("falhou", None)
+    # o rótulo de consenso continua em labels/ e no treino até a revisão
+    assert (saida / "labels" / "b c.txt").exists()
