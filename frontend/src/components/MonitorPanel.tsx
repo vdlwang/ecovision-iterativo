@@ -1,14 +1,15 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card } from './ui/card';
-import { Label } from './ui/label';
-import { Slider } from './ui/slider';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Play, Pause, RotateCw, Menu } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
+import { BadgeBackend } from './BadgeBackend';
+import { BACKEND_WS_URL } from '../config';
 
 interface Detection {
   class: string;
+  material: string;
   confidence: number;
   bbox: [number, number, number, number];
 }
@@ -18,15 +19,23 @@ interface FrameData {
   detections: Detection[];
   fps: number;
   motor_running: boolean;
+  serial_port: string | null;
 }
 
 export function MonitorPanel() {
-  const [confidence, setConfidence] = useState(0.4);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [fps, setFps] = useState(0);
   const [motorRunning, setMotorRunning] = useState(true);
+  const [serialPort, setSerialPort] = useState<string | null>(null);
+  // Câmera e YOLO contam como ativos se chegou frame nos últimos 3 s
+  const [ultimoFrame, setUltimoFrame] = useState(0);
+  const [agora, setAgora] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { connected, send } = useStableWebSocket('ws://localhost:8765', {
+  const { connected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
         const data: FrameData = JSON.parse(event.data);
@@ -42,23 +51,22 @@ export function MonitorPanel() {
               canvas.height = img.height;
               ctx.drawImage(img, 0, 0);
 
-              // Desenhar bounding boxes
+              // Desenhar bounding boxes (o backend envia o quadro sem elas)
               data.detections?.forEach(det => {
                 const [x1, y1, x2, y2] = det.bbox;
                 ctx.strokeStyle = '#22c55e';
                 ctx.lineWidth = 3;
                 ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
-                // Label
-                ctx.fillStyle = '#22c55e';
-                ctx.fillRect(x1, y1 - 25, 200, 25);
-                ctx.fillStyle = '#000';
+                // Label com a largura do texto; dentro da caixa se não couber acima
+                const label = `${det.class} (${det.material}) ${(det.confidence * 100).toFixed(1)}%`;
                 ctx.font = '14px monospace';
-                ctx.fillText(
-                  `${det.class} ${(det.confidence * 100).toFixed(1)}%`,
-                  x1 + 5,
-                  y1 - 8
-                );
+                const larguraLabel = ctx.measureText(label).width + 10;
+                const topoLabel = y1 >= 25 ? y1 - 25 : y1;
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(x1, topoLabel, larguraLabel, 25);
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x1 + 5, topoLabel + 17);
               });
             };
             img.src = `data:image/jpeg;base64,${data.frame}`;
@@ -68,39 +76,28 @@ export function MonitorPanel() {
         setDetections(data.detections || []);
         setFps(data.fps || 0);
         setMotorRunning(data.motor_running ?? true);
+        setSerialPort(data.serial_port ?? null);
+        if (data.frame) setUltimoFrame(Date.now());
       } catch (error) {
         // Silencioso
       }
     },
   });
 
+  const recebendoFrames = connected && agora - ultimoFrame < 3000;
+  // Esteira só com o ESP32 conectado (backend offline ou em modo demo desabilita)
+  const semSerial = !connected || !serialPort;
+
   const sendCommand = (command: string) => {
     send({ command });
   };
 
-  const updateConfidence = (value: number) => {
-    setConfidence(value);
-    send({
-      type: 'config',
-      confidence: value
-    });
-  };
-
+  // Ícone pelo material que o backend já mapeou (taco_to_material)
   const materialIcons: Record<string, string> = {
     'plastic': '♻️',
     'metal': '🔩',
-    'corrugated carton': '📦',
     'paper': '📄',
-    'cardboard': '📦',
     'glass': '🍾',
-  };
-
-  const getMaterialIcon = (className: string) => {
-    const lower = className.toLowerCase();
-    for (const [key, icon] of Object.entries(materialIcons)) {
-      if (lower.includes(key)) return icon;
-    }
-    return '📦';
   };
 
   return (
@@ -111,9 +108,7 @@ export function MonitorPanel() {
           <p className="text-neutral-400">Detecções YOLO + Controle da Esteira</p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="outline" className={`${connected ? 'bg-green-600/20 text-green-600 border-green-600/30' : 'bg-red-600/20 text-red-600 border-red-600/30'}`}>
-            {connected ? 'Conectado' : 'Desconectado'}
-          </Badge>
+          <BadgeBackend connected={connected} />
           <Badge variant="outline" className="bg-neutral-800 text-white border-neutral-700">
             {fps} FPS
           </Badge>
@@ -141,7 +136,7 @@ export function MonitorPanel() {
                   <div className="text-center">
                     <div className="text-6xl mb-4">📹</div>
                     <p className="text-neutral-500 mb-2">Aguardando conexão...</p>
-                    <p className="text-neutral-600 text-sm">Execute: python backend/ecovision_local.py</p>
+                    <p className="text-neutral-600 text-sm">Execute: python backend/ecovision_local_modf.py</p>
                   </div>
                 </div>
               )}
@@ -157,7 +152,7 @@ export function MonitorPanel() {
                   className="p-3 md:p-4 bg-neutral-800 rounded-lg text-center"
                 >
                   <div className="text-3xl md:text-4xl mb-2">
-                    {getMaterialIcon(detection.class)}
+                    {materialIcons[detection.material] ?? '📦'}
                   </div>
                   <p className="text-white text-xs md:text-sm mb-1 truncate" title={detection.class}>
                     {detection.class}
@@ -195,6 +190,7 @@ export function MonitorPanel() {
                     setMotorRunning(true);
                     sendCommand('MOTOR ON');
                   }}
+                  disabled={semSerial}
                   className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
                 >
                   <Play className="w-3 h-3 md:w-4 md:h-4 mr-2" />
@@ -205,6 +201,7 @@ export function MonitorPanel() {
                     setMotorRunning(false);
                     sendCommand('MOTOR OFF');
                   }}
+                  disabled={semSerial}
                   variant="outline"
                   className="bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
                 >
@@ -221,22 +218,22 @@ export function MonitorPanel() {
             <div className="space-y-3">
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">Câmera</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'Ativo' : 'Inativo'}
+                <Badge className={recebendoFrames ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {recebendoFrames ? 'Ativo' : 'Inativo'}
                 </Badge>
               </div>
               
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">YOLO</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'Rodando' : 'Parado'}
+                <Badge className={recebendoFrames ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {recebendoFrames ? 'Rodando' : 'Parado'}
                 </Badge>
               </div>
               
               <div className="flex items-center justify-between p-2 md:p-3 bg-neutral-800 rounded-lg">
                 <span className="text-neutral-400 text-xs md:text-sm">ESP32</span>
-                <Badge className={connected ? 'bg-green-600' : 'bg-neutral-600'}>
-                  {connected ? 'COM8' : 'N/A'}
+                <Badge className={connected && serialPort ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {!connected ? 'N/A' : serialPort ?? 'Demo (sem serial)'}
                 </Badge>
               </div>
             </div>

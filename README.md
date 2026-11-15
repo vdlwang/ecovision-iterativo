@@ -1,6 +1,6 @@
 # EcoVision - Sistema Inteligente de Reciclagem
 
-> **Origem:** este repositório dá continuidade ao EcoVision, TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**, com correções e melhorias. O ponto de partida é a versão final do TCC (`vitor-scosta/Ecovision@d6f5181`), que está na raiz. A versão preliminar (`vitor-scosta/tcc-testes`) fica em [`legado/`](legado/). O histórico de ambas foi preservado.
+> **Origem:** este repositório dá continuidade ao EcoVision, TCC de Engenharia de Computação (Poli-USP, 2025) de **Vitor Santos** e **Nathan Santos**, com correções e melhorias. O ponto de partida é a versão final do TCC (`vitor-scosta/Ecovision@d6f5181`), que está na raiz. A versão preliminar (`vitor-scosta/tcc-testes`) fica em [`legado/`](legado/). O histórico de ambas foi preservado. O que mudou desde a tese está em [`CHANGELOG.md`](CHANGELOG.md).
 
 Sistema de controle para esteira rolante de centro de reciclagem. Uma webcam filma a esteira, um modelo YOLOv8 identifica o material (plástico, metal, vidro ou papel) e um ESP32 move um único servo para desviar o objeto para a saída correta.
 
@@ -29,11 +29,12 @@ O backend lê a câmera, roda o YOLO e, quando o centro de um objeto cruza uma f
 | Pesos do YOLO | `yolo_models/taco/` | [`yolo_models/README.md`](yolo_models/README.md) |
 | Diagramas (PlantUML) | `docs/diagrams/` | |
 | Versão preliminar do TCC (scripts, datasets, middleware, maquete) | `legado/` | [`legado/README.md`](legado/README.md) |
-| Problemas da versão preliminar e observações sobre a monografia | | [`PROBLEMAS.md`](PROBLEMAS.md) |
+| Problemas fora do código (modelo, dados, montagem, repositório) | | [`PROBLEMAS.md`](PROBLEMAS.md) |
+| Mudanças desde a tese (tag `tese-final`) | | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## Requisitos
 
-- **Python 3.10+**
+- **Python 3.12+** (as versões fixadas em `backend/requirements.txt` foram testadas com o 3.14)
 - **Node.js 18+** e npm
 - **PlatformIO** (CLI ou extensão do VS Code), para gravar o firmware
 - **Hardware:** webcam, ESP32 DevKit, servo MG996R, ponte H L298N e os motores DC da esteira
@@ -77,13 +78,7 @@ Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 
 ## Limitações conhecidas
 
-- **Vidro não é separado** depois de salvar a configuração pela interface: o painel grava a chave `vidro`, e o backend procura `glass`.
-- **O seletor de modelo da interface carrega pesos errados:** "Small" carrega o `yolov8s.pt`, que é o modelo COCO (não detecta lixo); "Nano" e "Medium" carregam os pesos TACO sem fine-tuning; "Large" e "XLarge" não existem. Para usar o modelo do projeto, mantenha `model_path` em `../yolo_models/taco/best.pt`.
-- **O slider de confiança não tem efeito** com o backend rodando; a confiança só muda ao reiniciar.
-- **A interface não lê a configuração atual** do backend: os painéis mostram valores fixos e, ao salvar, sobrescrevem `backend/config.json`.
 - **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Objetos que chegam nesse intervalo são ignorados.
-- **A serial não tem trava:** a thread do YOLO e o handler do WebSocket escrevem na mesma porta sem lock, e a leitura da resposta bloqueia o loop do WebSocket.
-- **No firmware, qualquer comando não numérico** (por exemplo, `PING` no `testes_serial.py`) é lido como 0 e move o servo para 0°.
 - **O login é simulado:** não há autenticação real.
 
 ## Licença

@@ -1,5 +1,7 @@
 node_modules
 venv
+.venv/
+*.cache
 __pycache__/
 backend/config.json
 frontend/build
