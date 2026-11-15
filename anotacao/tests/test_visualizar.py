@@ -48,7 +48,7 @@ def test_coletar_propostas_e_status(tmp_path):
     for nome in ("a.jpg", "b c.png", "sem.jpg"):
         Image.new("RGB", (8, 4)).save(saida / "images" / nome)
     formato.preparar(saida, ["Garrafa", "Lata"])
-    formato.registrar(saida, [("a.jpg", 8, 4), ("sem.jpg", 8, 4)])
+    formato.registrar(saida, [("a.jpg", 8, 4), ("sem.jpg", 8, 4)], "l1", {"conjunto": "treino"})
     formato.revisar(saida, "a.jpg", {"acao": "salvar", "caixas": []}, "t")
     formato.nova_proposta(saida, "falso", "sem.jpg", [
         ("Lata", 0.7, (0.25, 0.25, 0.75, 0.75)), ("Pneu", 0.6, (0, 0, 1, 1)),

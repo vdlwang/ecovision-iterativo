@@ -37,7 +37,8 @@ def montar(pasta, nomes_classes=("Garrafa", "Lata")):
     (pasta / "segredo.txt").write_text("não deve sair")
     formato.preparar(pasta, nomes_classes)
     formato.registrar(pasta, [(n, 40, 20) for n in ("a.jpg", "b c.png", "d.jpg", "e.jpg",
-                                                    "f.jpg")])
+                                                    "f.jpg")],
+                       "l1", {"conjunto": "treino"})
     gravar_proposta(pasta, "a.jpg", [("Lata", 0.9), ("Garrafa", 0.6)])
     gravar_proposta(pasta, "b c.png", [("Lata", 0.3)])
     gravar_proposta(pasta, "d.jpg", [])

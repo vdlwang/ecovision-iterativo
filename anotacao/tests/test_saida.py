@@ -22,7 +22,7 @@ LIMIARES = {"confianca": 0.2, "confianca_classe": 0.35}
 
 def criar(saida, nomes=("Garrafa", "Lata"), imagens=("a.jpg",)):
     formato.preparar(saida, nomes)
-    formato.registrar(saida, [(n, 100, 50) for n in imagens])
+    formato.registrar(saida, [(n, 100, 50) for n in imagens], "l1", {"conjunto": "treino"})
     return saida
 
 
@@ -89,7 +89,11 @@ def test_registrar_lote_estado_e_colisoes(tmp_path):
                                   "conjunto": "teste", "voto": None, "motivo": None,
                                   "largura": 40, "altura": 20}
     with pytest.raises(ValueError, match="colide"):
-        formato.registrar(tmp_path, [("l1_a.png", 40, 20)])
+        formato.registrar(tmp_path, [("l1_a.png", 40, 20)], "l1")
+    # imagem só entra num lote existente (criado pelo importar.py)
+    with pytest.raises(ValueError, match="lote 'l9' não existe"):
+        formato.registrar(tmp_path, [("l9_a.jpg", 40, 20)], "l9")
+    assert "l9_a.jpg" not in formato.ler_estado(tmp_path)
     with pytest.raises(ValueError, match="colide"):
         formato.conferir_colisoes({}, ["x.jpg", "x.png"])
     formato.conferir_colisoes({"x.jpg": {}}, ["x.jpg"])  # a mesma: passa

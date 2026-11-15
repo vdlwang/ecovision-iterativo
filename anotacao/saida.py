@@ -37,7 +37,7 @@ STATUS = ("pendente", "revisada", "descartada")
 CONJUNTOS = ("treino", "teste")
 VOTOS = ("aprovada", "falhou")
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 2
+VERSAO_ESQUEMA = 3
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -64,7 +64,7 @@ CREATE TABLE imagens (
     stem TEXT NOT NULL UNIQUE,
     largura INTEGER NOT NULL CHECK (largura > 0),
     altura INTEGER NOT NULL CHECK (altura > 0),
-    lote TEXT REFERENCES lotes (nome),
+    lote TEXT NOT NULL REFERENCES lotes (nome),
     status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN {STATUS}),
     voto TEXT CHECK (voto IN {VOTOS}),
     motivo TEXT,
@@ -124,12 +124,9 @@ CREATE VIEW propostas_vigentes AS
 SELECT p.id, p.imagem_id, e.anotador FROM propostas p JOIN execucoes e ON e.id = p.execucao_id
 WHERE p.id = (SELECT MAX(p2.id) FROM propostas p2 JOIN execucoes e2 ON e2.id = p2.execucao_id
               WHERE p2.imagem_id = p.imagem_id AND e2.anotador = e.anotador);
-"""
-
-# Voto (T6, votar.py): uma votação por rodada; um voto por imagem votada, com
-# as propostas que usou e, se aprovada, as caixas de consenso. O voto vigente
-# de uma imagem é o de maior id, e imagens.voto/motivo repetem o resultado dele.
-ESQUEMA_VOTO = f"""
+-- Voto (T6, votar.py): uma votação por rodada; um voto por imagem votada, com
+-- as propostas que usou e, se aprovada, as caixas de consenso. O voto vigente
+-- de uma imagem é o de maior id, e imagens.voto/motivo repetem o resultado dele.
 CREATE TABLE votacoes (
     id INTEGER PRIMARY KEY,
     anotadores TEXT NOT NULL,
@@ -161,9 +158,6 @@ CREATE TABLE caixas_voto (
     PRIMARY KEY (voto_id, indice)
 );
 """
-
-# Migrações: de cada versão para a seguinte. Só acrescentam tabelas.
-MIGRACOES = {1: ESQUEMA_VOTO}
 
 
 def agora_iso():
@@ -221,25 +215,12 @@ def conectar(saida):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     versao = con.execute("PRAGMA user_version").fetchone()[0]
-    if versao in MIGRACOES:
-        migrar(con)
-    elif versao != VERSAO_ESQUEMA:
+    if versao != VERSAO_ESQUEMA:
         con.close()
+        # Sem migrações: o banco é recriado do zero (importar e anotar de novo)
         raise ValueError(f"{caminho}: esquema na versão {versao}, este código usa a "
-                         f"{VERSAO_ESQUEMA}")
+                         f"{VERSAO_ESQUEMA}; apague a saída e importe de novo")
     return con
-
-
-def migrar(con):
-    """Leva o banco à versão atual, numa transação (outra conexão pode estar migrando)."""
-    with transacao(con):
-        versao = con.execute("PRAGMA user_version").fetchone()[0]
-        while versao in MIGRACOES:
-            for comando in MIGRACOES[versao].split(";"):
-                if comando.strip():
-                    con.execute(comando)
-            versao += 1
-            con.execute(f"PRAGMA user_version = {versao}")
 
 
 @contextmanager
@@ -273,8 +254,7 @@ def criar_banco(saida):
     try:
         # WAL: o servidor lê enquanto o anotar.py grava
         con.execute("PRAGMA journal_mode = WAL")
-        con.executescript(f"BEGIN; {ESQUEMA} {ESQUEMA_VOTO} "
-                          f"PRAGMA user_version = {VERSAO_ESQUEMA}; COMMIT;")
+        con.executescript(f"BEGIN; {ESQUEMA} PRAGMA user_version = {VERSAO_ESQUEMA}; COMMIT;")
     finally:
         con.close()
 
@@ -382,7 +362,7 @@ def ler_estado(saida):
     with abrir(saida) as con:
         return {r["nome"]: dict(r) for r in con.execute(
             "SELECT i.nome, i.status, i.lote, l.conjunto, i.voto, i.motivo, i.largura, i.altura "
-            "FROM imagens i LEFT JOIN lotes l ON l.nome = i.lote ORDER BY i.id")}
+            "FROM imagens i JOIN lotes l ON l.nome = i.lote ORDER BY i.id")}
 
 
 def conferir_colisoes(existentes, novos):
@@ -401,17 +381,22 @@ def conferir_colisoes(existentes, novos):
         stems[stem] = nome
 
 
-def registrar(saida, imagens, lote=None, dados_lote=None, agora=None):
+def registrar(saida, imagens, lote, dados_lote=None, agora=None):
     """
     Registra as imagens [(nome, largura, altura)] como pendentes, no lote dado,
-    numa transação; as já registradas são puladas. dados_lote {conjunto,
-    regiao, importado_em} cria o lote se ele não existe. Devolve os nomes
-    registrados.
+    numa transação; as já registradas são puladas. Toda imagem é de um lote,
+    que diz o conjunto (treino ou teste): só entra pelo importar.py. dados_lote
+    {conjunto, regiao, importado_em} cria o lote se ele não existe; sem ele, o
+    lote tem de existir. Devolve os nomes registrados.
     """
     agora = agora or agora_iso()
     with abrir(saida) as con:
         with transacao(con):
-            if lote is not None and dados_lote is not None:
+            if dados_lote is None:
+                if con.execute("SELECT 1 FROM lotes WHERE nome = ?", (lote,)).fetchone() is None:
+                    raise ValueError(f"lote '{lote}' não existe: importe as imagens pelo "
+                                     "importar.py, que cria o lote com o conjunto")
+            else:
                 con.execute("INSERT OR IGNORE INTO lotes (nome, conjunto, regiao, importado_em) "
                             "VALUES (?, ?, ?, ?)",
                             (lote, dados_lote["conjunto"],
@@ -595,13 +580,11 @@ def separar(proposta):
 
 # Imagem com rótulo final: revisada por humano, ou pendente e aprovada pelo voto
 COM_ROTULO = "(i.status = 'revisada' OR (i.status = 'pendente' AND i.voto = 'aprovada'))"
-# Imagem sem lote (registrada fora do importar.py) conta como de treino
-CONJUNTO = "COALESCE(l.conjunto, 'treino')"
 LISTAS = {
     # OBJETIVO.md, seção 2: o treino recebe as aprovadas e as revisadas; o
     # teste, só as revisadas (o voto não roda no teste)
-    "treino.txt": f"{CONJUNTO} = 'treino' AND {COM_ROTULO}",
-    "teste.txt": f"{CONJUNTO} = 'teste' AND i.status = 'revisada'",
+    "treino.txt": f"l.conjunto = 'treino' AND {COM_ROTULO}",
+    "teste.txt": "l.conjunto = 'teste' AND i.status = 'revisada'",
     "revisadas.txt": "i.status = 'revisada'",
 }
 
@@ -618,7 +601,7 @@ def exportar_listas(con, saida):
     for arquivo, condicao in LISTAS.items():
         # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
         nomes = [f"./images/{r[0]}" for r in con.execute(
-            "SELECT i.nome FROM imagens i LEFT JOIN lotes l ON l.nome = i.lote "
+            "SELECT i.nome FROM imagens i JOIN lotes l ON l.nome = i.lote "
             f"WHERE {condicao} ORDER BY i.id")]
         tamanhos[arquivo] = len(nomes)
         gravar_atomico(saida / arquivo, "".join(n + "\n" for n in nomes))
@@ -1009,8 +992,7 @@ def aceitar(saida, anotador, nomes=None, agora=None):
 
 def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None):
     """
-    Vota, numa transação, as imagens pendentes de lotes de treino (ou sem
-    lote) com proposta vigente de todos os anotadores. Pula as que já têm voto
+    Vota, numa transação, as imagens pendentes de lotes de treino com proposta vigente de todos os anotadores. Pula as que já têm voto
     sobre essas mesmas propostas, a não ser com revotar; as de teste não são
     votadas (vão à união sem classe e à revisão, T9).
 
@@ -1034,8 +1016,8 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
         with transacao(con):
             ids = {n: i for i, n in _nomes(con).items()}
             imagens = con.execute(
-                f"SELECT i.id, i.nome, {CONJUNTO} AS conjunto FROM imagens i "
-                "LEFT JOIN lotes l ON l.nome = i.lote WHERE i.status = 'pendente' "
+                "SELECT i.id, i.nome, l.conjunto FROM imagens i "
+                "JOIN lotes l ON l.nome = i.lote WHERE i.status = 'pendente' "
                 "ORDER BY i.id").fetchall()
             vigentes = [{p["imagem"]: p for p in _propostas(con, VIGENTE, (a,))}
                         for a in anotadores]

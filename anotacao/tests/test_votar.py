@@ -213,17 +213,13 @@ def test_exportar_refaz_rotulos_das_aprovadas(tmp_path):
     assert linhas(saida, "treino.txt") == ["./images/l1_x.jpg"]
 
 
-def test_banco_da_versao_1_ganha_as_tabelas_do_voto(tmp_path):
+def test_banco_de_outra_versao_e_recusado(tmp_path):
     caminho = formato.caminho_banco(tmp_path)
     con = sqlite3.connect(caminho, isolation_level=None)
-    con.executescript(f"BEGIN; {formato.ESQUEMA} PRAGMA user_version = 1; COMMIT;")
+    con.executescript(f"BEGIN; {formato.ESQUEMA} PRAGMA user_version = 2; COMMIT;")
     con.close()
-    formato.preparar(tmp_path, NOMES)
-    formato.registrar(tmp_path, [("x.jpg", 100, 50)])
-    concordam(tmp_path, "x.jpg")
-    assert votar.votar(tmp_path, TRIO)["aprovadas"] == ["x.jpg"]   # sem lote: treino
-    with formato.abrir(tmp_path) as con:
-        assert con.execute("PRAGMA user_version").fetchone()[0] == formato.VERSAO_ESQUEMA
+    with pytest.raises(ValueError, match="versão 2.*importe de novo"):
+        formato.preparar(tmp_path, NOMES)
 
 
 def test_main_resume_e_recusa_anotador_sem_proposta(tmp_path, capsys):
