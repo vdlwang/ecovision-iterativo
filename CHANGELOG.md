@@ -31,6 +31,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Seletor de modelo** lista os pesos TACO reais, com `best.pt` como padrão; antes oferecia o `yolov8s.pt` (COCO) e arquivos inexistentes (`cbdf60a`).
 - **Status do Monitor:** mostra a porta serial real (ou "Demo"), e câmera/YOLO só aparecem ativos quando chegam quadros (`2cbf56f`).
 - **Backend offline:** "Salvar" desabilitado (`026269d`); as páginas de configuração ficam bloqueadas, e os botões da esteira exigem serial (`5b24934`).
+- **Badge de conexão ao trocar de painel:** um painel aberto com o socket já conectado mostrava "Backend Offline" (e bloqueava "Salvar") até o backend reconectar; o estado agora vem do socket compartilhado ao montar, e os listeners do socket não ficam mais órfãos ao sair do painel (`4052b4e`).
 
 ### Firmware
 
