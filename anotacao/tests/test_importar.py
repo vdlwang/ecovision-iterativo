@@ -29,24 +29,25 @@ def test_importa_copia_registra_e_pula_as_ja_importadas(tmp_path):
     fotos = [foto(tmp_path / "f", "a.jpg"), foto(tmp_path / "f", "b.png")]
     saida = tmp_path / "saida"
     r = importar.importar(saida, fotos, "l1", NOMES, conjunto="teste", agora="2026-11-11")
-    assert r == {"importadas": ["l1_a.jpg", "l1_b.png"], "puladas": [], "conjunto": "teste"}
+    assert r == {"importadas": ["l1_a.jpg", "l1_b.png"], "puladas": [],
+                 "conjuntos": {"treino": 0, "teste": 2}}
     # cópia byte a byte: nada foi regravado
     assert (saida / "images" / "l1_a.jpg").read_bytes() == fotos[0].read_bytes()
     estado = formato.ler_estado(saida)
     assert [(n, l["status"], l["lote"], l["conjunto"], l["largura"], l["altura"])
             for n, l in estado.items()] == [("l1_a.jpg", "pendente", "l1", "teste", 40, 20),
                                             ("l1_b.png", "pendente", "l1", "teste", 40, 20)]
-    assert formato.ler_lotes(saida) == {"l1": {"conjunto": "teste", "regiao": None,
-                                               "importado_em": "2026-11-11"}}
+    assert formato.ler_lotes(saida) == {"l1": {"regiao": None, "importado_em": "2026-11-11"}}
     assert yaml.safe_load((saida / "data.yaml").read_text())["names"] == {0: "Garrafa", 1: "Lata"}
 
-    # De novo, com uma nova: a antiga é pulada, o conjunto do lote se mantém
+    # De novo, com uma nova e outro conjunto: as antigas são puladas e não mudam de
+    # conjunto; a nova recebe o pedido (o conjunto é de cada imagem, não do lote)
     fotos.append(foto(tmp_path / "f", "c.jpg"))
-    r = importar.importar(saida, fotos, "l1", NOMES)
+    r = importar.importar(saida, fotos, "l1", NOMES, conjunto="treino")
     assert r["importadas"] == ["l1_c.jpg"] and r["puladas"] == ["l1_a.jpg", "l1_b.png"]
-    assert r["conjunto"] == "teste"
-    with pytest.raises(ValueError, match="não muda"):
-        importar.importar(saida, fotos, "l1", NOMES, conjunto="treino")
+    assert r["conjuntos"] == {"treino": 1, "teste": 0}
+    assert {n: l["conjunto"] for n, l in formato.ler_estado(saida).items()} == {
+        "l1_a.jpg": "teste", "l1_b.png": "teste", "l1_c.jpg": "treino"}
 
 
 def test_outro_lote_mesma_foto_nao_colide(tmp_path):
@@ -111,10 +112,21 @@ def test_link_quando_nao_regrava(tmp_path):
     assert os.path.samefile(gravada, a)
 
 
-def test_sorteio_por_lote_estavel_e_perto_de_um_em_cinco():
-    assert importar.sortear_conjunto("2026-11-11a") == importar.sortear_conjunto("2026-11-11a")
-    testes = sum(importar.sortear_conjunto(f"lote-{i}") == "teste" for i in range(2000))
-    assert 320 <= testes <= 480  # 1 em 5 de 2000 = 400
+def test_sorteio_por_imagem_estavel_e_perto_de_um_em_dez():
+    assert importar.sortear_conjunto("l1_a.jpg") == importar.sortear_conjunto("l1_a.jpg")
+    testes = sum(importar.sortear_conjunto(f"l1_foto-{i}.jpg") == "teste" for i in range(2000))
+    assert 150 <= testes <= 250  # 1 em 10 de 2000 = 200
+
+
+def test_sorteio_mistura_os_conjuntos_num_lote(tmp_path):
+    fotos = [foto(tmp_path / "f", f"{i:02d}.jpg") for i in range(40)]
+    saida = tmp_path / "saida"
+    r = importar.importar(saida, fotos, "l1", NOMES)
+    esperado = {c: sum(importar.sortear_conjunto(f"l1_{i:02d}.jpg") == c for i in range(40))
+                for c in importar.CONJUNTOS}
+    assert r["conjuntos"] == esperado and esperado["teste"] and esperado["treino"]
+    assert all(l["conjunto"] == importar.sortear_conjunto(n)
+               for n, l in formato.ler_estado(saida).items())
 
 
 def test_main_com_pasta(tmp_path, capsys):
@@ -124,7 +136,7 @@ def test_main_com_pasta(tmp_path, capsys):
     saida = tmp_path / "saida"
     importar.main([str(tmp_path / "f"), "-o", str(saida), "--lote", "l1", "--regiao",
                    "0", "0.1", "1", "0.9"])
-    assert "2 imagem(ns) importada(s)" in capsys.readouterr().out
+    assert "2 imagem(ns) importada(s) (" in capsys.readouterr().out
     assert formato.ler_lotes(saida)["l1"]["regiao"] == [0.0, 0.1, 1.0, 0.9]
     with pytest.raises(SystemExit):
         importar.main([str(tmp_path / "f"), "-o", str(saida)])  # sem --lote

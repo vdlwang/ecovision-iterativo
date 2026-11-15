@@ -23,7 +23,7 @@ LIMIARES = {"confianca": 0.2, "confianca_classe": 0.35}
 
 def criar(saida, nomes=("Garrafa", "Lata"), imagens=("a.jpg",)):
     formato.preparar(saida, nomes)
-    formato.registrar(saida, [(n, 100, 50) for n in imagens], "l1", {"conjunto": "treino"})
+    formato.registrar(saida, [(n, 100, 50, "treino") for n in imagens], "l1", {})
     return saida
 
 
@@ -89,22 +89,26 @@ def test_banco_de_outra_versao_e_recusado(tmp_path):
 
 def test_registrar_lote_estado_e_colisoes(tmp_path):
     formato.preparar(tmp_path, ["Garrafa"])
-    lote = {"conjunto": "teste", "regiao": [0, 0.1, 1, 0.9], "importado_em": "ontem"}
-    assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20), ("l1_b.png", 40, 20)],
+    lote = {"regiao": [0, 0.1, 1, 0.9], "importado_em": "ontem"}
+    assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20, "teste"),
+                                        ("l1_b.png", 40, 20, "treino")],
                              "l1", lote, agora="hoje") == ["l1_a.jpg", "l1_b.png"]
-    # já registrada: pulada, com o status mantido
-    assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20)], "l1", lote) == []
+    # já registrada: pulada, com o status e o conjunto mantidos
+    assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20, "treino")], "l1", lote) == []
     assert formato.ler_lotes(tmp_path) == {"l1": lote}
     estado = formato.ler_estado(tmp_path)
     assert list(estado) == ["l1_a.jpg", "l1_b.png"]
     assert estado["l1_a.jpg"] == {"nome": "l1_a.jpg", "status": "pendente", "lote": "l1",
                                   "conjunto": "teste", "voto": None, "motivo": None,
                                   "largura": 40, "altura": 20}
+    assert estado["l1_b.png"]["conjunto"] == "treino"   # o conjunto é de cada imagem
     with pytest.raises(ValueError, match="colide"):
-        formato.registrar(tmp_path, [("l1_a.png", 40, 20)], "l1")
+        formato.registrar(tmp_path, [("l1_a.png", 40, 20, "treino")], "l1")
+    with pytest.raises(ValueError, match="conjunto"):
+        formato.registrar(tmp_path, [("l1_c.png", 40, 20, "validacao")], "l1")
     # imagem só entra num lote existente (criado pelo importar.py)
     with pytest.raises(ValueError, match="lote 'l9' não existe"):
-        formato.registrar(tmp_path, [("l9_a.jpg", 40, 20)], "l9")
+        formato.registrar(tmp_path, [("l9_a.jpg", 40, 20, "treino")], "l9")
     assert "l9_a.jpg" not in formato.ler_estado(tmp_path)
     with pytest.raises(ValueError, match="colide"):
         formato.conferir_colisoes({}, ["x.jpg", "x.png"])

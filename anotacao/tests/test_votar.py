@@ -27,8 +27,8 @@ def perto(caixa, k, conf=None):
 def criar(saida, lotes={"l1": "treino"}, por_lote=("x.jpg",)):
     formato.preparar(saida, NOMES)
     for lote, conjunto in lotes.items():
-        formato.registrar(saida, [(f"{lote}_{n}", 100, 50) for n in por_lote], lote,
-                          {"conjunto": conjunto, "regiao": None})
+        formato.registrar(saida, [(f"{lote}_{n}", 100, 50, conjunto) for n in por_lote], lote,
+                          {"regiao": None})
     return saida
 
 
@@ -291,19 +291,34 @@ def test_caixas_da_revisao_consenso_so_com_todos_na_mesma_classe():
         (None, 0.8, [(0, 1), (1, 1)])]                  # dois de três: conflito
 
 
-def test_teste_sem_classe_e_classe_atribuida(tmp_path):
+def test_teste_sem_pre_anotacao(tmp_path):
     saida = criar(tmp_path, {"t1": "teste"})
     concordam(saida, "t1_x.jpg")
     votar.votar(saida, TRIO)
+    # a união sem classe fica gravada no voto, para comparar com a revisão...
+    assert len(formato.ler_voto(saida, "t1_x.jpg")["caixas"]) == 2
     base = formato.voto_para_revisao(saida, "t1_x.jpg", formato.nomes_classes(saida))
-    # o revisor do teste não vê classe, confiança nem quem propôs (seção 4)
-    assert all(c["id"] is None and c["nome"] is None and c["conf"] is None
-               and c["anotadores"] == [] for c in base["caixas"])
-    assert all(c["sugestoes"] == [] for c in base["caixas"])
-    caixas = [{"id": 1, "caixa": c["caixa"], "origem": "voto", "indice": c["indice"]}
-              for c in base["caixas"]]
-    registro = formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg", caixas=caixas), "t")
-    assert {c["desfecho"] for c in registro["caixas"]} == {"classe_atribuida"}
+    # ...mas a revisão do teste parte do zero (seção 4): nenhuma caixa, e todas
+    # as caixas das propostas, também as visíveis, viram candidatas do clique
+    assert base["caixas"] == []
+    assert {c["origem"] for c in base["candidatas"]} == {"proposta"}
+    assert len(base["candidatas"]) == 2   # as quase iguais dos três viram uma
+    uma = base["candidatas"][0]
+    caixa = {"id": 1, "caixa": uma["caixa"], "origem": "proposta", "anotador": uma["anotador"],
+             "indice": uma["indice"]}
+    registro = formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg", caixas=[caixa]), "t")
+    assert [c["desfecho"] for c in registro["caixas"]] == ["adicionada"]
+
+
+def test_teste_recusa_caixa_do_voto(tmp_path):
+    saida = criar(tmp_path, {"t1": "teste"})
+    concordam(saida, "t1_x.jpg")
+    votar.votar(saida, TRIO)
+    caixa = formato.ler_voto(saida, "t1_x.jpg")["caixas"][0]["caixa"]
+    with pytest.raises(formato.RevisaoInvalida, match="sem pré-anotação"):
+        formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg", caixas=[
+            {"id": 1, "caixa": caixa, "origem": "voto", "indice": 0}]), "t")
+    assert formato.ler_estado(saida)["t1_x.jpg"]["status"] == "pendente"
 
 
 @pytest.mark.parametrize("caixa, trecho", [

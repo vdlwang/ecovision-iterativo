@@ -35,12 +35,12 @@ from PIL import Image
 EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 STATUS = ("pendente", "revisada", "descartada")
 CONJUNTOS = ("treino", "teste")
-# aprovada e falhou: o voto NooN, nos lotes de treino; uniao: a união das caixas
-# dos anotadores, sem classe, nos de teste (OBJETIVO.md, seção 4)
+# aprovada e falhou: o voto NooN, nas imagens de treino; uniao: a união das
+# caixas dos anotadores, sem classe, nas de teste (OBJETIVO.md, seção 4)
 VOTOS = ("aprovada", "falhou", "uniao")
 ORIGENS = ("voto", "proposta", "candidata")  # de onde vem uma caixa da revisão
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 4
+VERSAO_ESQUEMA = 5
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -57,7 +57,6 @@ CREATE TABLE classes (
 );
 CREATE TABLE lotes (
     nome TEXT PRIMARY KEY,
-    conjunto TEXT NOT NULL CHECK (conjunto IN {CONJUNTOS}),
     regiao TEXT,
     importado_em TEXT NOT NULL
 );
@@ -68,6 +67,7 @@ CREATE TABLE imagens (
     largura INTEGER NOT NULL CHECK (largura > 0),
     altura INTEGER NOT NULL CHECK (altura > 0),
     lote TEXT NOT NULL REFERENCES lotes (nome),
+    conjunto TEXT NOT NULL CHECK (conjunto IN {CONJUNTOS}),
     status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN {STATUS}),
     voto TEXT CHECK (voto IN {VOTOS}),
     motivo TEXT,
@@ -370,12 +370,11 @@ def nomes_classes(saida):
 # --- lotes e imagens --------------------------------------------------------
 
 def ler_lotes(saida):
-    """{lote: {conjunto, regiao, importado_em}}; {} sem banco."""
+    """{lote: {regiao, importado_em}}; {} sem banco."""
     if not existe(saida):
         return {}
     with abrir(saida) as con:
-        return {r["nome"]: {"conjunto": r["conjunto"],
-                            "regiao": None if r["regiao"] is None else json.loads(r["regiao"]),
+        return {r["nome"]: {"regiao": None if r["regiao"] is None else json.loads(r["regiao"]),
                             "importado_em": r["importado_em"]}
                 for r in con.execute("SELECT * FROM lotes ORDER BY nome")}
 
@@ -389,8 +388,8 @@ def ler_estado(saida):
         return {}
     with abrir(saida) as con:
         return {r["nome"]: dict(r) for r in con.execute(
-            "SELECT i.nome, i.status, i.lote, l.conjunto, i.voto, i.motivo, i.largura, i.altura "
-            "FROM imagens i JOIN lotes l ON l.nome = i.lote ORDER BY i.id")}
+            "SELECT nome, status, lote, conjunto, voto, motivo, largura, altura "
+            "FROM imagens ORDER BY id")}
 
 
 def conferir_colisoes(existentes, novos):
@@ -411,11 +410,12 @@ def conferir_colisoes(existentes, novos):
 
 def registrar(saida, imagens, lote, dados_lote=None, agora=None):
     """
-    Registra as imagens [(nome, largura, altura)] como pendentes, no lote dado,
-    numa transação; as já registradas são puladas. Toda imagem é de um lote,
-    que diz o conjunto (treino ou teste): só entra pelo importar.py. dados_lote
-    {conjunto, regiao, importado_em} cria o lote se ele não existe; sem ele, o
-    lote tem de existir. Devolve os nomes registrados.
+    Registra as imagens [(nome, largura, altura, conjunto)] como pendentes,
+    no lote dado, numa transação; as já registradas são puladas (e o conjunto
+    delas não muda). Toda imagem é de um lote, a importação que a trouxe (só
+    entra pelo importar.py); o conjunto (treino ou teste) é de cada imagem.
+    dados_lote {regiao, importado_em} cria o lote se ele não existe; sem ele,
+    o lote tem de existir. Devolve os nomes registrados.
     """
     agora = agora or agora_iso()
     with abrir(saida) as con:
@@ -423,20 +423,24 @@ def registrar(saida, imagens, lote, dados_lote=None, agora=None):
             if dados_lote is None:
                 if con.execute("SELECT 1 FROM lotes WHERE nome = ?", (lote,)).fetchone() is None:
                     raise ValueError(f"lote '{lote}' não existe: importe as imagens pelo "
-                                     "importar.py, que cria o lote com o conjunto")
+                                     "importar.py, que cria o lote")
             else:
-                con.execute("INSERT OR IGNORE INTO lotes (nome, conjunto, regiao, importado_em) "
-                            "VALUES (?, ?, ?, ?)",
-                            (lote, dados_lote["conjunto"],
+                con.execute("INSERT OR IGNORE INTO lotes (nome, regiao, importado_em) "
+                            "VALUES (?, ?, ?)",
+                            (lote,
                              None if dados_lote.get("regiao") is None
                              else json.dumps(dados_lote["regiao"]),
                              dados_lote.get("importado_em") or agora))
             existentes = {r[0] for r in con.execute("SELECT nome FROM imagens")}
-            conferir_colisoes(existentes, [n for n, _, _ in imagens])
-            novas = [(n, Path(n).stem, int(w), int(h), lote, agora)
-                     for n, w, h in imagens if n not in existentes]
-            con.executemany("INSERT INTO imagens (nome, stem, largura, altura, lote, criada_em) "
-                            "VALUES (?, ?, ?, ?, ?, ?)", novas)
+            conferir_colisoes(existentes, [n for n, *_ in imagens])
+            fora = sorted({c for *_, c in imagens} - set(CONJUNTOS))
+            if fora:
+                raise ValueError(f"conjunto deve ser um de {', '.join(CONJUNTOS)}: "
+                                 f"{', '.join(map(str, fora))}")
+            novas = [(n, Path(n).stem, int(w), int(h), lote, c, agora)
+                     for n, w, h, c in imagens if n not in existentes]
+            con.executemany("INSERT INTO imagens (nome, stem, largura, altura, lote, conjunto, "
+                            "criada_em) VALUES (?, ?, ?, ?, ?, ?, ?)", novas)
     return [n for n, *_ in novas]
 
 
@@ -449,7 +453,7 @@ def dentro_da_regiao(caixa, regiao):
 
 
 def _imagem(con, nome):
-    return con.execute("SELECT id, nome, status, voto FROM imagens WHERE nome = ?",
+    return con.execute("SELECT id, nome, status, voto, conjunto FROM imagens WHERE nome = ?",
                        (nome,)).fetchone()
 
 
@@ -611,8 +615,8 @@ COM_ROTULO = "(i.status = 'revisada' OR (i.status = 'pendente' AND i.voto = 'apr
 LISTAS = {
     # OBJETIVO.md, seção 2: o treino recebe as aprovadas e as revisadas; o
     # teste, só as revisadas (o voto não roda no teste)
-    "treino.txt": f"l.conjunto = 'treino' AND {COM_ROTULO}",
-    "teste.txt": "l.conjunto = 'teste' AND i.status = 'revisada'",
+    "treino.txt": f"i.conjunto = 'treino' AND {COM_ROTULO}",
+    "teste.txt": "i.conjunto = 'teste' AND i.status = 'revisada'",
     "revisadas.txt": "i.status = 'revisada'",
 }
 
@@ -621,15 +625,14 @@ def exportar_listas(con, saida):
     """
     treino.txt, teste.txt, revisadas.txt e o data.yaml, que aponta para as
     duas primeiras: o val do treino do YOLO é a base de teste, anotada por
-    humanos sem pré-anotação de classe (OBJETIVO.md, seção 4). Sem imagem de
+    humanos sem pré-anotação (OBJETIVO.md, seção 4). Sem imagem de
     teste revisada, o teste.txt fica vazio e não dá para treinar, de propósito.
     """
     saida = Path(saida)
     for arquivo, condicao in LISTAS.items():
         # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
         nomes = [f"./images/{r[0]}" for r in con.execute(
-            "SELECT i.nome FROM imagens i JOIN lotes l ON l.nome = i.lote "
-            f"WHERE {condicao} ORDER BY i.id")]
+            f"SELECT i.nome FROM imagens i WHERE {condicao} ORDER BY i.id")]
         gravar_atomico(saida / arquivo, "".join(n + "\n" for n in nomes))
     # Sem 'path': o Ultralytics usa a pasta do data.yaml
     gravar_atomico(saida / "data.yaml", yaml.safe_dump(
@@ -782,7 +785,7 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
     ser com revotar.
 
     decidir(propostas, conjunto) recebe as propostas vigentes, na ordem de
-    anotadores, e o conjunto do lote, e devolve (resultado, motivo, caixas,
+    anotadores, e o conjunto da imagem, e devolve (resultado, motivo, caixas,
     limiares): resultado em VOTOS; motivo só em "falhou"; caixas [(nome da
     classe ou None, confianca, caixa normalizada, membros)], com membros
     [(posição do anotador, índice da caixa na proposta dele)]; limiares, o de
@@ -804,9 +807,8 @@ def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None
         with transacao(con):
             ids = {n: i for i, n in _nomes(con).items()}
             imagens = con.execute(
-                "SELECT i.id, i.nome, l.conjunto FROM imagens i "
-                "JOIN lotes l ON l.nome = i.lote WHERE i.status = 'pendente' "
-                "ORDER BY i.id").fetchall()
+                "SELECT id, nome, conjunto FROM imagens WHERE status = 'pendente' "
+                "ORDER BY id").fetchall()
             vigentes = [{p["imagem"]: p for p in _propostas(con, VIGENTE, (a,))}
                         for a in anotadores]
             votacao = None
@@ -927,30 +929,45 @@ def voto_para_revisao(saida, nome, nomes):
       sugestoes lista as classes que eles propuseram, uma por classe:
       [{id, nome, anotadores: [{anotador, conf}]}], das propostas por mais
       anotadores para menos e, no empate, da maior confiança; só classes do
-      data.yaml, mesmo abaixo de confianca_classe. No teste (união), sem
-      classe, confiança, anotadores nem sugestões (seção 4);
-    - candidatas: [{anotador, indice, conf, caixa}], as caixas abaixo do
-      limiar de leitura de todas as propostas, sem as quase iguais a uma mais
-      confiante, para a caixa por clique.
+      data.yaml, mesmo abaixo de confianca_classe. No teste, nenhuma: a
+      imagem abre sem pré-anotação (seção 4), e a união gravada pelo voto
+      não vai à página;
+    - candidatas: [{anotador, indice, origem, conf, caixa}], para a caixa por
+      clique, sem as quase iguais a uma mais confiante: as caixas abaixo do
+      limiar de leitura de todas as propostas (origem "candidata") e, no
+      teste, também uma por objeto da união: a caixa mais confiante entre as
+      dos anotadores que a formaram (origem "proposta"), porque o revisor
+      acrescenta cada objeto pelo clique.
     """
     if not existe(saida):
         return None
     ids = {n: i for i, n in nomes.items()}
     with abrir(saida) as con:
-        imagem = con.execute("SELECT i.id, l.conjunto FROM imagens i JOIN lotes l "
-                             "ON l.nome = i.lote WHERE i.nome = ?", (nome,)).fetchone()
+        imagem = con.execute("SELECT id, conjunto FROM imagens WHERE nome = ?",
+                             (nome,)).fetchone()
         voto = None if imagem is None else _voto_vigente(con, imagem["id"])
         if voto is None:
             return None
         _, propostas, caixas_voto = _contexto_voto(con, voto)
-    uniao = voto["resultado"] == "uniao"
+    teste = imagem["conjunto"] == "teste"
     por_anotador = {p["anotador"]: p for p, _ in propostas}
-    candidatas = []
+    def candidata(anotador, k, origem):
+        _, conf, caixa = por_anotador[anotador]["caixas"][k]
+        return {"anotador": anotador, "indice": k, "origem": origem, "conf": conf,
+                "caixa": [round(v, 6) for v in caixa]}
+
+    # No teste, um objeto da união é uma candidata só (as caixas dos anotadores
+    # para o mesmo objeto se sobrepõem menos que IOU_CANDIDATA_REPETIDA)
+    def confianca(membro):
+        anotador, k = membro
+        return por_anotador[anotador]["caixas"][k][1]
+
+    candidatas = [candidata(*max(c["membros"], key=confianca), "proposta")
+                  for c in caixas_voto if c["membros"]] if teste else []
     for proposta, limiar in propostas:
-        for k, (_, conf, caixa) in enumerate(proposta["caixas"]):
+        for k, (_, conf, _) in enumerate(proposta["caixas"]):
             if conf < limiar:
-                candidatas.append({"anotador": proposta["anotador"], "indice": k, "conf": conf,
-                                   "caixa": [round(v, 6) for v in caixa]})
+                candidatas.append(candidata(proposta["anotador"], k, "candidata"))
     unicas = []
     for c in sorted(candidatas, key=lambda c: c["conf"], reverse=True):
         if all(_iou(c["caixa"], u["caixa"]) < IOU_CANDIDATA_REPETIDA for u in unicas):
@@ -969,9 +986,8 @@ def voto_para_revisao(saida, nome, nomes):
     return {
         "id": voto["id"], "resultado": voto["resultado"], "motivo": voto["motivo"],
         "conjunto": imagem["conjunto"],
-        "caixas": [dict(caixa_json(None, None, None, c["caixa"]), indice=c["indice"],
-                        anotadores=[], sugestoes=[]) if uniao else
-                   dict(caixa_json(c["classe_id"], nomes.get(c["classe_id"]), c["conf"],
+        "caixas": [] if teste else
+                  [dict(caixa_json(c["classe_id"], nomes.get(c["classe_id"]), c["conf"],
                                    c["caixa"]), indice=c["indice"],
                         anotadores=sorted({a for a, _ in c["membros"]}),
                         sugestoes=[] if c["classe_id"] is not None else sugestoes(c["membros"]))
@@ -1006,7 +1022,7 @@ def _inteiro(v):
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def validar_caixas(caixas, nomes, propostas, caixas_voto):
+def validar_caixas(caixas, nomes, propostas, caixas_voto, teste=False):
     """
     Confere as caixas finais vindas da página e devolve-as como linhas de
     caixas_revisao: [(classe_id, caixa, origem, voto_indice, proposta_id,
@@ -1019,6 +1035,8 @@ def validar_caixas(caixas, nomes, propostas, caixas_voto):
       candidata (abaixo dele): 'adicionada'.
     Enquanto a página não move caixas, as coordenadas têm de ser as da origem.
     propostas: [(proposta, limiar)] do voto; caixas_voto: as de _contexto_voto.
+    teste: a imagem é de teste, revisada sem pré-anotação; a página não
+    recebeu as caixas do voto, e uma caixa com origem "voto" é recusada.
     """
     if not isinstance(caixas, list):
         raise RevisaoInvalida("'caixas' deve ser uma lista")
@@ -1039,6 +1057,9 @@ def validar_caixas(caixas, nomes, propostas, caixas_voto):
             raise RevisaoInvalida(f"caixa {i}: origem {origem!r} desconhecida")
         if not _inteiro(indice):
             raise RevisaoInvalida(f"caixa {i}: indice {indice!r} inválido")
+        if origem == "voto" and teste:
+            raise RevisaoInvalida(f"caixa {i}: imagem de teste é revisada sem pré-anotação; "
+                                  "as caixas vêm do clique, não do voto")
         if origem == "voto":
             if indice not in do_voto:
                 raise RevisaoInvalida(f"caixa {i}: o voto não tem a caixa {indice}")
@@ -1125,7 +1146,7 @@ def revisar(saida, nome, pedido, agora):
             if pedido["acao"] == "salvar":
                 _, propostas, caixas_voto = _contexto_voto(con, voto)
                 caixas = validar_caixas(pedido.get("caixas", []), _nomes(con), propostas,
-                                        caixas_voto)
+                                        caixas_voto, imagem["conjunto"] == "teste")
             _gravar_revisao(con, imagem, voto["id"], pedido["acao"], agora, tempo, None, caixas)
         _exportar_rotulo(con, saida, _imagem(con, nome))
         exportar_listas(con, saida)

@@ -9,14 +9,15 @@ O sistema completo que este repositório persegue: as imagens da própria esteir
 ## 1. Fluxo (diagrama v3)
 
 ```
-esteira → YOLO → banco (imagens + logs) → treino ou teste? (por lote, 1 em cada 5 para o teste)
+esteira → YOLO → banco (imagens + logs) → treino ou teste? (por imagem, 1 em cada 10 para o teste)
   treino → 3 anotadores (em lote, no dia seguinte) → voto 3oo3
              passou     → base de treino (caixas de consenso)
              não passou → revisão humana → base de treino (caixas corrigidas)
              (+ auditoria: 5% das aprovadas também vão à revisão)
            base de treino → fine-tuning do YOLO
-  teste  → segmentação sem classe (união das caixas dos 3 anotadores)
-           → revisão humana obrigatória → base de teste → avaliação do YOLO (com a base externa)
+  teste  → 3 anotadores → união das caixas, sem classe (gravada, não mostrada)
+           → revisão humana sem pré-anotação (caixa por clique) → base de teste
+           → avaliação do YOLO (com a base externa)
 ```
 
 O código do voto aceita N anotadores, mas cada um a mais custa uma integração e baixa a taxa de aprovação.
@@ -26,7 +27,7 @@ O código do voto aceita N anotadores, mas cada um a mais custa uma integração
 O framework (T1) grava as propostas de cada anotador separadas das anotações finais, e o status de cada imagem, num banco SQLite (`anotacoes.sqlite`, desde 2026-11-13; antes, `imagens.csv`), que é a fonte do estado. A tabela `imagens` já tem as colunas do sistema completo:
 
 - `lote`: sessão de captura de onde a imagem veio.
-- `conjunto`: `treino` ou `teste`, sorteado por lote na entrada e nunca mais alterado.
+- `conjunto`: `treino` ou `teste`, sorteado por imagem na entrada (1 em cada 10 para o teste, decisão 7) e nunca mais alterado.
 - `voto`: `passou`, `falhou` ou vazio (teste, ou ainda não votada); `motivo` diz por que falhou (contagem diferente, classe diferente, IoU baixo, imagem vazia).
 - `status`: além de `pendente`, `revisada` e `descartada` (do framework), `aprovada` (voto, sem humano).
 
@@ -51,13 +52,12 @@ Cada anotador entrega suas caixas já filtradas pelo próprio limiar e pelo NMS,
 
 ## 4. Viés de automação no teste
 
-O framework terá o modo "sem pré-anotação" (o revisor anota do zero), que mede o viés e dá o tempo de anotação manual, a linha de base do ganho.
+Pesa mais no teste: se o revisor parte das propostas dos anotadores, o viés vai para a base que mede o YOLO e os próprios anotadores. Por isso o teste é revisado **sem pré-anotação** (decisão 5, revista em 2026-11-15; T9):
 
-Pesa mais no teste: se o revisor parte das propostas dos anotadores, o viés vai para a base que mede o YOLO e os próprios anotadores. Por isso o teste chega **segmentado e sem classe** (decisão 5):
-
-- As caixas são a união das caixas dos três anotadores, com as sobrepostas (IoU ≥ 0,5) fundidas numa só. A união favorece o recall: sobra caixa para remover, falta pouca para desenhar.
-- A página não mostra classe, confiança nem quem propôs. O revisor só seleciona cada caixa, dá a classe (`1`–`9`) e ajusta, remove ou acrescenta caixas.
-- Sem classe proposta, a classe do teste não herda o viés. A localização ainda herda um pouco; o registro guarda quantas caixas foram ajustadas, removidas e acrescentadas, o que mede esse resto.
+- A imagem de teste abre **sem nenhuma caixa**, e a página não mostra classe, confiança nem quem propôs, nem pelas camadas de propostas. O revisor acrescenta cada objeto que vê pela caixa por clique (`N` e um clique nele) e dá a classe.
+- As candidatas do clique são, por objeto que os anotadores acharam, a caixa mais confiante do grupo da união (as sobrepostas, IoU ≥ 0,5, de anotadores diferentes), mais as caixas abaixo do limiar de leitura. Um objeto que nenhum anotador cobre leva ao descarte da imagem, como no treino (decisão 12); se isso for frequente, o desenho à mão volta.
+- O `votar.py` continua gravando a união sem classe das caixas dos anotadores, que não vai à página: comparada com a revisão, mede quantos objetos os anotadores perderam ou inventaram, sem que o revisor a tenha visto.
+- Sem caixa nem classe mostradas, o revisor decide o que é objeto e qual é a classe. A localização ainda vem dos anotadores (ele só escolhe entre as caixas deles), então o viés de localização não é medido; o tempo registrado é o do modo por clique, não o da anotação manual. Os dois ficam para quando houver desenho à mão.
 
 ## 5. Escolha dos anotadores
 
@@ -435,7 +435,7 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 ### Voto e revisão
 
 - **O voto usa a classe do anotador, mesmo abaixo de 0,35** (`sugerida`); a classe só é escondida do revisor, quando a imagem vai à revisão.
-- **Desvio treino/teste antes do voto**: lote de teste não é votado; vai à união sem classe e à revisão obrigatória (seção 4).
+- **Desvio treino/teste antes do voto**: imagem de teste não é votada; o voto grava a união sem classe, e ela vai à revisão obrigatória, sem pré-anotação (seção 4).
 - **Auditoria cega**: as aprovadas sorteadas (5%) entram na fila com o mesmo status das reprovadas; a marca de auditoria fica num campo que a página não mostra.
 - **Toda revisão parte de um voto** (2026-11-15): imagem não votada não é revisável, e o `--aceitar` (proposta de um anotador direto como rótulo) saiu.
 
@@ -446,12 +446,12 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | T1 | [~] | **Framework de anotação e página de revisão** (escopo atual): anotadores intercambiáveis gravando propostas, página para ver, corrigir e editar, registro da revisão. Plano: [`anotacao/PLANO-REVISAO.md`](anotacao/PLANO-REVISAO.md) | — | as do plano |
 | T2 | [~] `b70ac8a` | **Escolha dos anotadores** (seção 5): linha de base do Grounding DINO feita e refeita com o vidro em três classes e os rótulos corrigidos; 60 classes e classe genérica medidas (2026-11-10); cobertura sem classe medida e limiar da anotação em 0,20 (2026-11-11); interface genérica de detector, propostas no formato 2 e `avaliar.py` sobre propostas gravadas, com a cobertura, as faixas e o clique (seção 6, 2026-11-11); OWLv2 como anotador, medido (2026-11-12: classe 75% e material 89%, contra 57% e 65% do Grounding DINO); vários prompts por classe, adotados (2026-11-13: classe do DINO 57% → 63%, do OWLv2 76% → 79%, imagens completas 73% → 86% e 85% → 92%); YOLO da equipe como terceiro anotador, medido (2026-11-13: classe 87%, mas cobre só 43% dos objetos); ficam como alternativas a híbrida com SigLIP e o YOLOE | T1 (interface de anotador) | tabelas do `avaliar.py` |
 | T3 | [x] `4341c97` | **`avaliar.py --voto`**: taxa de aprovação e fração das aprovadas corretas por inteiro, para escolher o trio; lê as propostas gravadas dos N anotadores (seção 6). Feito: erro conjunto de classe de um par (`--comparar`, 2026-11-12, seção 5); `--voto` com o NooN estrito por imagem e o consenso por caixa (2026-11-13). Medido: por imagem, 1–5% de aprovação com qualquer YOLO; por caixa, 97–99% certas em ~29% dos objetos. Regra: por imagem (decisão 18) | T2 | pytest com caixas sintéticas; tabelas |
-| T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens) | — | teste com a esteira |
-| T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o registra (hoje no banco SQLite), com `lote`, o sorteio treino/teste (1 lote em 5) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
+| T4 | [ ] | **Captura na esteira**: o backend grava imagens e logs por lote (banco do diagrama). Ver [resolução e origem das imagens](#resolução-e-origem-das-imagens). Requisito desde a decisão 7 revista (2026-11-15): duas capturas quaisquer não podem ser próximas demais (no tempo e no conteúdo), porque o sorteio treino/teste é por imagem e quadros quase iguais vazariam cenas entre as bases | — | teste com a esteira |
+| T5 | [x] `ab8e46d` | **`importar.py`**: importa um lote para o armazenamento comum (`images/`) e o registra (hoje no banco SQLite), com `lote`, o sorteio treino/teste (1 lote em 5; por imagem, 1 em 10, desde a decisão 7 revista em 2026-11-15) e a região de interesse do lote; sem pré-processamento além do nome único e do giro pelo EXIF (seção 6); o `anotar.py` deixa de copiar. Não depende do T4: serve às fotos de validação e de celular | T1 | pytest |
 | T6 | [x] | **`votar.py`**: aplica o 3oo3 (seção 3) só nos lotes de treino e com a classe `sugerida`, grava `labels/` das aprovadas com as caixas de consenso, `voto`/`motivo`, `treino.txt`, `teste.txt` e `data.yaml`; vota só imagens com proposta dos N anotadores e registra quais propostas usou; grava no banco SQLite (fase 3b do T1, feita), numa transação. Feito (2026-11-14): tabelas `votacoes`, `votos`, `votos_propostas` e `caixas_voto` (esquema v3, sem migração: banco de outra versão é recusado e recriado; `imagens.lote` obrigatório, toda imagem entra pelo `importar.py`); a aprovada continua `pendente` com `voto = aprovada`, e a revisão humana vale mais que o voto; vota de novo só imagem com proposta nova (ou `--revotar`); `data.yaml` com `val: teste.txt` (a base de teste, anotada por humanos, é a validação do treino; sem ela, não se treina). Conferido na cópia de `tcc-0CF` com Grounding DINO e YOLO: o mesmo resultado do `avaliar.py --voto` (1 de 24 aprovada) | T1, T3, T5 | pytest do voto com caixas sintéticas |
 | T7 | [x] | **Revisão do voto na página**: fila só das `falhou`; caixas de consenso e, separadas, as que só um ou dois propuseram, com quem propôs. Feito (2026-11-15): a revisão sempre parte do voto vigente (sem voto, 409); a fila padrão, "a revisar", tem as `falhou` e as de teste, com filtros para as aprovadas, as sem voto, as revisadas e as descartadas; a edição começa com uma caixa por objeto (a união das caixas dos anotadores): consenso, se todos a acharam com a mesma classe, ou conflito, sem classe, com as classes propostas como sugestões na busca (atalhos 1–3, uma por classe, com quem propôs); candidatas de todos os anotadores, sem as repetidas; cada caixa da revisão registra a origem (caixa do voto, proposta ou candidata). Resolve as três pendências antigas (base no primeiro anotador, ordem misturando escalas na edição, registro só da base). Esquema v4 | T1, T6 | pytest da API; teste no Chrome headless |
 | T8 | [ ] | **Auditoria**: amostra das aprovadas (ex.: 5%) na fila de revisão, sem o revisor saber | T6, T7 | pytest |
-| T9 | [~] | **Modo de teste**: segmentado e sem classe (padrão no teste, seção 4) e sem pré-anotação. Feito (2026-11-15): o `votar.py` grava a união sem classe das caixas dos anotadores nos lotes de teste, e a página a mostra sem classe, confiança nem anotador (nem na fila nem nas camadas). Falta o modo sem pré-anotação | T1, T5 | pytest; teste manual |
+| T9 | [x] | **Modo de teste**: sem pré-anotação (seção 4). Feito (2026-11-15): o `votar.py` grava a união sem classe das caixas dos anotadores nas imagens de teste, que não vai à página; a imagem de teste abre sem caixas, e o revisor acrescenta cada objeto pela caixa por clique, com uma candidata por objeto da união mais as abaixo do limiar, sem classe, confiança nem anotador; o servidor recusa caixa do voto numa imagem de teste. Sorteio treino/teste por imagem, 1 em 10 (decisão 7 revista; esquema v5, `conjunto` em `imagens`). Desenho à mão, para a linha de base manual, fica com a decisão 12 | T1, T5 | pytest; teste no Chrome headless |
 | T10 | [ ] | **`metricas.py`** (RF13): taxa de aprovação e motivos, erro das aprovadas pela auditoria, precisão e recall de cada anotador frente à revisão, tempo por imagem e por objeto, taxa de cada tipo de correção | T1, T6, T8 | pytest com registros sintéticos |
 | T11 | [ ] | **Novas classes pela página** (RF14): acrescenta no fim do `classes.yaml` e regenera o `data.yaml` | T1 | pytest; teste manual |
 | T12 | [ ] | **Fine-tuning do YOLO** com a base de treino; versões fixadas antes (RNF07). O YOLO retreinado no ciclo n é o terceiro anotador do voto no ciclo n+1 (decisão 17). Treinar também o **RF-DETR** (Nano/Small, Apache 2.0) na mesma base, para comparar com o YOLO: é de conjunto fechado (não serve de anotador), feito para transferir a domínios novos, e evita a AGPL da Ultralytics. XL e 2XL ficam fora (licença PML) | T6, T7 | métricas do treino |
@@ -481,9 +481,9 @@ As decisões que só valem para o framework (ferramenta própria, fonte das clas
 | # | Questão | Decisão |
 |---|---|---|
 | 4 | ~~Um anotador ou vários?~~ | **Decidido (2026-10-28)**: três anotadores com voto 3oo3; quem não passa vai à revisão humana (seção 3). |
-| 5 | ~~O teste chega ao revisor com as propostas dos anotadores ou sem elas?~~ | **Decidido (2026-10-28)**: segmentado e sem classe. Os objetos chegam delimitados para poupar a seleção; a classe é do revisor (seção 4). |
+| 5 | ~~O teste chega ao revisor com as propostas dos anotadores ou sem elas?~~ | **Decidido (2026-10-28)**: segmentado e sem classe. **Revisto (2026-11-15)**: sem pré-anotação; a imagem abre sem caixas, e o revisor acrescenta cada objeto pelo clique nas candidatas dos anotadores e dá a classe. A união continua gravada pelo voto, para comparar (seção 4). |
 | 6 | ~~O voto exige a mesma classe ou só o mesmo material?~~ | **Decidido (2026-10-28)**: mesma classe. Por material aprovaria mais, mas a imagem ficaria sem classe definida para o treino. |
-| 7 | ~~Proporção treino/teste e unidade do sorteio~~ | **Decidido (2026-10-28)**: sorteio por lote de captura, 1 lote em cada 5 para o teste. Frames seguidos da esteira são quase iguais; sortear imagem a imagem vazaria cenas entre os conjuntos. |
+| 7 | ~~Proporção treino/teste e unidade do sorteio~~ | **Decidido (2026-10-28)**: sorteio por lote de captura, 1 lote em cada 5 para o teste. **Revisto (2026-11-15)**: sorteio por imagem, 1 em cada 10 para o teste, pelo hash do nome; o lote passa a ser só a importação (com a região de interesse). O vazamento de cenas entre treino e teste, que motivava o sorteio por lote, passa a ser evitado na captura (T4): duas capturas quaisquer não podem ser próximas demais. |
 | 13 | ~~Onde as imagens ficam e quem as copia?~~ | **Decidido (2026-11-11)**: o `importar.py` grava uma cópia de cada imagem em `images/`, na resolução nativa e sem normalizar nem recortar (seção 6), e todos os anotadores leem de lá; link em vez de cópia se o espaço pesar. Sem hash nem análise de conteúdo: a fonte é uma só, a webcam da esteira. |
 | 14 | ~~Como os anotadores são definidos e medidos?~~ | **Decidido (2026-11-11)**: por `anotadores.yaml`, sobre uma classe base de detector que só exige a inferência; o `avaliar.py` mede propostas gravadas, não roda modelo (seção 6). |
 | 15 | ~~A classe abaixo de 0,35 entra no voto?~~ | **Decidido (2026-11-11)**: sim, a `sugerida`; só é escondida do revisor. Candidatas do clique vêm de um anotador só, por enquanto. |

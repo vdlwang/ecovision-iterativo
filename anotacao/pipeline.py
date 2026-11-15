@@ -1,8 +1,9 @@
 """
 Pipeline de anotação (OBJETIVO.md, seção 6, tarefa T14): importa um lote
 (opcional), anota as imagens pendentes com cada anotador de anotadores.yaml,
-um de cada vez, e vota. Nos lotes de treino, o voto NooN estrito; nos de
-teste, a união sem classe (votar.py).
+um de cada vez, e vota. Nas imagens de treino, o voto NooN estrito; nas de
+teste, a união sem classe (votar.py), que fica no banco: a revisão do teste
+é sem pré-anotação.
 
     python anotacao/pipeline.py -o anotacoes fotos/ --lote 2026-11-15a
     python anotacao/pipeline.py -o anotacoes          # retoma: anota o que falta e vota
@@ -157,7 +158,8 @@ def main(argv=None):
     grupo = parser.add_argument_group("importação", "como no importar.py; só com entradas")
     grupo.add_argument("--lote", help="nome do lote de captura")
     grupo.add_argument("--conjunto", choices=importar.CONJUNTOS,
-                       help="força o conjunto do lote (padrão: sorteio pelo nome)")
+                       help="força o conjunto de todas as imagens (padrão: sorteio por "
+                            "imagem, 1 em 10 para o teste)")
     grupo.add_argument("--regiao", type=float, nargs=4, metavar=("X1", "Y1", "X2", "Y2"),
                        help="região de interesse do lote, normalizada")
     grupo.add_argument("--lado-maximo", type=int,
@@ -188,8 +190,7 @@ def main(argv=None):
     if arquivos:
         r = importar.importar(args.saida, arquivos, args.lote, nomes_classes, args.conjunto,
                               args.regiao, args.lado_maximo, args.link)
-        print(f"Lote {args.lote} ({r['conjunto']}): {len(r['importadas'])} imagem(ns) "
-              f"importada(s), {len(r['puladas'])} já importada(s)")
+        print(importar.resumo(args.lote, r))
 
     nomes = [a["nome"] for a in config["anotadores"]]
     for i, (nome, argv_a) in enumerate(zip(nomes, argvs), 1):

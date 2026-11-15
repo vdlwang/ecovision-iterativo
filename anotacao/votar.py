@@ -12,10 +12,11 @@ classe, ou em conflito, com as classes propostas como sugestões.
     python anotacao/anotar.py -o anotacoes --anotador grounding-dino   # e owlv2, yolo
     python anotacao/votar.py anotacoes [--anotadores grounding-dino owlv2 yolo]
 
-Só vota imagens pendentes com proposta de todos os anotadores. Nos lotes de
-teste não há voto de classe: grava a união das caixas dos anotadores, sem
-classe, e todas vão à revisão (seção 4). Toda revisão parte de um
-voto: imagem não votada não é revisável. Cada
+Só vota imagens pendentes com proposta de todos os anotadores. Nas imagens
+de teste não há voto de classe: grava a união das caixas dos anotadores, sem
+classe, e todas vão à revisão, que é sem pré-anotação (seção 4): a união
+fica no banco, para comparar com a revisão, e não vai à página. Toda
+revisão parte de um voto: imagem não votada não é revisável. Cada
 anotador é lido no limiar de leitura gravado na proposta (--limiares troca),
 com a classe sugerida mesmo abaixo de confianca_classe: ela só é escondida do
 revisor. Rodar de novo vota as imagens novas e as que ganharam proposta nova;
@@ -156,11 +157,11 @@ def caixas_da_revisao(listas, limiar_iou=IOU_VOTO):
 def decisor(limiares=None, limiar_iou=IOU_VOTO):
     """
     A função de decisão que o saida.votar() chama com as propostas de uma
-    imagem e o conjunto do lote. limiares: um por anotador, None para o
+    imagem e o conjunto dela. limiares: um por anotador, None para o
     gravado na proposta. No treino, o voto NooN estrito: a aprovada guarda as
     caixas de consenso, e a que falha, uma caixa por objeto, de consenso ou em
     conflito (caixas_da_revisao), de onde a revisão parte; no teste, a união
-    sem classe.
+    sem classe, que a revisão (sem pré-anotação) não mostra.
     """
     def decidir(propostas, conjunto):
         usados, listas, indices = [], [], []

@@ -216,7 +216,7 @@ A fase 1 muda o formato sem mudar o que o usuário vê; as fases 2 e 3 já entre
 | 11 | ~~Onde guardar o estado da anotação?~~ | **Decidido (2026-11-11)**: SQLite (`anotacoes.sqlite`, biblioteca padrão) para imagens, propostas e revisões; imagens e rótulos YOLO continuam como arquivos (seção 6). PostgreSQL só com vários revisores em máquinas diferentes (decisão 3); FiftyOne serve para explorar, não substitui a página (decisão 1); DVC, para versionar as bases de treino e teste, entra com o T6/T12 e complementa o banco. |
 | 12 | ~~Desenhar caixas à mão agora?~~ | **Decidido (2026-11-11)**: não. Objeto que nenhuma candidata cobre leva ao descarte da imagem. Medir nos registros de revisão a fração de imagens descartadas (`acao: descartar`); se for alta, o desenho à mão volta. |
 
-As decisões 4 a 7 (voto, teste sem classe, mesma classe no voto, sorteio por lote) e a 8 (vidro) são do sistema completo e estão no `OBJETIVO.md`.
+As decisões 4 a 7 (voto, teste sem pré-anotação, mesma classe no voto, sorteio por imagem) e a 8 (vidro) são do sistema completo e estão no `OBJETIVO.md`.
 
 ## Notas
 

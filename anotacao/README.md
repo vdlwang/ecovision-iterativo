@@ -31,17 +31,17 @@ python anotacao/pipeline.py -o anotacoes                             # retoma o 
 
 ### Importar
 
-O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote, com a largura e a altura. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
+O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote (a importação), com a largura, a altura e o conjunto. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
 
 - **A imagem muda o mínimo**: é copiada byte a byte, a não ser que o EXIF a gire (fotos de celular; ela é gravada já girada, e as caixas valem para ela) ou que passe de `--lado-maximo`. Sem normalizar cor nem recortar: a base de treino tem de parecer com o que a câmera vê na operação.
-- **Conjunto por lote**: o lote inteiro vai para `treino` ou `teste` (frames seguidos são quase iguais). O sorteio é pelo hash do nome do lote, cerca de 1 em cada 5 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força. Depois de gravado no banco, não muda.
+- **Conjunto por imagem**: cada imagem vai para `treino` ou `teste` pelo hash do nome final (`<lote>_<nome>`), cerca de 1 em cada 10 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força o de todas as imagens da importação. Depois de gravado no banco, não muda. Sortear por imagem só não vaza cenas entre as bases porque a captura (T4) não grava quadros próximos demais (decisão 7 do `OBJETIVO.md`, revista em 2026-11-15).
 - **Região de interesse** (`--regiao X1 Y1 X2 Y2`, de 0 a 1): os anotadores descartam caixas com o **centro** fora dela (a mesa em volta da esteira). A imagem continua inteira.
 
 | Opção | Padrão | |
 |---|---|---|
 | `-o`, `--saida` | `anotacoes` | Diretório de saída |
 | `--lote` | obrigatório | Nome do lote de captura: letras, dígitos, `.` e `-` (o `_` separa o lote do nome da imagem) |
-| `--conjunto` | sorteio | `treino` ou `teste` |
+| `--conjunto` | sorteio | `treino` ou `teste`, para todas as imagens da importação |
 | `--regiao` | — | Região de interesse do lote, normalizada |
 | `--lado-maximo` | — | Reduz imagens com o lado maior acima disso (só para fotos grandes de outra origem; a da esteira fica na resolução nativa) |
 | `--link` | — | Link (hardlink, ou simbólico se não der) em vez de cópia, quando a imagem não precisa ser regravada |
@@ -86,7 +86,7 @@ Opções de um anotador só:
 O `votar.py` decide, para cada imagem **pendente** com proposta vigente de todos os anotadores (o trio é o da decisão 17), de onde a revisão parte. **Toda revisão parte de um voto**: imagem não votada não é revisável.
 
 - **Treino**: o voto NooN estrito (`OBJETIVO.md`, seção 3). A imagem é aprovada se todos propõem o mesmo número de caixas e cada caixa casa, com a mesma classe e IoU ≥ 0,5, com uma de cada um dos outros. A aprovada recebe como rótulo as **caixas de consenso** (a mediana de cada coordenada, com a menor das confianças) e entra no `treino.txt`, sem passar pela revisão. A que falha continua `pendente`, com o motivo (`quantidade`, `caixas`, `vazia` ou `classe_fora`), e vai para a revisão com **uma caixa por objeto**: as caixas visíveis dos anotadores agrupadas como na união do teste (abaixo), em que um grupo achado por todos com a mesma classe é **consenso** e qualquer outro é **conflito**, sem classe.
-- **Teste**: não há voto de classe (seção 4). O voto grava a **união** das caixas dos anotadores, sem classe: da mais confiante para a menos, as que se sobrepõem (IoU ≥ 0,5, de anotadores diferentes) viram uma só, na mediana. Toda imagem de teste vai para a revisão, e o revisor dá a classe de cada caixa.
+- **Teste**: não há voto de classe (seção 4). O voto grava a **união** das caixas dos anotadores, sem classe: da mais confiante para a menos, as que se sobrepõem (IoU ≥ 0,5, de anotadores diferentes) viram uma só, na mediana. Toda imagem de teste vai para a revisão, que é **sem pré-anotação**: a união fica no banco, para comparar com a revisão, e não vai à página.
 
 ```bash
 python anotacao/votar.py anotacoes                                  # grounding-dino, owlv2 e yolo
@@ -107,7 +107,7 @@ python anotacao/votar.py anotacoes --anotadores grounding-dino yolo --limiares g
 
 ### Pipeline
 
-O `pipeline.py` encadeia os três passos acima (`OBJETIVO.md`, seção 6, T14): importa um lote (se receber entradas), roda o `anotar.py` com cada anotador de [`anotadores.yaml`](anotadores.yaml), um de cada vez (o modelo do anterior é liberado antes de carregar o próximo), e vota com eles, na ordem do arquivo: voto NooN nos lotes de treino, união sem classe nos de teste.
+O `pipeline.py` encadeia os três passos acima (`OBJETIVO.md`, seção 6, T14): importa um lote (se receber entradas), roda o `anotar.py` com cada anotador de [`anotadores.yaml`](anotadores.yaml), um de cada vez (o modelo do anterior é liberado antes de carregar o próximo), e vota com eles, na ordem do arquivo: voto NooN nas imagens de treino, união sem classe nas de teste (gravada para comparar; a revisão do teste é sem pré-anotação).
 
 - **Retomável**: a unidade de trabalho é (imagem, anotador). Cada proposta é gravada numa transação, o `anotar.py` pula as imagens que já têm proposta do anotador e o voto pula as já votadas com as mesmas propostas. Interrompida (Ctrl+C, queda do Colab), basta rodar o mesmo comando; sem nada a fazer, nenhum modelo é carregado. Sem entradas, anota e vota o que já foi importado, de qualquer lote.
 - **Conferência antes de tudo**: o `anotadores.yaml` e as opções de cada anotador passam pelo `anotar.py` antes de importar ou carregar qualquer modelo, para um erro no terceiro não aparecer depois de horas de GPU.
@@ -149,7 +149,7 @@ O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels
 | Tabela | O que guarda |
 |---|---|
 | `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão ou algum voto guarda caixa com classe |
-| `lotes` | Conjunto (`treino` ou `teste`), região de interesse e data de cada lote |
+| `lotes` | Região de interesse e data de cada lote (importação); o conjunto (`treino` ou `teste`) é de cada imagem, em `imagens` |
 | `imagens` | Nome, tamanho, lote, status (`pendente`, `revisada`, `descartada`) e, para o voto (T6), `voto` e `motivo` |
 | `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
 | `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
@@ -160,9 +160,9 @@ As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata 
 
 **Nada é sobrescrito.** Anotar de novo (`--sobrescrever`) grava uma proposta nova, e a vigente de um anotador numa imagem é a mais recente; as anteriores continuam no banco, e o voto guarda quais versões usou. Cada revisão é uma linha nova, e a vigente é a mais recente. A proposta guarda a classe pelo nome (o anotador pode propor classe fora do `data.yaml`) e as caixas da mais confiante para a menos. Quem lê aplica os limiares de leitura gravados nos parâmetros da execução (`confianca`, `confianca_classe`): a página mostra a partir de `confianca`, esconde a classe abaixo de `confianca_classe` e oferece as de baixo como candidatas. O registro da revisão cita cada caixa pelo índice na lista do voto ou na proposta, que não muda com os limiares. Uma imagem entra como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
-Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão nem voto guarda caixa com classe (as propostas guardam a classe pelo nome; fundo, descarte e a união do teste não têm ids); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, só com `labels/`, ou um banco de outra versão do esquema) são recusadas, sem migração: importe de novo numa saída nova. Toda imagem entra pelo `importar.py`, num lote, que dá o conjunto; não há imagem sem lote.
+Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão nem voto guarda caixa com classe (as propostas guardam a classe pelo nome; fundo, descarte e a união do teste não têm ids); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, só com `labels/`, ou um banco de outra versão do esquema) são recusadas, sem migração: importe de novo numa saída nova. Toda imagem entra pelo `importar.py`, num lote, com o seu conjunto; não há imagem sem lote.
 
-**Treino e teste** são divididos por lote (sessão de captura, nunca por imagem; monografia, seção 5.3.5), no `importar.py`. O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`: a validação do YOLO é feita nas imagens de teste, anotadas por humanos sem a classe proposta (seção 4 do `OBJETIVO.md`). Enquanto nenhuma imagem de teste foi revisada, o `teste.txt` fica vazio e o Ultralytics não treina, de propósito.
+**Treino e teste** são divididos por imagem, no `importar.py` (1 em cada 10 para o teste; o vazamento entre as bases é evitado na captura, decisão 7 do `OBJETIVO.md`). O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`: a validação do YOLO é feita nas imagens de teste, anotadas por humanos sem pré-anotação (seção 4 do `OBJETIVO.md`). Enquanto nenhuma imagem de teste foi revisada, o `teste.txt` fica vazio e o Ultralytics não treina, de propósito.
 
 O diretório `anotacoes/` está no `.gitignore`: imagens não vão para o repositório (RNF10).
 
@@ -195,10 +195,10 @@ A revisão parte do voto (`votar.py`). A fila padrão, **a revisar**, tem as ima
 
 ### Edição
 
-Numa imagem pendente e votada, com "mostrar" em "automático (edição)", a edição começa com as **caixas do voto**:
+Numa imagem pendente e votada, com "mostrar" em "automático (edição)", a edição começa com as **caixas do voto** no treino, e sem nenhuma no teste:
 
 - **Treino**: uma caixa por objeto. As de **consenso** (todos os anotadores a acharam com a mesma classe) vêm com a classe e a menor confiança. As demais aparecem só como **conflito**, em vermelho: algum anotador não a achou, ou eles discordam da classe. Ao selecionar um conflito, a busca vazia lista as classes que os anotadores propuseram, uma por classe, com quem propôs e a confiança (mesmo abaixo de `confianca_classe`), das propostas por mais anotadores para menos; `1`, `2`, `3` escolhem a sugestão, e escrever busca em todas as classes. Chegar a um conflito pelo `Tab` já abre a busca com as sugestões, como o clique.
-- **Teste**: as caixas da união, todas "sem classe", sem confiança nem quem propôs (seção 4 do `OBJETIVO.md`). O revisor dá a classe de cada uma, remove as que sobram e acrescenta as que faltam pela caixa por clique.
+- **Teste**: **sem pré-anotação** (seção 4 do `OBJETIVO.md`). A imagem abre sem caixas, e a página não mostra classe, confiança nem quem propôs, nem pelas camadas de propostas. O revisor acrescenta cada objeto pela caixa por clique (`N` e um clique nele) e dá a classe. As candidatas são uma por objeto que os anotadores acharam (a caixa mais confiante do grupo da união) mais as abaixo do limiar de leitura; objeto sem candidata leva ao descarte da imagem (decisão 12).
 
 Caixa do voto intocada aparece tracejada, com a confiança; caixa corrigida ou incluída, em linha contínua. Caixa sem classe aparece em vermelho: a imagem só pode ser salva depois que cada uma recebe classe ou é removida.
 
@@ -238,7 +238,7 @@ Cada revisão é uma linha nova no banco (RF13); a API devolve a vigente assim:
  "removidas": [1]}
 ```
 
-O servidor confere a origem de cada caixa: uma caixa do voto (`origem: "voto"`, `indice` na lista do voto), ou uma candidata de um anotador usado pelo voto (`"candidata"`, com `anotador` e o `indice` na proposta; a API ainda aceita `"proposta"`, uma caixa visível dele, que a página não usa mais); as coordenadas têm de ser as da origem. O desfecho é calculado por ele: `aceita` ou `classe_corrigida` frente à classe da caixa do voto, `classe_atribuida` quando a caixa do voto não tinha classe (conflito ou teste), e `adicionada` para as que vêm de uma candidata. `removidas` lista as caixas do voto apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
+O servidor confere a origem de cada caixa: uma caixa do voto (`origem: "voto"`, `indice` na lista do voto), ou uma caixa de um anotador usado pelo voto, com `anotador` e o `indice` na proposta: `"candidata"`, abaixo do limiar de leitura, ou `"proposta"`, visível (no treino a página só usa as candidatas; no teste, também a caixa visível que representa cada objeto); as coordenadas têm de ser as da origem. Numa imagem de teste, caixa com origem `"voto"` é recusada: a revisão é sem pré-anotação. O desfecho é calculado por ele: `aceita` ou `classe_corrigida` frente à classe da caixa do voto, `classe_atribuida` quando a caixa do voto não tinha classe (conflito ou teste), e `adicionada` para as que vêm de uma candidata. `removidas` lista as caixas do voto apagadas. O tempo ativo só conta com a aba visível e em foco, e pausa depois de 60 s sem interação.
 
 ### Servidor e API
 
@@ -248,7 +248,7 @@ O servidor escuta só em `127.0.0.1` e lê o banco a cada pedido, então propost
 |---|---|
 | `GET /api/classes` | `[{id, nome, material}]` |
 | `GET /api/imagens?status=a_revisar&ordem=incerteza` | `{imagens: [{nome, status, situacao, voto, motivo, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}`; `status` é a situação: `a_revisar`, `aprovada`, `sem_voto`, `revisada`, `descartada` ou `todas`. Nas de teste pendentes, sem anotadores nem confiança |
-| `GET /api/imagens/<nome>` | `{nome, status, situacao, conjunto, largura, altura, final, propostas: {anotador: [...]}, voto, invalidas, revisao}`; `voto` (nulo sem voto): `{id, resultado, motivo, conjunto, caixas: [{indice, id, nome, conf, caixa, anotadores, sugestoes: [{id, nome, anotadores: [{anotador, conf}]}]}], candidatas: [{anotador, indice, conf, caixa}]}`; caixa de treino com `id` nulo é conflito, com as `sugestoes`. No teste pendente, `propostas` vem vazio e as caixas do voto sem classe, confiança nem sugestões |
+| `GET /api/imagens/<nome>` | `{nome, status, situacao, conjunto, largura, altura, final, propostas: {anotador: [...]}, voto, invalidas, revisao}`; `voto` (nulo sem voto): `{id, resultado, motivo, conjunto, caixas: [{indice, id, nome, conf, caixa, anotadores, sugestoes: [{id, nome, anotadores: [{anotador, conf}]}]}], candidatas: [{anotador, indice, origem, conf, caixa}]}`; caixa de treino com `id` nulo é conflito, com as `sugestoes`. No teste pendente, `propostas` e `voto.caixas` vêm vazios, e as candidatas incluem uma caixa visível por objeto da união (`origem: "proposta"`) |
 | `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", voto_id, tempo_ativo_s, caixas: [{id, caixa, origem, indice, anotador}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, não foi votada, ou se `voto_id` não é mais o voto vigente (a imagem foi votada de novo depois que a página abriu) |
 | `GET /images/<nome>` | A imagem |
 

@@ -283,7 +283,8 @@ async function mostrar(i) {
     detalhe = dados;
     edicao = null;
     if (dados.status === "pendente" && dados.voto) {
-      // A edição parte das caixas do voto: consenso no treino, união sem classe no teste
+      // A edição parte das caixas do voto no treino; no teste, de nenhuma (sem
+      // pré-anotação): o revisor acrescenta cada objeto pelo clique
       edicao = { voto: dados.voto.id, teste: dados.voto.resultado === "uniao",
         sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
         caixas: dados.voto.caixas.map(c =>
@@ -429,12 +430,13 @@ function desenharEdicao() {
   const { corrigidas, adicionadas, removidas } = contarAlteracoes();
   const v = detalhe.voto;
   legenda.replaceChildren(edicao.teste
-    ? "Teste: caixas da união dos modelos, sem classe; dê a classe de cada uma. "
+    ? "Teste, sem pré-anotação: acrescente cada objeto (N e clique nele) e dê a classe. "
     : v.resultado === "aprovada" ? "Voto aprovado: caixas de consenso. "
     : `Voto falhou (${MOTIVOS[v.motivo] ?? v.motivo}): uma caixa por objeto. `);
   legenda.append(edicao.caixas.length || v.caixas.length
-    ? `${edicao.caixas.length} caixa(s), ${corrigidas} ${edicao.teste ? "com classe dada"
-      : "corrigida(s)"}, ${adicionadas} adicionada(s), ${removidas} removida(s).`
+    ? (edicao.teste ? `${edicao.caixas.length} caixa(s).`
+      : `${edicao.caixas.length} caixa(s), ${corrigidas} corrigida(s), `
+        + `${adicionadas} adicionada(s), ${removidas} removida(s).`)
     : "Nenhuma caixa: salve para marcar como fundo (sem objetos) ou descarte.");
   const conflitos = edicao.caixas.filter(c => c.id === null && emConflito(c)).length;
   if (conflitos) legenda.append(` ${conflitos} em conflito: selecione e escolha uma das `
@@ -489,8 +491,10 @@ function selecionar(k) {
 // --- nova caixa por clique ---------------------------------------------------
 // As propostas guardam as caixas dos anotadores desde um piso baixo; as abaixo
 // do limiar do voto chegam à página como candidatas, de todos os anotadores,
-// sem as repetidas. Um clique no objeto mostra a mais confiante que contém o
-// ponto; Tab ou a roda passam às seguintes. A caixa confirmada nasce sem classe.
+// sem as repetidas; no teste, também uma por objeto que os modelos acharam
+// (origem "proposta"), porque a imagem abre sem caixas. Um clique no objeto
+// mostra a mais confiante que contém o ponto; Tab ou a roda passam às
+// seguintes. A caixa confirmada nasce sem classe.
 
 const candidatasBase = () => detalhe.voto?.candidatas ?? [];
 
@@ -532,7 +536,8 @@ function confirmarNova() {
   const c = edicao.novo?.lista?.[edicao.novo.i];
   if (!c) return;
   guardar();
-  edicao.caixas.push({ id: null, caixa: c.caixa, origem: "candidata", anotador: c.anotador,
+  edicao.caixas.push({ id: null, caixa: c.caixa, origem: c.origem ?? "candidata",
+                       anotador: c.anotador,
                        indice: c.indice, tocada: true });
   edicao.sel = edicao.caixas.length - 1;
   edicao.novo = null;
@@ -543,7 +548,9 @@ function confirmarNova() {
 function textoNova() {
   const novo = edicao.novo;
   if (!candidatasBase().length)
-    return "Nenhum modelo propôs caixa abaixo das mostradas (candidatas). Esc sai.";
+    return (edicao.teste ? "Nenhum modelo propôs caixa nesta imagem: salve como fundo ou "
+      + "descarte." : "Nenhum modelo propôs caixa abaixo das mostradas (candidatas).")
+      + " Esc sai.";
   if (!novo.lista) return "Nova caixa: clique no objeto. Esc cancela.";
   if (!novo.lista.length)
     return "Nenhuma candidata nova contém esse ponto: clique em outra parte do objeto "

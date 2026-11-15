@@ -48,8 +48,8 @@ def montar(pasta, nomes_classes=("Garrafa", "Lata")):
     (pasta / "images" / "fora.jpg").write_bytes(b"")   # não registrada
     (pasta / "segredo.txt").write_text("não deve sair")
     formato.preparar(pasta, nomes_classes)
-    formato.registrar(pasta, [(n, 40, 20) for n in nomes[:-1]], "l1", {"conjunto": "treino"})
-    formato.registrar(pasta, [("t.jpg", 40, 20)], "t1", {"conjunto": "teste"})
+    formato.registrar(pasta, [(n, 40, 20, "treino") for n in nomes[:-1]], "l1", {})
+    formato.registrar(pasta, [("t.jpg", 40, 20, "teste")], "t1", {})
     gravar_proposta(pasta, "a.jpg", [("Lata", 0.9), ("Garrafa", 0.6, OUTRA)])
     gravar_proposta(pasta, "a.jpg", [("Lata", 0.9)], "outro")
     for anotador in DUPLA:
@@ -175,9 +175,11 @@ def test_detalhe_do_teste_sem_classe_nem_confianca(servidor):
     status, tipo, corpo = pedir(servidor + "/api/imagens/t.jpg")
     dados = json.loads(corpo)
     assert dados["voto"]["resultado"] == "uniao" and dados["voto"]["conjunto"] == "teste"
-    assert dados["voto"]["caixas"] == [{"id": None, "nome": None, "conf": None,
-                                        "caixa": [0.1, 0.1, 0.5, 0.5], "indice": 0,
-                                        "anotadores": [], "sugestoes": []}]
+    # sem pré-anotação: nenhuma caixa; a do objeto vem pelo clique, das candidatas
+    assert dados["voto"]["caixas"] == []
+    assert dados["voto"]["candidatas"] == [{"anotador": "falso", "indice": 0,
+                                            "origem": "proposta", "conf": 0.9,
+                                            "caixa": [0.1, 0.1, 0.5, 0.5]}]
     # nem pelas camadas de propostas
     assert dados["propostas"] == {} and b"Lata" not in corpo
 
@@ -254,12 +256,16 @@ def test_aprovada_aceita_como_esta_e_fundo(servidor, saida):
     assert status == 200 and (saida / "labels" / "d.txt").read_text() == ""
 
 
-def test_teste_recebe_a_classe_do_revisor(servidor, saida):
-    status, dados = enviar(servidor + "/api/imagens/t.jpg",
-                           {"acao": "salvar", "voto_id": voto(saida, "t.jpg"),
-                            "caixas": [do_voto(saida, "t.jpg", 0, 1)]})
+def test_teste_recebe_a_caixa_pelo_clique_e_a_classe_do_revisor(servidor, saida):
+    url, corpo = servidor + "/api/imagens/t.jpg", {"acao": "salvar",
+                                                   "voto_id": voto(saida, "t.jpg")}
+    status, erro = enviar(url, dict(corpo, caixas=[do_voto(saida, "t.jpg", 0, 1)]))
+    assert status == 400 and "sem pré-anotação" in erro["erro"]
+    caixa = {"id": 1, "caixa": [0.1, 0.1, 0.5, 0.5], "origem": "proposta",
+             "anotador": "falso", "indice": 0}
+    status, dados = enviar(url, dict(corpo, caixas=[caixa]))
     assert status == 200, dados
-    assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["classe_atribuida"]
+    assert [c["desfecho"] for c in dados["revisao"]["caixas"]] == ["adicionada"]
     assert (saida / "teste.txt").read_text() == "./images/t.jpg\n"
 
 
