@@ -181,7 +181,7 @@ Caixa do voto intocada aparece tracejada, com a confiança; caixa corrigida ou i
 | Selecionar caixa | clique (já abre a busca) | `Tab` / `Shift+Tab`, em ordem de leitura |
 | Trocar a classe | escrever no campo de busca e clicar na opção | com a caixa selecionada, escrever (a primeira letra já abre a busca); `↑`/`↓` e `Enter` escolhem |
 | Escolher uma sugestão de um conflito | clicar na opção da busca | `1`–`3`, com a caixa selecionada (a busca aberta e vazia, ou fechada) |
-| Remover caixa | "Remover caixa" | `Del` |
+| Remover caixa | "Remover caixa" | `Del`, também com a busca aberta; `Backspace` com a busca vazia ou fechada |
 | Desfazer a seleção | clique fora das caixas | `Esc` |
 | Desfazer e refazer | — | `Ctrl+Z`; `Ctrl+Shift+Z` ou `Ctrl+Y` (`Cmd` no Mac). Valem para trocar classe, remover e adicionar caixa, na imagem atual; na busca com texto, ficam com o campo |
 | Nova caixa por clique | "Nova caixa" e um clique no objeto | `N` (sem caixa selecionada), clique no objeto, `Tab`/`Shift+Tab` ou a roda do mouse trocam a candidata, `Enter` confirma, `Esc` cancela |

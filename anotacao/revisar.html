@@ -811,6 +811,14 @@ $("busca").onfocus = mostrarOpcoes;
 $("busca").onblur = () => { $("opcoes").hidden = true; };
 $("busca").onkeydown = e => {
   const n = busca.opcoes.length;
+  // Del remove a caixa selecionada mesmo com a busca aberta (o clique e o Tab
+  // num conflito a abrem); Backspace também, se o campo está vazio
+  if (e.key === "Delete" || (e.key === "Backspace" && !$("busca").value)) {
+    e.preventDefault();
+    fecharBusca();
+    remover();
+    return;
+  }
   // Busca vazia numa caixa em conflito: 1–3 escolhem a sugestão
   if (/^[1-9]$/.test(e.key) && !$("busca").value) {
     const k = busca.opcoes.findIndex(o => o.atalho === Number(e.key));
