@@ -31,9 +31,10 @@ def test_preparar_cria_banco_classes_e_arquivos(tmp_path):
     assert formato.existe(tmp_path)
     assert formato.nomes_classes(tmp_path) == {0: "Garrafa", 1: "Tampa", 2: "Lata"}
     dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
-    assert dados == {"train": "revisadas.txt", "val": "revisadas.txt",
+    assert dados == {"train": "treino.txt", "val": "treino.txt",
                      "names": {0: "Garrafa", 1: "Tampa", 2: "Lata"}}
-    assert (tmp_path / "revisadas.txt").read_text() == ""
+    for lista in ("treino.txt", "teste.txt", "revisadas.txt"):
+        assert (tmp_path / lista).read_text() == ""
     assert formato.ler_estado(tmp_path) == {} and formato.ler_lotes(tmp_path) == {}
     with sqlite3.connect(formato.caminho_banco(tmp_path)) as con:
         assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"

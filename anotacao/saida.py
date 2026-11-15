@@ -5,8 +5,10 @@ Estado da anotação (PLANO-REVISAO.md, seções 1 e 6).
                                     execuções dos anotadores, propostas e revisões
     <saida>/images/<nome>.jpg       gravada pelo importar.py
     <saida>/labels/<stem>.txt       gerado do banco: caixas finais (YOLO) das revisadas
-    <saida>/revisadas.txt           gerado do banco; o data.yaml aponta para ele
-    <saida>/data.yaml               gerado do banco (tabela classes)
+                                    e das aprovadas pelo voto (votar.py)
+    <saida>/treino.txt, teste.txt   gerados do banco: as listas do data.yaml
+    <saida>/revisadas.txt           gerado do banco: as revisadas por humano
+    <saida>/data.yaml               gerado do banco (tabela classes e as listas)
 
 O que o anotador propõe fica separado do que o revisor aprova: uma imagem sem
 .txt em labels/ não entra no treino, em vez de entrar como fundo. Cada operação
@@ -35,7 +37,7 @@ STATUS = ("pendente", "revisada", "descartada")
 CONJUNTOS = ("treino", "teste")
 VOTOS = ("aprovada", "falhou")
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 1
+VERSAO_ESQUEMA = 2
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -124,6 +126,45 @@ WHERE p.id = (SELECT MAX(p2.id) FROM propostas p2 JOIN execucoes e2 ON e2.id = p
               WHERE p2.imagem_id = p.imagem_id AND e2.anotador = e.anotador);
 """
 
+# Voto (T6, votar.py): uma votação por rodada; um voto por imagem votada, com
+# as propostas que usou e, se aprovada, as caixas de consenso. O voto vigente
+# de uma imagem é o de maior id, e imagens.voto/motivo repetem o resultado dele.
+ESQUEMA_VOTO = f"""
+CREATE TABLE votacoes (
+    id INTEGER PRIMARY KEY,
+    anotadores TEXT NOT NULL,
+    parametros TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE TABLE votos (
+    id INTEGER PRIMARY KEY,
+    votacao_id INTEGER NOT NULL REFERENCES votacoes (id),
+    imagem_id INTEGER NOT NULL REFERENCES imagens (id),
+    resultado TEXT NOT NULL CHECK (resultado IN {VOTOS}),
+    motivo TEXT,
+    CHECK ((resultado = 'aprovada') = (motivo IS NULL))
+);
+CREATE INDEX votos_imagem ON votos (imagem_id);
+CREATE TABLE votos_propostas (
+    voto_id INTEGER NOT NULL REFERENCES votos (id),
+    proposta_id INTEGER NOT NULL REFERENCES propostas (id),
+    limiar REAL NOT NULL CHECK (limiar BETWEEN 0 AND 1),
+    PRIMARY KEY (voto_id, proposta_id)
+);
+CREATE TABLE caixas_voto (
+    voto_id INTEGER NOT NULL REFERENCES votos (id),
+    indice INTEGER NOT NULL CHECK (indice >= 0),
+    classe_id INTEGER NOT NULL REFERENCES classes (id),
+    confianca REAL NOT NULL CHECK (confianca BETWEEN 0 AND 1),
+    x1 REAL NOT NULL, y1 REAL NOT NULL, x2 REAL NOT NULL, y2 REAL NOT NULL,
+    CHECK (0 <= x1 AND x1 < x2 AND x2 <= 1 AND 0 <= y1 AND y1 < y2 AND y2 <= 1),
+    PRIMARY KEY (voto_id, indice)
+);
+"""
+
+# Migrações: de cada versão para a seguinte. Só acrescentam tabelas.
+MIGRACOES = {1: ESQUEMA_VOTO}
+
 
 def agora_iso():
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -180,11 +221,25 @@ def conectar(saida):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     versao = con.execute("PRAGMA user_version").fetchone()[0]
-    if versao != VERSAO_ESQUEMA:
+    if versao in MIGRACOES:
+        migrar(con)
+    elif versao != VERSAO_ESQUEMA:
         con.close()
         raise ValueError(f"{caminho}: esquema na versão {versao}, este código usa a "
                          f"{VERSAO_ESQUEMA}")
     return con
+
+
+def migrar(con):
+    """Leva o banco à versão atual, numa transação (outra conexão pode estar migrando)."""
+    with transacao(con):
+        versao = con.execute("PRAGMA user_version").fetchone()[0]
+        while versao in MIGRACOES:
+            for comando in MIGRACOES[versao].split(";"):
+                if comando.strip():
+                    con.execute(comando)
+            versao += 1
+            con.execute(f"PRAGMA user_version = {versao}")
 
 
 @contextmanager
@@ -218,7 +273,8 @@ def criar_banco(saida):
     try:
         # WAL: o servidor lê enquanto o anotar.py grava
         con.execute("PRAGMA journal_mode = WAL")
-        con.executescript(f"BEGIN; {ESQUEMA} PRAGMA user_version = {VERSAO_ESQUEMA}; COMMIT;")
+        con.executescript(f"BEGIN; {ESQUEMA} {ESQUEMA_VOTO} "
+                          f"PRAGMA user_version = {VERSAO_ESQUEMA}; COMMIT;")
     finally:
         con.close()
 
@@ -282,8 +338,7 @@ def preparar(saida, nomes):
                     con.execute("DELETE FROM classes")
                     novas = list(enumerate(nomes))
                 con.executemany("INSERT INTO classes (id, nome) VALUES (?, ?)", novas)
-        exportar_data_yaml(con, saida)
-        exportar_revisadas(con, saida)
+        exportar_listas(con, saida)
 
 
 def nomes_classes(saida):
@@ -381,7 +436,8 @@ def dentro_da_regiao(caixa, regiao):
 
 
 def _imagem(con, nome):
-    return con.execute("SELECT id, nome, status FROM imagens WHERE nome = ?", (nome,)).fetchone()
+    return con.execute("SELECT id, nome, status, voto FROM imagens WHERE nome = ?",
+                       (nome,)).fetchone()
 
 
 # --- propostas ----------------------------------------------------------------
@@ -537,19 +593,44 @@ def separar(proposta):
 
 # --- arquivos gerados do banco --------------------------------------------------
 
-def exportar_data_yaml(con, saida):
-    # Sem 'path': o Ultralytics usa a pasta do data.yaml. Só as revisadas,
-    # e ainda sem divisão treino/validação (por sessão, monografia 5.3.5).
-    gravar_atomico(Path(saida) / "data.yaml", yaml.safe_dump(
-        {"train": "revisadas.txt", "val": "revisadas.txt", "names": _nomes(con)},
+# Imagem com rótulo final: revisada por humano, ou pendente e aprovada pelo voto
+COM_ROTULO = "(i.status = 'revisada' OR (i.status = 'pendente' AND i.voto = 'aprovada'))"
+# Imagem sem lote (registrada fora do importar.py) conta como de treino
+CONJUNTO = "COALESCE(l.conjunto, 'treino')"
+LISTAS = {
+    # OBJETIVO.md, seção 2: o treino recebe as aprovadas e as revisadas; o
+    # teste, só as revisadas (o voto não roda no teste)
+    "treino.txt": f"{CONJUNTO} = 'treino' AND {COM_ROTULO}",
+    "teste.txt": f"{CONJUNTO} = 'teste' AND i.status = 'revisada'",
+    "revisadas.txt": "i.status = 'revisada'",
+}
+
+
+def exportar_listas(con, saida):
+    """
+    treino.txt, teste.txt, revisadas.txt e o data.yaml, que aponta para as
+    duas primeiras. Enquanto nenhuma imagem de teste foi revisada, o val do
+    data.yaml é o treino.txt (o Ultralytics não treina sem val), com um aviso
+    no arquivo: as métricas de validação, aí, não medem nada.
+    """
+    saida = Path(saida)
+    tamanhos = {}
+    for arquivo, condicao in LISTAS.items():
+        # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
+        nomes = [f"./images/{r[0]}" for r in con.execute(
+            "SELECT i.nome FROM imagens i LEFT JOIN lotes l ON l.nome = i.lote "
+            f"WHERE {condicao} ORDER BY i.id")]
+        tamanhos[arquivo] = len(nomes)
+        gravar_atomico(saida / arquivo, "".join(n + "\n" for n in nomes))
+    val, aviso = "teste.txt", ""
+    if not tamanhos["teste.txt"]:
+        val = "treino.txt"
+        aviso = ("# Nenhuma imagem de teste revisada ainda: val aponta para o treino,\n"
+                 "# e as métricas de validação não medem generalização.\n")
+    # Sem 'path': o Ultralytics usa a pasta do data.yaml
+    gravar_atomico(saida / "data.yaml", aviso + yaml.safe_dump(
+        {"train": "treino.txt", "val": val, "names": _nomes(con)},
         allow_unicode=True, sort_keys=False))
-
-
-def exportar_revisadas(con, saida):
-    # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
-    revisadas = [f"./images/{r[0]}" for r in con.execute(
-        "SELECT nome FROM imagens WHERE status = 'revisada' ORDER BY id")]
-    gravar_atomico(Path(saida) / "revisadas.txt", "".join(r + "\n" for r in revisadas))
 
 
 def _revisao_vigente(con, imagem_id):
@@ -562,35 +643,61 @@ def _caixas_revisao(con, revisao_id):
                        (revisao_id,)).fetchall()
 
 
+def _voto_vigente(con, imagem_id):
+    return con.execute("SELECT * FROM votos WHERE imagem_id = ? ORDER BY id DESC LIMIT 1",
+                       (imagem_id,)).fetchone()
+
+
+def _caixas_voto(con, voto_id):
+    return con.execute("SELECT * FROM caixas_voto WHERE voto_id = ? ORDER BY indice",
+                       (voto_id,)).fetchall()
+
+
+def _caixas_finais(con, imagem):
+    """
+    As caixas finais (linhas de caixas_revisao ou caixas_voto) da imagem, ou
+    None se ela não tem rótulo: as da revisão vigente, se revisada; as do voto
+    vigente, se pendente e aprovada. A revisão humana sempre vale mais.
+    """
+    if imagem["status"] == "revisada":
+        revisao = _revisao_vigente(con, imagem["id"])
+        if revisao is not None and revisao["acao"] == "salvar":
+            return _caixas_revisao(con, revisao["id"])
+    elif imagem["status"] == "pendente" and imagem["voto"] == "aprovada":
+        voto = _voto_vigente(con, imagem["id"])
+        if voto is not None and voto["resultado"] == "aprovada":
+            return _caixas_voto(con, voto["id"])
+    return None
+
+
 def _exportar_rotulo(con, saida, imagem):
-    """labels/<stem>.txt da imagem: as caixas da revisão vigente, se revisada; senão, nenhum."""
+    """labels/<stem>.txt da imagem com as caixas finais; sem rótulo final, nenhum."""
     rotulo = Path(saida) / "labels" / f"{Path(imagem['nome']).stem}.txt"
-    revisao = _revisao_vigente(con, imagem["id"])
-    if imagem["status"] != "revisada" or revisao is None or revisao["acao"] != "salvar":
+    caixas = _caixas_finais(con, imagem)
+    if caixas is None:
         rotulo.unlink(missing_ok=True)
         return
     gravar_atomico(rotulo, "".join(
         linha_yolo(c["classe_id"], (c["x1"], c["y1"], c["x2"], c["y2"])) + "\n"
-        for c in _caixas_revisao(con, revisao["id"])))
+        for c in caixas))
 
 
 def exportar(saida):
     """
-    Refaz do banco todos os arquivos gerados: data.yaml, labels/ (e apaga os
-    .txt de imagens que não estão revisadas) e revisadas.txt.
+    Refaz do banco todos os arquivos gerados: labels/ (e apaga os .txt de
+    imagens sem rótulo final), as listas e o data.yaml (exportar_listas).
     """
     saida = Path(saida)
     (saida / "labels").mkdir(parents=True, exist_ok=True)
     with abrir(saida) as con:
-        exportar_data_yaml(con, saida)
-        imagens = con.execute("SELECT id, nome, status FROM imagens").fetchall()
+        imagens = con.execute("SELECT id, nome, status, voto FROM imagens").fetchall()
         for imagem in imagens:
             _exportar_rotulo(con, saida, imagem)
-        stems = {Path(i["nome"]).stem for i in imagens if i["status"] == "revisada"}
+        stems = {Path(i["nome"]).stem for i in imagens if _caixas_finais(con, i) is not None}
         for rotulo in (saida / "labels").glob("*.txt"):
             if rotulo.stem not in stems:
                 rotulo.unlink()
-        exportar_revisadas(con, saida)
+        exportar_listas(con, saida)
 
 
 # --- leitura de uma imagem, para as páginas ---------------------------------
@@ -775,7 +882,7 @@ def _gravar_revisao(con, imagem, proposta_id, acao, agora, tempo, revisor, caixa
 
 def revisar(saida, nome, pedido, agora):
     """
-    Aplica a revisão de uma imagem pendente. pedido: {acao, base, proposta_id,
+    Aplica a revisão de uma imagem pendente (aprovada pelo voto ou não). pedido: {acao, base, proposta_id,
     caixas, tempo_ativo_s}, como a página envia; proposta_id, se vier, tem de
     ser a proposta vigente do anotador base (senão, outra foi gravada depois
     que a página a abriu: 409). Grava a revisão e o status numa transação e
@@ -823,7 +930,7 @@ def revisar(saida, nome, pedido, agora):
             _gravar_revisao(con, imagem, None if proposta is None else proposta["id"],
                             pedido["acao"], agora, tempo, None, caixas)
         _exportar_rotulo(con, saida, _imagem(con, nome))
-        exportar_revisadas(con, saida)
+        exportar_listas(con, saida)
     return ler_revisao(saida, nome)
 
 
@@ -894,5 +1001,120 @@ def aceitar(saida, anotador, nomes=None, agora=None):
                 aceitas.append(nome)
         for nome in aceitas:
             _exportar_rotulo(con, saida, _imagem(con, nome))
-        exportar_revisadas(con, saida)
+        exportar_listas(con, saida)
     return len(aceitas), sem_classe
+
+
+# --- voto (OBJETIVO.md, seção 3; T6) -----------------------------------------
+
+def votar(saida, anotadores, decidir, parametros=None, revotar=False, agora=None):
+    """
+    Vota, numa transação, as imagens pendentes de lotes de treino (ou sem
+    lote) com proposta vigente de todos os anotadores. Pula as que já têm voto
+    sobre essas mesmas propostas, a não ser com revotar; as de teste não são
+    votadas (vão à união sem classe e à revisão, T9).
+
+    decidir(propostas) recebe as propostas vigentes, na ordem de anotadores, e
+    devolve (motivo, consenso, limiares): motivo None se aprovada;
+    consenso [(nome da classe, confianca, caixa normalizada)]; limiares, o de
+    leitura que usou em cada proposta. Uma caixa de consenso de classe fora da
+    tabela classes reprova a imagem ("classe_fora"): não teria id no .txt.
+
+    Grava a votação, um voto por imagem com as propostas que usou e as caixas
+    de consenso, e voto/motivo em imagens; depois, os .txt das votadas e as
+    listas. Devolve {aprovadas: [nomes], falhou: {nome: motivo}, incompletas,
+    ja_votadas, teste} (os três últimos, contagens).
+    """
+    anotadores = list(anotadores)
+    if len(set(anotadores)) != len(anotadores) or len(anotadores) < 2:
+        raise ValueError("o voto precisa de ao menos dois anotadores, sem repetição")
+    agora = agora or agora_iso()
+    resultado = {"aprovadas": [], "falhou": {}, "incompletas": 0, "ja_votadas": 0, "teste": 0}
+    with abrir(saida) as con:
+        with transacao(con):
+            ids = {n: i for i, n in _nomes(con).items()}
+            imagens = con.execute(
+                f"SELECT i.id, i.nome, {CONJUNTO} AS conjunto FROM imagens i "
+                "LEFT JOIN lotes l ON l.nome = i.lote WHERE i.status = 'pendente' "
+                "ORDER BY i.id").fetchall()
+            vigentes = [{p["imagem"]: p for p in _propostas(con, VIGENTE, (a,))}
+                        for a in anotadores]
+            votacao = None
+            for imagem in imagens:
+                nome = imagem["nome"]
+                if imagem["conjunto"] == "teste":
+                    resultado["teste"] += 1
+                    continue
+                if not all(nome in v for v in vigentes):
+                    resultado["incompletas"] += 1
+                    continue
+                propostas = [v[nome] for v in vigentes]
+                anterior = _voto_vigente(con, imagem["id"])
+                if anterior is not None and not revotar and {
+                        r[0] for r in con.execute(
+                            "SELECT proposta_id FROM votos_propostas WHERE voto_id = ?",
+                            (anterior["id"],))} == {p["id"] for p in propostas}:
+                    resultado["ja_votadas"] += 1
+                    continue
+                motivo, consenso, limiares_usados = decidir(propostas)
+                if motivo is None and any(c[0] not in ids for c in consenso):
+                    motivo, consenso = "classe_fora", []
+                if votacao is None:
+                    votacao = con.execute(
+                        "INSERT INTO votacoes (anotadores, parametros, data) VALUES (?, ?, ?)",
+                        (json.dumps(anotadores, ensure_ascii=False),
+                         json.dumps(parametros or {}, ensure_ascii=False, sort_keys=True),
+                         agora)).lastrowid
+                voto = con.execute(
+                    "INSERT INTO votos (votacao_id, imagem_id, resultado, motivo) "
+                    "VALUES (?, ?, ?, ?)",
+                    (votacao, imagem["id"], "falhou" if motivo else "aprovada",
+                     motivo)).lastrowid
+                con.executemany(
+                    "INSERT INTO votos_propostas (voto_id, proposta_id, limiar) VALUES (?, ?, ?)",
+                    [(voto, p["id"], float(l)) for p, l in zip(propostas, limiares_usados)])
+                con.executemany(
+                    "INSERT INTO caixas_voto (voto_id, indice, classe_id, confianca, "
+                    "x1, y1, x2, y2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(voto, k, ids[classe], round(float(conf), 4),
+                      *(round(float(v), 6) for v in caixa))
+                     for k, (classe, conf, caixa) in enumerate(consenso)])
+                con.execute("UPDATE imagens SET voto = ?, motivo = ? WHERE id = ?",
+                            ("falhou" if motivo else "aprovada", motivo, imagem["id"]))
+                if motivo:
+                    resultado["falhou"][nome] = motivo
+                else:
+                    resultado["aprovadas"].append(nome)
+        for nome in [*resultado["aprovadas"], *resultado["falhou"]]:
+            _exportar_rotulo(con, saida, _imagem(con, nome))
+        exportar_listas(con, saida)
+    return resultado
+
+
+def ler_voto(saida, nome):
+    """
+    O voto vigente da imagem, ou None: {imagem, resultado, motivo, data,
+    anotadores, parametros, propostas: [{id, anotador, limiar}], caixas:
+    [{id, conf, caixa}]}.
+    """
+    if not existe(saida):
+        return None
+    with abrir(saida) as con:
+        imagem = _imagem(con, nome)
+        voto = None if imagem is None else _voto_vigente(con, imagem["id"])
+        if voto is None:
+            return None
+        votacao = con.execute("SELECT * FROM votacoes WHERE id = ?",
+                              (voto["votacao_id"],)).fetchone()
+        propostas = [{"id": r["proposta_id"], "anotador": r["anotador"], "limiar": r["limiar"]}
+                     for r in con.execute(
+                         "SELECT vp.proposta_id, vp.limiar, e.anotador FROM votos_propostas vp "
+                         "JOIN propostas p ON p.id = vp.proposta_id "
+                         "JOIN execucoes e ON e.id = p.execucao_id WHERE vp.voto_id = ? "
+                         "ORDER BY vp.proposta_id", (voto["id"],))]
+        return {"imagem": nome, "resultado": voto["resultado"], "motivo": voto["motivo"],
+                "data": votacao["data"], "anotadores": json.loads(votacao["anotadores"]),
+                "parametros": json.loads(votacao["parametros"]), "propostas": propostas,
+                "caixas": [{"id": c["classe_id"], "conf": c["confianca"],
+                            "caixa": [round(c[k], 6) for k in ("x1", "y1", "x2", "y2")]}
+                           for c in _caixas_voto(con, voto["id"])]}

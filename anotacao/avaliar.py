@@ -35,12 +35,12 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
-from statistics import median
 
 import yaml
 
 import anotar
 import saida as formato
+from votar import consenso_por_caixa, voto_estrito
 
 DIR_REPO = anotar.DIR_SCRIPT.parent
 DATASETS_PADRAO = sorted((DIR_REPO / "legado" / "database").glob("tcc-*/YOLO_dataset/validation"))
@@ -439,67 +439,6 @@ def imprimir_erro_conjunto(r, a, b, classes):
         print(f"    {nomes[real]} -> {prevista if prevista == 'outra' else nomes[prevista]}: {q}")
 
 
-def casar_mesma_classe(a, b, limiar_iou=IOU_ACERTO):
-    """
-    Casamento guloso pelo IoU entre as detecções de dois anotadores, só entre
-    caixas da mesma classe: {índice em a: índice em b} com IoU >= limiar_iou.
-    """
-    pares = sorted(((anotar.iou(da[2], db[2]), i, j) for i, da in enumerate(a)
-                    for j, db in enumerate(b) if da[0] == db[0]), reverse=True)
-    usadas_a, usadas_b, casados = set(), set(), {}
-    for iou, i, j in pares:
-        if iou < limiar_iou:
-            break
-        if i not in usadas_a and j not in usadas_b:
-            usadas_a.add(i)
-            usadas_b.add(j)
-            casados[i] = j
-    return casados
-
-
-def consenso_por_caixa(listas, limiar_iou=IOU_ACERTO):
-    """
-    As caixas em que os N anotadores concordam, sem exigir a imagem inteira:
-    cada caixa do primeiro que casa (mesma classe, IoU >= limiar_iou) com uma
-    de cada um dos outros, e essas entre si. [(classe, menor confiança,
-    mediana de cada coordenada)].
-    """
-    base = listas[0]
-    casamentos = [casar_mesma_classe(base, outra, limiar_iou) for outra in listas[1:]]
-    consenso = []
-    for i, (classe, conf, caixa) in enumerate(base):
-        if not all(i in c for c in casamentos):
-            continue
-        grupo = [(conf, caixa)] + [(l[c[i]][1], l[c[i]][2]) for l, c in zip(listas[1:], casamentos)]
-        caixas = [g[1] for g in grupo]
-        if any(anotar.iou(x, y) < limiar_iou for k, x in enumerate(caixas) for y in caixas[k + 1:]):
-            continue
-        consenso.append((classe, min(g[0] for g in grupo),
-                         tuple(median(c[k] for c in caixas) for k in range(4))))
-    return consenso
-
-
-def votar(listas, limiar_iou=IOU_ACERTO):
-    """
-    Voto NooN estrito (OBJETIVO.md, seção 3) sobre as detecções de N
-    anotadores numa imagem, cada lista já no limiar de leitura do seu
-    anotador. Passa se todos propõem o mesmo número de caixas e cada caixa do
-    primeiro casa (mesma classe, IoU >= limiar_iou) com uma de cada um dos
-    outros, e essas também casam entre si. Imagem sem caixa não passa.
-    Devolve (motivo, consenso): motivo None se passou, senão "vazia",
-    "quantidade" ou "caixas"; consenso, [(classe, menor confiança, mediana
-    de cada coordenada)] quando passa.
-    """
-    if not any(listas):
-        return "vazia", []
-    if len({len(l) for l in listas}) > 1:
-        return "quantidade", []
-    consenso = consenso_por_caixa(listas, limiar_iou)
-    if len(consenso) != len(listas[0]):
-        return "caixas", []
-    return None, consenso
-
-
 def medir_voto(pares_por_anotador, limiares, materiais, limiar_iou=IOU_ACERTO):
     """
     O voto sobre as imagens com proposta de todos os anotadores e rótulo da
@@ -527,7 +466,7 @@ def medir_voto(pares_por_anotador, limiares, materiais, limiar_iou=IOU_ACERTO):
         c["caixas_consenso"] += len(por_caixa)
         c["caixas_consenso_certas"] += casar(por_caixa, verdade, limiar_iou)[0]
         c["objetos_com_consenso"] += len(casar_sem_classe(por_caixa, verdade, limiar_iou))
-        motivo, consenso = votar(listas, limiar_iou)
+        motivo, consenso = voto_estrito(listas, limiar_iou)
         if motivo:
             c[f"reprovada_{motivo}"] += 1
             continue

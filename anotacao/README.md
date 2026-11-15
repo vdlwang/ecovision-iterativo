@@ -52,7 +52,7 @@ O `anotar.py` só anota imagens importadas e `pendente`: sem nomes na linha de c
 | `--dispositivo` | `cuda` se houver | `cuda` ou `cpu` |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` com as caixas desenhadas |
 | `--sobrescrever` | — | Anota de novo imagens pendentes que já têm proposta deste anotador |
-| `--exportar` | — | Só refaz do banco os arquivos gerados (`data.yaml`, `labels/`, `revisadas.txt`) e sai |
+| `--exportar` | — | Só refaz do banco os arquivos gerados (`data.yaml`, `labels/`, as listas) e sai |
 | `--aceitar` | — | Grava as propostas do anotador como uma revisão sem mudança (revisor `aceitar`), copia-as para `labels/` e marca as imagens como `revisada`; só mexe nas `pendente`, só as caixas visíveis (a partir de `--confianca`), e deixa pendentes as que têm caixa de classe escondida. Com imagens na linha de comando, aceita só elas, depois de anotá-las; sem, todas as pendentes |
 
 Opções de detecção, comuns a todo detector. A proposta guarda **todas** as caixas a partir de `--piso`, sempre com a classe; `--confianca` e `--confianca-classe` são gravados nela e aplicados por quem lê (a página, o `aceitar`, depois o voto), então dá para mudá-los sem rodar o modelo de novo (decisão 16 do `OBJETIVO.md`).
@@ -74,6 +74,27 @@ Opções de um anotador só:
 | `--owlv2-frase` | `{}` | `owlv2`: modelo da consulta de cada prompt, com `{}` no lugar dele (ex.: `"a photo of a {}"`). Fica gravada nos `parametros` da proposta |
 | `--yolo-lado` | `640` | `yolo`: lado maior da imagem na entrada da rede, múltiplo de 32 (o do treino do `best.pt`). 960 e 1280 não melhoram a cobertura nas fotos de validação |
 
+### Votar
+
+O `votar.py` aplica o voto NooN estrito (`OBJETIVO.md`, seção 3; o trio é o da decisão 17) às imagens **pendentes de lotes de treino** com proposta vigente de todos os anotadores. A imagem é aprovada se todos propõem o mesmo número de caixas e cada caixa casa, com a mesma classe e IoU ≥ 0,5, com uma de cada um dos outros. A aprovada recebe como rótulo as **caixas de consenso** (a mediana de cada coordenada, com a menor das confianças) e entra no `treino.txt`. A que falha continua `pendente`, com o motivo (`quantidade`, `caixas`, `vazia` ou `classe_fora`), e vai para a revisão.
+
+```bash
+python anotacao/votar.py anotacoes                                  # grounding-dino, owlv2 e yolo
+python anotacao/votar.py anotacoes --anotadores grounding-dino yolo --limiares g 0.05
+```
+
+- Cada anotador é lido no limiar de leitura gravado na proposta (`confianca`), ou no de `--limiares` (`g` mantém o gravado). Vale a classe do anotador mesmo abaixo de `confianca_classe`: ela só é escondida do revisor.
+- As imagens de teste não são votadas, porque passam pela revisão sem pré-anotação (seção 4 do `OBJETIVO.md`, T9). As imagens sem lote contam como treino.
+- Rodar de novo vota só as imagens novas e as que ganharam proposta nova de algum anotador. `--revotar` vota de novo todas as pendentes (por exemplo, com outros `--limiares`). Cada voto é uma linha nova no banco, com as propostas e os limiares que usou.
+- A revisão humana vale mais que o voto: uma aprovada que o revisor salva passa a ter o rótulo dele, e o voto não mexe mais nela. Por enquanto a página de revisão ainda lista as aprovadas entre as pendentes. A fila só das reprovadas é o T7.
+
+| Opção | Padrão | O que faz |
+|---|---|---|
+| `--anotadores` | `grounding-dino owlv2 yolo` | Quem vota (ao menos dois); o primeiro dá a ordem das caixas de consenso |
+| `--limiares` | gravados | Um limiar de leitura por anotador, ou `g` |
+| `--iou` | `0.5` | IoU mínimo para duas caixas casarem |
+| `--revotar` | — | Vota de novo as já votadas com as mesmas propostas |
+
 ## Google Colab
 
 Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb) ([abrir no Colab](https://colab.research.google.com/github/vdlwang/ecovision-iterativo/blob/main/anotacao/anotar_colab.ipynb)). Ele clona o repositório e roda o próprio `importar.py` e o `anotar.py`, com as opções acima em formulário; as fotos podem vir do Google Drive ou ser enviadas do computador, são importadas como um lote, e a saída fica no Drive (ou é baixada como `.zip`). O banco não é usado direto sobre o Drive montado, onde as travas do SQLite não valem: o notebook trabalha numa cópia em `/content` e a grava de volta no Drive no último passo; se o Colab desconectar antes, o que foi anotado depois da última gravação se perde (imagens já importadas e já anotadas são puladas, então basta rodar de novo). Não rode dois Colabs sobre a mesma saída. O campo `RAMO` escolhe o ramo clonado.
@@ -82,17 +103,19 @@ Sem GPU no computador, use o notebook [`anotar_colab.ipynb`](anotar_colab.ipynb)
 
 ```
 anotacoes/
-├── anotacoes.sqlite                   # o estado: classes, lotes, imagens, propostas e revisões
+├── anotacoes.sqlite                   # o estado: classes, lotes, imagens, propostas, revisões e votos
 ├── anotacoes.sqlite.bak               # cópia do banco antes de cada anotar.py
 ├── images/lote_foto.jpg               # gravada pelo importar.py
-├── labels/lote_foto.txt               # gerado do banco: rótulos finais (YOLO) das revisadas
-├── revisadas.txt                      # gerado do banco: imagens revisadas; train e val do data.yaml
-├── data.yaml                          # gerado do banco: names (TACO + Background); train e val: revisadas.txt
+├── labels/lote_foto.txt               # gerado do banco: rótulos finais (YOLO) das revisadas e aprovadas
+├── treino.txt                         # gerado do banco: treino aprovadas pelo voto ou revisadas; train do data.yaml
+├── teste.txt                          # gerado do banco: teste revisadas; val do data.yaml
+├── revisadas.txt                      # gerado do banco: as revisadas por humano, de qualquer conjunto
+├── data.yaml                          # gerado do banco: names (TACO + Background), train e val
 ├── previa/grounding-dino/foto.jpg     # só com --previa
 └── visualizar.html                    # página para conferir propostas e rótulos (abaixo)
 ```
 
-O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels/`, `revisadas.txt` e `data.yaml` são gerados dele, para o Ultralytics e o Colab, que leem arquivos. Cada operação grava primeiro no banco, numa transação, e depois os arquivos daquela imagem; interrompida entre os dois, o banco vale, e `anotar.py --exportar` (ou a abertura do `revisar.py`) refaz os arquivos. O `importar.py`, o `anotar.py` e o `revisar.py` podem rodar ao mesmo tempo sobre a mesma saída: cada gravação é uma transação, e quem chega depois espera. Para inspecionar: `sqlite3 anotacoes/anotacoes.sqlite` ou o DB Browser for SQLite. O esquema está no `saida.py` e no [`PLANO-REVISAO.md`](PLANO-REVISAO.md), seção 6:
+O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels/`, as listas (`treino.txt`, `teste.txt`, `revisadas.txt`) e `data.yaml` são gerados dele, para o Ultralytics e o Colab, que leem arquivos. Cada operação grava primeiro no banco, numa transação, e depois os arquivos daquela imagem; interrompida entre os dois, o banco vale, e `anotar.py --exportar` (ou a abertura do `revisar.py`) refaz os arquivos. O `importar.py`, o `anotar.py`, o `votar.py` e o `revisar.py` podem rodar ao mesmo tempo sobre a mesma saída: cada gravação é uma transação, e quem chega depois espera. Para inspecionar: `sqlite3 anotacoes/anotacoes.sqlite` ou o DB Browser for SQLite. O esquema está no `saida.py` e no [`PLANO-REVISAO.md`](PLANO-REVISAO.md), seção 6:
 
 | Tabela | O que guarda |
 |---|---|
@@ -102,14 +125,15 @@ O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels
 | `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
 | `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
 | `revisoes`, `caixas_revisao` | Cada sessão de revisão: ação, data, tempo ativo, revisor, a proposta que serviu de base e as caixas finais com o desfecho |
+| `votacoes`, `votos`, `votos_propostas`, `caixas_voto` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado, o motivo, as propostas usadas com o limiar de cada uma e as caixas de consenso das aprovadas. O resultado do voto vigente é repetido em `imagens.voto` e `imagens.motivo`. Bancos da versão 1 do esquema ganham essas tabelas ao serem abertos |
 
-As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada com `.txt` entraria no treino como negativo falso. E, sem a proposta original, não dá para medir quanto o revisor corrigiu cada anotador (RF13). Por isso o `data.yaml` aponta para `revisadas.txt`, e não para `images/`.
+As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada com `.txt` entraria no treino como negativo falso. E, sem a proposta original, não dá para medir quanto o revisor corrigiu cada anotador (RF13). Por isso o `data.yaml` aponta para as listas, e não para `images/`.
 
 **Nada é sobrescrito.** Anotar de novo (`--sobrescrever`) grava uma proposta nova, e a vigente de um anotador numa imagem é a mais recente; as anteriores continuam no banco, e a revisão guarda qual versão viu. Cada revisão é uma linha nova, e a vigente é a mais recente. A proposta guarda a classe pelo nome (o anotador pode propor classe fora do `data.yaml`) e as caixas da mais confiante para a menos. Quem lê aplica os limiares de leitura gravados nos parâmetros da execução (`confianca`, `confianca_classe`): a página mostra a partir de `confianca`, esconde a classe abaixo de `confianca_classe` e oferece as de baixo como candidatas. O registro da revisão cita cada caixa pelo índice na proposta, que não muda com os limiares. Uma imagem entra como `pendente` ao ser importada, e anotar não muda o status dela. Os rótulos em `labels/` usam o formato de detecção do YOLO (`id cx cy w h`, de 0 a 1), e uma imagem revisada sem objetos tem `.txt` vazio (fundo).
 
 Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão guarda caixas (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, ou só com `labels/`) são recusadas: importe de novo numa saída nova.
 
-Ainda não há divisão entre treino e validação: ela deve ser feita por sessão de captura, nunca por imagem (monografia, seção 5.3.5), e fica para quando houver sessões.
+**Treino e teste** são divididos por lote (sessão de captura, nunca por imagem; monografia, seção 5.3.5), no `importar.py`. O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`. Enquanto nenhuma imagem de teste foi revisada, o `val` também é o `treino.txt`, com um aviso no arquivo, porque o Ultralytics não treina sem `val`. Nesse caso, as métricas de validação não medem generalização.
 
 O diretório `anotacoes/` está no `.gitignore`: imagens não vão para o repositório (RNF10).
 
