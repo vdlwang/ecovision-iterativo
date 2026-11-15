@@ -396,3 +396,23 @@ def test_auditada_aparece_como_reprovada(tmp_path):
     assert (dados["voto"]["resultado"], dados["voto"]["motivo"]) == ("falhou", None)
     # o rótulo de consenso continua em labels/ e no treino até a revisão
     assert (saida / "labels" / "b c.txt").exists()
+
+
+def test_api_de_metricas_cega_por_padrao(tmp_path):
+    saida = montar(tmp_path)
+    votar.votar(saida, DUPLA, revotar=True, auditoria=1)   # b c.png, aprovada, vira auditada
+    srv = revisar.criar_servidor(saida, CLASSES, porta=0)
+    thread = threading.Thread(target=srv.serve_forever, args=(0.05,), daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}/api/metricas"
+        status, cega = pedir_json(base)
+        assert status == 200 and cega["cega"] and "auditoria" not in cega
+        # e.jpg, aprovada e revisada antes, conta; b c.png, auditada, está entre as a revisar
+        assert "auditadas" not in cega["voto"] and cega["voto"]["aprovadas"] == 1
+        status, completa = pedir_json(base + "?auditoria=1")
+        assert status == 200 and not completa["cega"]
+        assert completa["auditoria"]["auditadas"] == 1 and completa["voto"]["auditadas"] == 1
+    finally:
+        srv.shutdown()
+        srv.server_close()

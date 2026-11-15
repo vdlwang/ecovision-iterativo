@@ -9,16 +9,19 @@
   :root { --fundo: #111418; --painel: #1b2027; --borda: #2c333d; --texto: #e6e9ee;
           --suave: #9aa4b2; --destaque: #22c55e; --alerta: #f59e0b; --perigo: #ef4444; }
   * { box-sizing: border-box; }
+  /* hidden vale mesmo onde o CSS dá display (.acoes, main) */
+  [hidden] { display: none !important; }
   body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--fundo);
          color: var(--texto); display: flex; height: 100vh; }
   aside { width: 280px; flex: none; background: var(--painel); border-right: 1px solid var(--borda);
           display: flex; flex-direction: column; }
-  aside header { padding: 12px 14px; border-bottom: 1px solid var(--borda); display: grid; gap: 8px; }
+  aside header { padding: 12px 14px; border-bottom: 1px solid var(--borda); display: grid; gap: 8px;
+                 grid-template-columns: minmax(0, 1fr); }
   aside h1 { font-size: 15px; margin: 0; }
   aside small { color: var(--suave); }
   .filtros { display: flex; gap: 8px; }
-  .filtros label { flex: 1; display: grid; gap: 2px; color: var(--suave); font-size: 12px; }
-  select { background: var(--fundo); color: var(--texto); border: 1px solid var(--borda);
+  .filtros label { flex: 1; min-width: 0; display: grid; gap: 2px; color: var(--suave); font-size: 12px; }
+  select { min-width: 0; max-width: 100%; background: var(--fundo); color: var(--texto); border: 1px solid var(--borda);
            border-radius: 6px; padding: 3px 6px; }
   #fila { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
   #fila li { padding: 8px 14px; cursor: pointer; display: flex; justify-content: space-between;
@@ -89,6 +92,27 @@
   #opcoes .material { margin-left: auto; color: var(--suave); font-size: 12px; }
   #opcoes li.sugestao .material { color: var(--texto); }
   .dica { color: var(--suave); font-size: 12px; }
+  .abas { display: flex; gap: 4px; }
+  .abas button { flex: 1; }
+  .abas button.ativa { background: #263445; border-color: #60a5fa; }
+  #metricas { flex: 1; overflow-y: auto; padding: 14px 18px 28px; min-width: 0; }
+  #metricas h2 { font-size: 15px; margin: 22px 0 8px; }
+  #metricas h2:first-of-type { margin-top: 4px; }
+  #metricas .topo { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  #metricas .topo label { color: var(--suave); display: flex; gap: 6px; align-items: center; }
+  #metricas table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #metricas th, #metricas td { border-bottom: 1px solid var(--borda); padding: 4px 10px;
+                               text-align: right; white-space: nowrap; }
+  #metricas th:first-child, #metricas td:first-child { text-align: left; }
+  #metricas th { color: var(--suave); font-weight: 500; }
+  #metricas .rolagem { overflow-x: auto; }
+  #metricas .numeros { display: flex; flex-wrap: wrap; gap: 10px; }
+  #metricas .numero { background: var(--painel); border: 1px solid var(--borda); border-radius: 6px;
+                      padding: 8px 12px; min-width: 120px; }
+  #metricas .numero b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  #metricas .numero span { color: var(--suave); font-size: 12px; }
+  #metricas ul.avisos { margin: 0; padding-left: 18px; color: var(--alerta); }
+  #metricas .nota { color: var(--suave); font-size: 12px; max-width: 760px; }
   .erro { color: var(--perigo); }
   @media (max-width: 700px) {
     body { flex-direction: column; height: auto; min-height: 100vh; }
@@ -102,6 +126,10 @@
 <aside>
   <header>
     <h1>Revisão</h1>
+    <nav class="abas">
+      <button id="aba-revisao" class="ativa">Revisão</button>
+      <button id="aba-metricas">Métricas</button>
+    </nav>
     <small id="resumo">carregando…</small>
     <div class="filtros">
       <label>fila
@@ -154,6 +182,15 @@
     </div>
   </div>
 </main>
+<section id="metricas" hidden>
+  <div class="topo">
+    <button id="atualizar-metricas">Atualizar</button>
+    <label title="Mostra a amostra da auditoria cega e conta as auditadas à parte: quem revisa passa a saber quais revisões eram da auditoria (T8)">
+      <input type="checkbox" id="com-auditoria"> mostrar a auditoria (quebra a cegueira)</label>
+    <span class="dica" id="metricas-estado"></span>
+  </div>
+  <div id="metricas-corpo"></div>
+</section>
 <dialog id="confirmar">
   <form method="dialog">
     <p id="confirmar-texto"></p>
@@ -257,7 +294,7 @@ async function carregarFila(manter) {
       ? `\nmenor confiança proposta: ${im.confianca_min ?? "—"}` : "");
     // sem o motivo da falha: a auditoria é cega (T8)
     li.append(nome, info);
-    li.onclick = () => { if (podeSair()) mostrar(i); };
+    li.onclick = () => { trocarAba(false); if (podeSair()) mostrar(i); };
     lista.append(li);
   });
 
@@ -918,6 +955,141 @@ document.addEventListener("keydown", e => {
     enviar("descartar");
   }
 });
+
+// --- aba de métricas (metricas.py, T10) ---------------------------------------
+// Cega por padrão: as auditadas contam com as reprovadas, e nada da auditoria
+// aparece. Mostrá-la deixaria o revisor ver o contador subir ao salvar uma.
+
+let abaMetricas = false;
+
+function trocarAba(metricasAtiva) {
+  if (metricasAtiva === abaMetricas) return;
+  if (metricasAtiva && !podeSair()) return;
+  abaMetricas = metricasAtiva;
+  document.querySelector("main").hidden = metricasAtiva;
+  $("metricas").hidden = !metricasAtiva;
+  $("aba-revisao").classList.toggle("ativa", !metricasAtiva);
+  $("aba-metricas").classList.toggle("ativa", metricasAtiva);
+  if (metricasAtiva) { fecharBusca(); carregarMetricas(); }
+}
+$("aba-revisao").onclick = () => trocarAba(false);
+$("aba-metricas").onclick = () => trocarAba(true);
+$("atualizar-metricas").onclick = () => carregarMetricas();
+$("com-auditoria").onchange = () => carregarMetricas();
+// Na aba de métricas, os atalhos da revisão não valem
+document.addEventListener("keydown", e => {
+  if (abaMetricas && e.target.tagName !== "INPUT") e.stopImmediatePropagation();
+}, true);
+
+function el(tag, props = {}, ...filhos) {
+  const elemento = Object.assign(document.createElement(tag), props);
+  elemento.append(...filhos.filter(f => f !== null && f !== undefined));
+  return elemento;
+}
+const pct = x => x === null || x === undefined ? "—" : `${Math.round(x * 100)}%`;
+const seg = x => x === null || x === undefined ? "—" : `${x.toFixed(1)} s`;
+const numero = (valor, rotulo) => el("div", { className: "numero" },
+  el("b", { textContent: valor }), el("span", { textContent: rotulo }));
+function tabela(cabecalho, linhas) {
+  return el("div", { className: "rolagem" }, el("table", {},
+    el("thead", {}, el("tr", {}, ...cabecalho.map(c => el("th", { textContent: c })))),
+    el("tbody", {}, ...linhas.map(l => el("tr", {}, ...l.map(c => el("td", { textContent: c })))))));
+}
+
+function nomeGrupo(g, cega) {
+  return { falhou: cega ? "reprovadas no voto" : "reprovadas no voto (sem as auditadas)",
+           auditoria: "auditoria", aprovada: "aprovadas, revistas pelo filtro",
+           teste: "teste", todas: "todas" }[g] ?? g;
+}
+
+async function carregarMetricas() {
+  $("metricas-estado").textContent = "carregando…";
+  try {
+    const m = await api("/api/metricas" + ($("com-auditoria").checked ? "?auditoria=1" : ""));
+    mostrarMetricas(m);
+    $("metricas-estado").textContent = `lidas às ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    $("metricas-estado").textContent = "";
+    $("metricas-corpo").replaceChildren(el("p", { className: "erro", textContent: `Erro: ${e.message}` }));
+  }
+}
+
+function mostrarMetricas(m) {
+  const corpo = [];
+  const v = m.voto;
+  corpo.push(el("h2", { textContent: "Voto" }), el("div", { className: "numeros" },
+    numero(v.treino_votadas, "imagens de treino votadas"),
+    ...(m.cega ? [numero(v.aprovadas, "aprovadas"), numero(v.a_revisar, "a revisar")] : [
+      numero(`${v.aprovadas} (${pct(v.taxa_aprovacao)})`, `aprovadas, ${v.auditadas} na auditoria`),
+      ...Object.entries(v.falhou).map(([motivo, q]) => numero(q, `reprovadas: ${motivo}`))]),
+    numero(v.teste_unidas, "imagens de teste votadas (união)"),
+    numero(v.sem_voto, "pendentes sem voto")));
+  if (m.cega) corpo.push(el("p", { className: "nota", textContent:
+    "Como na fila: as aprovadas sorteadas para a auditoria contam entre as a revisar, e o motivo "
+    + "das reprovadas não aparece. A taxa de aprovação e os motivos ficam com a auditoria "
+    + "(opção acima) e no metricas.py." }));
+
+  if (m.avisos.length) corpo.push(el("h2", { textContent: "Avisos" }),
+    el("ul", { className: "avisos" }, ...m.avisos.map(a => el("li", { textContent: a }))));
+
+  if (!m.cega) {
+    const a = m.auditoria;
+    corpo.push(el("h2", { textContent: "Auditoria cega" }));
+    if (!a.revistas) corpo.push(el("p", { className: "nota",
+      textContent: `${a.auditadas} auditada(s), nenhuma revista ainda.` }));
+    else {
+      const f = a.fracao_correta, c = a.caixas_consenso;
+      corpo.push(el("div", { className: "numeros" },
+        numero(`${a.revistas} de ${a.auditadas}`, "auditadas revistas"),
+        numero(pct(f.p), `corretas por inteiro (IC 95%: ${pct(f.ic95[0])} a ${pct(f.ic95[1])})`),
+        numero(a.descartadas, "descartadas (contam como erro)"),
+        numero(`${c.aceita} / ${c.classe_corrigida} / ${c.removida}`,
+               "caixas de consenso: aceitas / classe corrigida / removidas"),
+        numero(a.objetos_perdidos, "objetos que o voto não tinha")));
+    }
+  }
+
+  corpo.push(el("h2", { textContent: "Correções (revisão vigente)" }));
+  const grupos = Object.entries(m.correcoes);
+  corpo.push(grupos.length ? tabela(
+    ["grupo", "salvas", "descartadas", "caixas", "aceitas", "classe corrigida",
+     "classe atribuída", "adicionadas", "removidas do voto"],
+    grupos.map(([g, c]) => [nomeGrupo(g, m.cega), c.salvas, c.descartadas, c.caixas,
+      c.desfechos.aceita, c.desfechos.classe_corrigida, c.desfechos.classe_atribuida,
+      c.desfechos.adicionada + (Object.keys(c.adicionadas).length ? " ("
+        + Object.entries(c.adicionadas).map(([o, q]) => `${o} ${q}`).join(", ") + ")" : ""),
+      c.removidas]))
+    : el("p", { className: "nota", textContent: "Nenhuma revisão ainda." }));
+  if (m.correcoes.teste) corpo.push(el("p", { className: "nota", textContent:
+    "No teste, revisado sem pré-anotação, toda caixa é adicionada pelo clique, e nenhuma conta "
+    + "como removida: a união do voto não vai à página." }));
+
+  corpo.push(el("h2", { textContent: "Tempo ativo de revisão" }));
+  const tempos = Object.entries(m.tempo);
+  corpo.push(tempos.length ? tabela(
+    ["grupo", "revisões", "por imagem (mediana)", "por imagem (média)", "por objeto"],
+    tempos.map(([g, t]) => [nomeGrupo(g, m.cega), t.revisoes, seg(t.mediana_s), seg(t.media_s),
+                            seg(t.por_objeto_s)]))
+    : el("p", { className: "nota", textContent: "Nenhuma revisão ainda." }));
+
+  corpo.push(el("h2", { textContent: `Anotadores frente à revisão (IoU ≥ ${m.iou})` }));
+  const conjuntos = Object.entries(m.anotadores);
+  if (!conjuntos.length) corpo.push(el("p", { className: "nota",
+    textContent: "Nenhuma imagem salva na revisão ainda." }));
+  for (const [conjunto, porAnotador] of conjuntos) corpo.push(
+    el("p", { className: "nota", textContent: conjunto === "teste"
+      ? "Teste (revisado sem pré-anotação: a referência menos enviesada)"
+      : "Treino (a revisão parte das caixas do voto: precisão otimista)" }),
+    tabela(["anotador", "imagens", "caixas", "objetos", "localização P", "localização R",
+            "com a classe P", "com a classe R"],
+      Object.entries(porAnotador).map(([a, x]) => [a, x.imagens, x.previstas, x.objetos,
+        pct(x.localizacao.precisao), pct(x.localizacao.recall),
+        pct(x.classe.precisao), pct(x.classe.recall)])));
+  corpo.push(el("p", { className: "nota", textContent:
+    "Sem desenho à mão (decisão 12), as caixas salvas vêm sempre das dos anotadores: um objeto "
+    + "que nenhum deles cobre não entra, e o recall sai otimista. Só a revisão vigente conta." }));
+  $("metricas-corpo").replaceChildren(...corpo);
+}
 
 // #<nome> no endereço abre essa imagem; se ela não estiver na fila a
 // revisar, a fila passa a mostrar todas

@@ -173,3 +173,49 @@ def test_de_ponta_a_ponta_pelo_banco(tmp_path, capsys):
 def test_main_recusa_saida_sem_banco(tmp_path):
     with pytest.raises(ValueError, match="não tem banco"):
         metricas.main([str(tmp_path)])
+
+
+def cenario_com_auditoria():
+    return [
+        registro("aud", resultado="aprovada", auditoria=True, caixas=[aceita("Lata", A)], tempo=8),
+        registro("rep", motivo="quantidade", caixas=[aceita("Lata", A)], tempo=20),
+        registro("apr", resultado="aprovada", status="pendente", revisada=False),
+        registro("t", conjunto="teste", resultado="uniao", status="pendente", revisada=False),
+    ]
+
+
+def test_modo_cego_mostra_so_o_que_a_pagina_mostra():
+    registros = cenario_com_auditoria()
+    completo = metricas.medir(registros)
+    assert set(completo["correcoes"]) == {"falhou", "auditoria"}
+    assert completo["voto"]["auditadas"] == 1
+    cego = metricas.medir(registros, cega=True)
+    assert cego["cega"] and "auditoria" not in cego
+    # como na fila: a auditada está entre as "a revisar", sem motivos nem taxa
+    assert cego["voto"] == {"treino_votadas": 3, "aprovadas": 1, "a_revisar": 2,
+                            "teste_unidas": 1, "sem_voto": 0}
+    assert list(cego["correcoes"]) == ["falhou"] and cego["correcoes"]["falhou"]["salvas"] == 2
+    assert cego["tempo"]["falhou"]["revisoes"] == 2
+    assert "auditoria" not in json.dumps(cego).lower()
+
+
+def test_avisos_de_inconsistencia_e_de_leitura():
+    registros = cenario_com_auditoria() + [
+        registro("sem_rev", status="revisada", revisada=False),
+        registro("pend_rev", status="pendente"),
+        registro("tempo0", tempo=0),
+        registro("troca", conjunto="teste", resultado="aprovada"),
+    ]
+    avisos = metricas.medir(registros)["avisos"]
+    texto = "\n".join(avisos)
+    assert "revisada ou descartada sem revisão registrada: sem_rev" in texto
+    assert "pendente com revisão registrada: pend_rev" in texto
+    assert "conjunto e resultado do voto não batem" in texto and "troca" in texto
+    assert "tempo ativo zero" in texto and "tempo0" in texto
+    assert "Auditoria: 1 de 1" in texto
+    # "troca" é de teste e foi salva: há teste revisado, sem o aviso de base de teste vazia
+    assert "Nenhuma imagem de teste revisada" not in texto
+    cegos = metricas.medir(registros, cega=True)["avisos"]
+    assert not any("uditoria" in a for a in cegos)
+    assert "Nenhuma imagem de teste revisada" in "\n".join(
+        metricas.medir(cenario_com_auditoria())["avisos"])

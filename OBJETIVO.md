@@ -26,12 +26,13 @@ O código do voto aceita N anotadores, mas cada um a mais custa uma integração
 
 O framework (T1) grava as propostas de cada anotador separadas das anotações finais, e o status de cada imagem, num banco SQLite (`anotacoes.sqlite`, desde 2026-11-13; antes, `imagens.csv`), que é a fonte do estado. A tabela `imagens` já tem as colunas do sistema completo:
 
-- `lote`: sessão de captura de onde a imagem veio.
+- `lote`: a importação de onde a imagem veio (com a região de interesse).
 - `conjunto`: `treino` ou `teste`, sorteado por imagem na entrada (1 em cada 10 para o teste, decisão 7) e nunca mais alterado.
-- `voto`: `passou`, `falhou` ou vazio (teste, ou ainda não votada); `motivo` diz por que falhou (contagem diferente, classe diferente, IoU baixo, imagem vazia).
-- `status`: além de `pendente`, `revisada` e `descartada` (do framework), `aprovada` (voto, sem humano).
+- `voto`: o resultado do voto vigente, `aprovada` ou `falhou` (treino) ou `uniao` (teste), ou vazio (ainda não votada); `motivo` diz por que falhou: `quantidade` (números de caixas diferentes), `caixas` (caixa ou classe sem par), `vazia` (ninguém achou nada) ou `classe_fora` (classe fora do `data.yaml`).
+- `auditoria`: a aprovada sorteada para a auditoria cega (T8).
+- `status`: `pendente`, `revisada` ou `descartada`. A aprovada pelo voto continua `pendente`, com `voto = aprovada`, e já tem rótulo; a revisão humana vale mais que o voto.
 
-`treino.txt` recebe as de treino `aprovada` ou `revisada`; `teste.txt`, só as de teste `revisada`. Uma imagem sem `labels/` nunca entra em nenhum dos dois. O `data.yaml` aponta para os dois arquivos.
+`treino.txt` recebe as de treino aprovadas pelo voto (ainda pendentes) ou revisadas; `teste.txt`, só as de teste `revisada`. Uma imagem sem `labels/` nunca entra em nenhum dos dois. O `data.yaml` aponta para os dois arquivos.
 
 Por que as propostas não vão direto para `labels/`: o Ultralytics trata imagem sem objetos como fundo, então uma imagem não revisada, ou com objetos que o modelo não achou, entraria no treino como negativo falso; e sem guardar a proposta original não dá para medir a precisão de cada anotador (RF13).
 

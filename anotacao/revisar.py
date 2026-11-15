@@ -11,6 +11,8 @@ refaz do banco os arquivos gerados (saida.exportar). Escuta só em 127.0.0.1.
     GET /api/imagens?status=&ordem= fila, anotadores e contagem por situação
     GET /api/imagens/<nome>        voto (a base da edição), propostas, anotação
                                    final, status e revisão
+    GET /api/metricas?auditoria=   as do metricas.py (T10); cegas, sem nada da
+                                   auditoria, salvo com auditoria=1
     PUT /api/imagens/<nome>        salva ou descarta uma pendente votada (saida.revisar)
 
 A revisão parte do voto (votar.py): as caixas de consenso (treino) ou da união
@@ -35,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import metricas
 import saida as formato
 from anotar import DIR_SCRIPT, carregar_classes
 
@@ -186,6 +189,11 @@ def criar_servidor(saida, classes, host="127.0.0.1", porta=8000):
                                                  consulta.get("ordem", "incerteza")))
                 elif url.path.startswith("/api/imagens/"):
                     self.enviar_json(detalhar(saida, url.path[len("/api/imagens/"):]))
+                elif url.path == "/api/metricas":
+                    # Cegas por padrão: com a auditoria, o revisor a veria
+                    # crescer ao salvar uma auditada (T8)
+                    self.enviar_json(metricas.medir(formato.ler_registros(saida),
+                                                    cega=consulta.get("auditoria") != "1"))
                 elif url.path.startswith("/images/"):
                     nome, _ = nome_valido(saida, url.path[len("/images/"):])
                     caminho = saida / "images" / nome

@@ -251,6 +251,7 @@ O servidor escuta só em `127.0.0.1` e lê o banco a cada pedido, então propost
 | `GET /api/classes` | `[{id, nome, material}]` |
 | `GET /api/imagens?status=a_revisar&ordem=incerteza` | `{imagens: [{nome, status, situacao, voto, motivo, anotadores, n_caixas, confianca_min, tem_final}], anotadores, contagem}`; `status` é a situação: `a_revisar`, `aprovada`, `sem_voto`, `revisada`, `descartada` ou `todas`. Nas de teste pendentes, sem anotadores nem confiança. `motivo` vem sempre nulo, e a aprovada da auditoria vem como `voto: "falhou"`, `situacao: "a_revisar"` e `tem_final: false` (auditoria cega) |
 | `GET /api/imagens/<nome>` | `{nome, status, situacao, conjunto, largura, altura, final, propostas: {anotador: [...]}, voto, invalidas, revisao}`; `voto` (nulo sem voto): `{id, resultado, motivo, conjunto, caixas: [{indice, id, nome, conf, caixa, anotadores, sugestoes: [{id, nome, anotadores: [{anotador, conf}]}]}], candidatas: [{anotador, indice, origem, conf, caixa}]}`; caixa de treino com `id` nulo é conflito, com as `sugestoes`. No teste pendente, `propostas` e `voto.caixas` vêm vazios, e as candidatas incluem uma caixa visível por objeto da união (`origem: "proposta"`) |
+| `GET /api/metricas?auditoria=1` | As medidas do `metricas.py` (`medir()`); sem `auditoria=1`, cegas: sem o bloco `auditoria`, com as auditadas no grupo `falhou`, e o voto só com `treino_votadas`, `aprovadas` (fora da auditoria), `a_revisar`, `teste_unidas` e `sem_voto` |
 | `PUT /api/imagens/<nome>` | Recebe `{acao: "salvar" \| "descartar", voto_id, tempo_ativo_s, caixas: [{id, caixa, origem, indice, anotador}]}` e devolve o mesmo que o `GET`. 400 para pedido inválido (nada é gravado); 409 se a imagem não está pendente, não foi votada, ou se `voto_id` não é mais o voto vigente (a imagem foi votada de novo depois que a página abriu) |
 | `GET /images/<nome>` | A imagem |
 
@@ -323,7 +324,7 @@ Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `clas
 
 ## Métricas
 
-O `metricas.py` (RF13, T10) lê o banco da saída e mede o uso da anotação, sem rodar modelo nem mudar nada:
+O `metricas.py` (RF13, T10) lê o banco da saída e mede o uso da anotação, sem rodar modelo nem mudar nada. As mesmas medidas estão na aba **Métricas** da página de revisão (abaixo):
 
 ```bash
 python anotacao/metricas.py anotacoes                      # tabelas no terminal
@@ -336,11 +337,13 @@ python anotacao/metricas.py anotacoes --json metricas.json # e todas as medidas 
 | Auditoria | Das aprovadas sorteadas (T8) já revistas, a fração **correta por inteiro** (o revisor aceitou todas as caixas de consenso, sem trocar classe, remover nem acrescentar; descartar conta como erro), com o intervalo de Wilson de 95% (a amostra é pequena: 5% das aprovadas), e o destino de cada caixa de consenso |
 | Correções | O desfecho de cada caixa da revisão vigente (aceita, classe corrigida, classe atribuída, adicionada de uma proposta ou candidata), as caixas do voto removidas e as descartadas, por grupo: `falhou`, `auditoria`, `aprovada` (revista pelo filtro) e `teste` |
 | Tempo | Tempo ativo de revisão por imagem (mediana e média) e por objeto (soma dos tempos sobre a soma das caixas salvas), por grupo |
+| Avisos | Estados que o banco não deveria ter (status sem a revisão que o explica, conjunto e resultado do voto que não batem) e limites da leitura (sem imagem de teste revisada, menos de 20 auditadas revistas, revisão com tempo zero) |
 | Anotadores | Precisão e recall de cada anotador frente à revisão salva, das caixas visíveis da proposta que o voto usou (casamento guloso, IoU ≥ `--iou`, padrão 0,5), sem e com a classe, separados em treino e teste |
 
 Cuidados ao ler:
 - **Treino é enviesado**: a revisão parte das caixas do voto e herda delas (viés de automação), então a precisão dos anotadores no treino sai otimista. O **teste**, revisado sem pré-anotação, é a referência, mas as caixas dele ainda vêm das candidatas dos anotadores (sem desenho à mão, decisão 12): um objeto que nenhum anotador cobre não entra, e o recall sai otimista também.
 - **Tempo por clique**: o tempo do teste é o da revisão por clique, não o da anotação manual.
+- **Aba Métricas** (`revisar.py`): a mesma medida, **cega por padrão**, porque quem a abre é o revisor. As auditadas contam com as reprovadas, o bloco da auditoria não aparece, e o voto mostra só o que a fila mostra (aprovadas fora da auditoria e a revisar, sem a taxa nem os motivos); senão, o revisor veria o contador da auditoria subir ao salvar uma auditada, ou deduziria quantas são. A opção "mostrar a auditoria" traz tudo, quebrando a cegueira; o `metricas.py` no terminal mostra sempre tudo. Clicar numa imagem da fila volta à revisão, e os atalhos de revisão não valem na aba.
 - Só conta a revisão vigente de cada imagem, e só a revisão salva entra na precisão e no recall (descartada não tem caixas finais). No teste, nenhuma caixa conta como removida: a união do voto não vai à página.
 
 ## Próximos passos

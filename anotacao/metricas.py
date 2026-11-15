@@ -24,6 +24,15 @@ saída: nada roda modelo nem muda o banco.
    é menos enviesada, mas as caixas ainda vêm das candidatas dos anotadores.
 
 Imagens descartadas não entram no item 5 (não têm caixas finais).
+
+6. Avisos: estados que o banco não deveria ter (status sem a revisão que o
+   explica, conjunto e resultado do voto que não batem) e limites da leitura
+   (sem base de teste revisada, amostra da auditoria pequena, revisão com
+   tempo zero).
+
+Modo cego (medir(cega=True), o da aba de métricas do revisar.py): as
+auditadas contam como reprovadas, e nada da auditoria aparece; senão, o
+revisor veria o contador da auditoria subir ao salvar uma auditada.
 """
 
 import argparse
@@ -53,11 +62,12 @@ def wilson(acertos, n, z=Z_95):
     return p, max(0.0, centro - margem), min(1.0, centro + margem)
 
 
-def grupo(registro):
+def grupo(registro, cega=False):
     """
     De onde veio a imagem revisada: 'teste', 'auditoria' (aprovada
     sorteada), 'falhou' ou 'aprovada' (revista pelo filtro das aprovadas);
-    None sem voto.
+    None sem voto. cega: a auditada conta como 'falhou', como a página a
+    mostra.
     """
     voto = registro["voto"]
     if voto is None:
@@ -65,7 +75,7 @@ def grupo(registro):
     if registro["conjunto"] == "teste":
         return "teste"
     if voto["auditoria"]:
-        return "auditoria"
+        return "falhou" if cega else "auditoria"
     return voto["resultado"]
 
 
@@ -116,10 +126,10 @@ def medir_auditoria(registros):
     }
 
 
-def medir_correcoes(registros):
+def medir_correcoes(registros, cega=False):
     por_grupo = {}
     for r in registros:
-        g, rev = grupo(r), r["revisao"]
+        g, rev = grupo(r, cega), r["revisao"]
         if g is None or rev is None:
             continue
         m = por_grupo.setdefault(g, {"salvas": 0, "descartadas": 0, "caixas": 0,
@@ -140,10 +150,10 @@ def medir_correcoes(registros):
             for g, m in sorted(por_grupo.items(), key=lambda t: GRUPOS.index(t[0]))}
 
 
-def medir_tempo(registros):
+def medir_tempo(registros, cega=False):
     por_grupo = {}
     for r in registros:
-        g, rev = grupo(r), r["revisao"]
+        g, rev = grupo(r, cega), r["revisao"]
         if g is None or rev is None:
             continue
         for chave in (g, "todas"):
@@ -214,10 +224,82 @@ def medir_anotadores(registros, limiar_iou=IOU_PADRAO):
             for conjunto, por_anotador in sorted(contas.items())}
 
 
-def medir(registros, limiar_iou=IOU_PADRAO):
-    return {"voto": medir_voto(registros), "auditoria": medir_auditoria(registros),
-            "correcoes": medir_correcoes(registros), "tempo": medir_tempo(registros),
-            "anotadores": medir_anotadores(registros, limiar_iou), "iou": limiar_iou}
+MINIMO_AUDITORIA = 20   # abaixo disso, o intervalo da auditoria é largo demais para concluir
+
+
+def avisos(registros, m, cega=False):
+    """
+    Avisos sobre os dados medidos, em texto: estados que o banco não deveria
+    ter e limites da leitura. cega: sem os que falam da auditoria.
+    """
+    lista = []
+
+    def contar(condicao):
+        return [r["nome"] for r in registros if condicao(r)]
+
+    def exemplos(nomes):
+        return ", ".join(nomes[:3]) + (f" e mais {len(nomes) - 3}" if len(nomes) > 3 else "")
+
+    for nomes, texto in (
+            (contar(lambda r: r["status"] != "pendente" and r["revisao"] is None),
+             "revisada ou descartada sem revisão registrada"),
+            (contar(lambda r: r["status"] == "pendente" and r["revisao"] is not None),
+             "pendente com revisão registrada"),
+            (contar(lambda r: r["revisao"] is not None and r["voto"] is None),
+             "revisão sem voto (toda revisão parte de um voto)"),
+            (contar(lambda r: r["voto"] is not None
+                    and (r["conjunto"] == "teste") != (r["voto"]["resultado"] == "uniao")),
+             "conjunto e resultado do voto não batem (teste é sempre união)"),
+            (contar(lambda r: r["revisao"] is not None and r["revisao"]["acao"] == "descartar"
+                    and r["status"] != "descartada"),
+             "revisão vigente descarta, mas o status não é descartada"),
+            (contar(lambda r: r["revisao"] is not None and r["revisao"]["acao"] == "salvar"
+                    and r["status"] != "revisada"),
+             "revisão vigente salva, mas o status não é revisada")):
+        if nomes:
+            lista.append(f"Inconsistência: {len(nomes)} imagem(ns) com {texto}: {exemplos(nomes)}")
+
+    sem_tempo = contar(lambda r: r["revisao"] is not None and not r["revisao"]["tempo_ativo_s"])
+    if sem_tempo:
+        lista.append(f"{len(sem_tempo)} revisão(ões) com tempo ativo zero (gravadas fora da "
+                     f"página?), que puxam o tempo para baixo: {exemplos(sem_tempo)}")
+    if not any(r["conjunto"] == "teste" and r["revisao"] is not None
+               and r["revisao"]["acao"] == "salvar" for r in registros):
+        lista.append("Nenhuma imagem de teste revisada: a precisão e o recall dos anotadores são "
+                     "só do treino, enviesados pela revisão que parte do voto; e o teste.txt "
+                     "vazio impede o treino do YOLO")
+    if not cega:
+        a = m["auditoria"]
+        if a["auditadas"] and a["revistas"] < MINIMO_AUDITORIA:
+            lista.append(f"Auditoria: {a['revistas']} de {a['auditadas']} auditada(s) revista(s); "
+                         f"com menos de {MINIMO_AUDITORIA}, o intervalo de confiança é largo "
+                         "demais para concluir sobre o erro das aprovadas")
+    return lista
+
+
+def medir(registros, limiar_iou=IOU_PADRAO, cega=False):
+    """
+    Todas as medidas. cega (aba de métricas do revisar.py): sem o bloco da
+    auditoria, com as auditadas no grupo 'falhou' e, no voto, só o que a
+    página mostra: aprovadas fora da auditoria e "a revisar" (reprovadas e
+    auditadas), sem a taxa nem os motivos.
+    """
+    m = {"voto": medir_voto(registros), "auditoria": medir_auditoria(registros),
+         "correcoes": medir_correcoes(registros, cega), "tempo": medir_tempo(registros, cega),
+         "anotadores": medir_anotadores(registros, limiar_iou), "iou": limiar_iou,
+         "cega": cega}
+    m["avisos"] = avisos(registros, m, cega)
+    if cega:
+        # O bloco do voto como a página o mostra: as auditadas estão entre as
+        # "a revisar", e o motivo não vem (a soma dos motivos contra as "a
+        # revisar" daria o número de auditadas)
+        v = m["voto"]
+        m["voto"] = {"treino_votadas": v["treino_votadas"],
+                     "aprovadas": v["aprovadas"] - v["auditadas"],
+                     "a_revisar": sum(v["falhou"].values()) + v["auditadas"],
+                     "teste_unidas": v["teste_unidas"], "sem_voto": v["sem_voto"]}
+        del m["auditoria"]
+    return m
 
 
 def pct(x):
@@ -270,6 +352,11 @@ def imprimir(m):
         print(f"{g}: {t['revisoes']} revisão(ões), por imagem {segundos(t['mediana_s'])} "
               f"(mediana) e {segundos(t['media_s'])} (média), por objeto "
               f"{segundos(t['por_objeto_s'])}")
+
+    if m["avisos"]:
+        print("\n== Avisos ==")
+        for aviso in m["avisos"]:
+            print(f"- {aviso}")
 
     print(f"\n== Anotadores frente à revisão (IoU >= {m['iou']}) ==")
     if not m["anotadores"]:
