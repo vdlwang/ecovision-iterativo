@@ -48,9 +48,6 @@
   .quadro img { display: block; max-width: 100%; }
   .caixa { position: absolute; border: 2px solid; }
   .caixa.proposta { border-style: dashed; }
-  /* Proposta de um modelo fora do voto: clique inclui na edição */
-  .caixa.modelo { border-style: dotted; opacity: .8; }
-  .caixa.modelo:hover { opacity: 1; }
   .editando .caixa { cursor: pointer; }
   .caixa.selecionada { border-width: 3px; box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,0,0,.6); }
   .caixa span { position: absolute; left: -2px; bottom: 100%; padding: 1px 5px; font-size: 12px;
@@ -90,6 +87,7 @@
   dialog p { margin: 0 0 14px; white-space: pre-line; }
   dialog .acoes { justify-content: flex-end; }
   #opcoes .material { margin-left: auto; color: var(--suave); font-size: 12px; }
+  #opcoes li.sugestao .material { color: var(--texto); }
   .dica { color: var(--suave); font-size: 12px; }
   .erro { color: var(--perigo); }
   @media (max-width: 700px) {
@@ -132,8 +130,6 @@
     <label>mostrar <select id="camada"></select></label>
     <label><input type="checkbox" id="mostrar-rotulos" checked> nomes</label>
     <label><input type="checkbox" id="mostrar-caixas" checked> caixas</label>
-    <label title="Propostas de cada modelo que não entraram no voto"><input type="checkbox"
-      id="mostrar-modelos" checked> propostas dos modelos</label>
     <button id="anterior" title="Seta para a esquerda">&larr;</button>
     <button id="proxima" title="Seta para a direita">&rarr;</button>
   </div>
@@ -151,9 +147,9 @@
       <button id="nova" title="N, sem caixa selecionada">Nova caixa <kbd>N</kbd></button>
       <span class="dica">Selecione uma caixa (clique ou <kbd>Tab</kbd>) e escreva a classe;
         <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
-        confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
-        <kbd>Esc</kbd> desfaz a seleção. Pontilhadas: propostas de um modelo fora do voto,
-        um clique inclui; o <kbd>Tab</kbd> também passa por elas, e <kbd>Enter</kbd> inclui. <kbd>N</kbd> e um clique no objeto: nova caixa.
+        confirmação; <kbd>Ctrl+S</kbd>, direto. Numa caixa em conflito, a busca vazia lista as
+        classes que os anotadores propuseram, e <kbd>1</kbd>–<kbd>3</kbd> as escolhem;
+        <kbd>Esc</kbd> desfaz a seleção. <kbd>N</kbd> e um clique no objeto: nova caixa.
         <kbd>Ctrl+Z</kbd> desfaz; <kbd>Ctrl+Shift+Z</kbd>, refaz.</span>
     </div>
   </div>
@@ -177,9 +173,8 @@ let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
-// {voto, teste, caixas: [{id, caixa, origem, indice, anotador, tocada}], sel, foco,
-// sujo, novo, desfazer, refazer} se editável; foco: a proposta pontilhada em que
-// o Tab parou, {anotador, indice} ou null (nunca junto com sel) (pendente e votada); voto: o id do voto
+// {voto, teste, caixas: [{id, caixa, origem, indice, anotador, tocada}], sel, sujo,
+// novo, desfazer, refazer} se editável (pendente e votada); voto: o id do voto
 // mostrado; origem: "voto" (indice na lista do voto), "proposta" ou "candidata"
 // (indice na proposta do anotador); novo: modo "nova caixa", {ponto, lista de
 // candidatas no ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel}
@@ -189,7 +184,8 @@ let recentes = [];    // ids das classes escolhidas nesta sessão, a mais recent
 const nomeClasse = id => classes.find(c => c.id === id)?.nome;
 // Rótulo de uma caixa sem id: proposta sem classe (nome null) ou classe fora do data.yaml
 const semId = nome => nome == null ? "sem classe" : `${nome} (fora do data.yaml)`;
-const AVISO_SEM_ID = "Há caixa sem classe ou com classe fora do data.yaml: dê a classe ou remova.";
+const AVISO_SEM_ID = "Há caixa em conflito, sem classe ou com classe fora do data.yaml: "
+  + "dê a classe ou remova.";
 const SITUACOES = { a_revisar: "a revisar", aprovada: "aprovada", sem_voto: "sem voto",
                     revisada: "revisada", descartada: "descartada" };
 const MOTIVOS = { quantidade: "os modelos acharam números de objetos diferentes",
@@ -289,7 +285,7 @@ async function mostrar(i) {
     if (dados.status === "pendente" && dados.voto) {
       // A edição parte das caixas do voto: consenso no treino, união sem classe no teste
       edicao = { voto: dados.voto.id, teste: dados.voto.resultado === "uniao",
-        sel: null, foco: null, sujo: false, novo: null, desfazer: [], refazer: [],
+        sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
         caixas: dados.voto.caixas.map(c =>
           ({ id: c.id, caixa: c.caixa, origem: "voto", indice: c.indice, tocada: false })) };
       tempo.ativo = 0;
@@ -387,66 +383,28 @@ function desenhar() {
     legenda.append(" Só visualização; escolha \"automático\" para editar.");
 }
 
-// A caixa de onde veio uma caixa da edição: do voto, de uma proposta ou candidata
+// A caixa de onde veio uma caixa da edição: do voto ou uma candidata
 function origemDe(c) {
   const v = detalhe.voto;
   if (c.origem === "voto") return v.caixas.find(x => x.indice === c.indice);
-  if (c.origem === "proposta") return v.propostas[c.anotador]?.find(x => x.indice === c.indice);
   return v.candidatas.find(x => x.anotador === c.anotador && x.indice === c.indice);
 }
 
-// Propostas dos modelos que não entraram no voto e ainda não foram incluídas
-function propostasFora() {
-  const incluidas = new Set(edicao.caixas.filter(c => c.origem === "proposta")
-    .map(c => `${c.anotador}\u0000${c.indice}`));
-  return Object.entries(detalhe.voto.propostas).flatMap(([anotador, lista]) => lista
-    .filter(p => !incluidas.has(`${anotador}\u0000${p.indice}`)).map(p => ({ anotador, p })));
-}
-
-function incluir(anotador, p, buscar = true) {
-  if (!editando()) return;
-  guardar();
-  edicao.caixas.push({ id: p.id, caixa: p.caixa, origem: "proposta", anotador,
-                       indice: p.indice, tocada: true });
-  edicao.sel = edicao.caixas.length - 1;
-  edicao.foco = null;
-  desenhar();
-  if (buscar && p.id === null) abrirBusca();
-}
-
-// A proposta pontilhada em foco (Tab), ou undefined
-const emFoco = () => edicao?.foco && propostasFora().find(({ anotador, p }) =>
-  anotador === edicao.foco.anotador && p.indice === edicao.foco.indice);
-
-// Inclui a proposta em foco; devolve se havia uma
-function incluirFoco(buscar = true) {
-  const f = emFoco();
-  if (f) incluir(f.anotador, f.p, buscar);
-  return !!f;
-}
+// Sugestões de classe de uma caixa da edição: as dos anotadores, se ela veio
+// de um conflito do voto (no treino); [] nas outras
+const sugestoesDe = c => (c?.origem === "voto" ? origemDe(c)?.sugestoes : null) ?? [];
+const emConflito = c => c.origem === "voto" && !edicao.teste && origemDe(c)?.id === null;
 
 function desenharEdicao() {
   const quadro = $("quadro");
-  // Por baixo, as propostas fora do voto; as maiores primeiro, para as
-  // pequenas ficarem por cima e clicáveis
-  if ($("mostrar-modelos").checked)
-    for (const { anotador, p } of propostasFora().sort((a, b) => area(b.p.caixa) - area(a.p.caixa))) {
-      const div = caixaDiv(p.id, `${anotador}: ${p.id === null ? semId(p.nome) : p.nome} `
-                                 + p.conf.toFixed(2), p.caixa, true);
-      div.classList.add("modelo");
-      div.title = `Proposta de ${anotador} fora do voto: clique para incluir`;
-      div.classList.toggle("selecionada", edicao.foco?.anotador === anotador
-                                          && edicao.foco?.indice === p.indice);
-      div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); incluir(anotador, p); };
-      quadro.append(div);
-    }
+  // As maiores primeiro, para as pequenas ficarem por cima e clicáveis
   const ordem = edicao.caixas.map((c, k) => k).sort((a, b) => area(edicao.caixas[b].caixa)
                                                        - area(edicao.caixas[a].caixa));
   for (const k of ordem) {
     const c = edicao.caixas[k];
     const origem = origemDe(c);
-    const conf = c.origem === "candidata" ? null : origem?.conf ?? null;
-    const nome = nomeClasse(c.id) ?? semId(origem?.nome);
+    const conf = c.origem === "candidata" || emConflito(c) ? null : origem?.conf ?? null;
+    const nome = nomeClasse(c.id) ?? (emConflito(c) ? "conflito" : semId(origem?.nome));
     const div = caixaDiv(c.id, `${nome}${!c.tocada && conf !== null ? ` ${conf.toFixed(2)}` : ""}`,
                          c.caixa, !c.tocada);
     div.classList.toggle("selecionada", edicao.sel === k);
@@ -473,18 +431,14 @@ function desenharEdicao() {
   legenda.replaceChildren(edicao.teste
     ? "Teste: caixas da união dos modelos, sem classe; dê a classe de cada uma. "
     : v.resultado === "aprovada" ? "Voto aprovado: caixas de consenso. "
-    : `Voto falhou (${MOTIVOS[v.motivo] ?? v.motivo}): caixas de consenso. `);
+    : `Voto falhou (${MOTIVOS[v.motivo] ?? v.motivo}): uma caixa por objeto. `);
   legenda.append(edicao.caixas.length || v.caixas.length
     ? `${edicao.caixas.length} caixa(s), ${corrigidas} ${edicao.teste ? "com classe dada"
       : "corrigida(s)"}, ${adicionadas} adicionada(s), ${removidas} removida(s).`
     : "Nenhuma caixa: salve para marcar como fundo (sem objetos) ou descarte.");
-  const fora = propostasFora().length;
-  if (fora) legenda.append(` ${fora} proposta(s) de modelos fora do voto`
-    + ($("mostrar-modelos").checked ? " (pontilhadas): clique para incluir." : ", ocultas."));
-  const foco = emFoco();
-  if (foco) legenda.append(Object.assign(document.createElement("b"), { textContent:
-    ` Em foco: proposta de ${foco.anotador}. Enter inclui; uma letra ou 1–9 incluem e dão `
-    + "a classe; Tab passa adiante." }));
+  const conflitos = edicao.caixas.filter(c => c.id === null && emConflito(c)).length;
+  if (conflitos) legenda.append(` ${conflitos} em conflito: selecione e escolha uma das `
+    + "sugestões dos anotadores (1–3) ou busque a classe.");
   if (edicao.caixas.some(c => c.id === null))
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
       textContent: " " + AVISO_SEM_ID }));
@@ -529,7 +483,6 @@ function atualizarVisibilidade() {
 function selecionar(k) {
   if (!editando()) return;
   edicao.sel = k;
-  edicao.foco = null;
   desenhar();
 }
 
@@ -545,7 +498,6 @@ function iniciarNova() {
   if (!editando()) return;
   fecharBusca();
   edicao.sel = null;
-  edicao.foco = null;
   edicao.novo = { ponto: null, lista: null, i: 0 };
   desenhar();
 }
@@ -624,22 +576,11 @@ function ordemLeitura(caixas) {
   return linhas.flatMap(linha => linha.sort((a, b) => cx(a) - cx(b)));
 }
 
-// O Tab passa pelas caixas da edição e pelas propostas pontilhadas (se
-// visíveis), todas na mesma ordem de leitura
 function selecionarVizinha(passo) {
-  const itens = [...edicao.caixas.map((c, k) => ({ caixa: c.caixa, k })),
-                 ...($("mostrar-modelos").checked ? propostasFora() : [])
-                   .map(({ anotador, p }) => ({ caixa: p.caixa, anotador, indice: p.indice }))];
-  const ordem = ordemLeitura(itens), n = ordem.length;
+  const ordem = ordemLeitura(edicao.caixas), n = ordem.length;
   if (!n) return;
-  const atualItem = itens.findIndex(it => it.k !== undefined ? it.k === edicao.sel
-    : edicao.foco?.anotador === it.anotador && edicao.foco?.indice === it.indice);
-  const i = ordem.indexOf(atualItem);
-  const alvo = itens[i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]];
-  if (alvo.k !== undefined) return selecionar(alvo.k);
-  edicao.sel = null;
-  edicao.foco = { anotador: alvo.anotador, indice: alvo.indice };
-  desenhar();
+  const i = ordem.indexOf(edicao.sel);
+  selecionar(i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]);
 }
 
 // --- busca da classe ----------------------------------------------------------
@@ -669,8 +610,16 @@ function casarClasse(consulta, c) {
   return null;
 }
 
+// Com a busca vazia numa caixa em conflito: as sugestões dos anotadores, com
+// os atalhos 1, 2, 3; escrever busca em todas as classes, como nas outras
 function opcoesPara(texto) {
   const consulta = normalizar(texto.trim());
+  const sugestoes = sugestoesDe(edicao?.caixas[edicao.sel]);
+  if (!consulta && sugestoes.length)
+    return sugestoes.slice(0, MAX_OPCOES).map((s, k) => ({
+      c: classes.find(c => c.id === s.id) ?? { id: s.id, nome: s.nome, material: null },
+      nivel: 0, inicio: null, atalho: k + 1,
+      quem: s.anotadores.map(q => `${q.anotador} ${q.conf.toFixed(2)}`).join(", ") }));
   const lista = consulta
     ? classes.map(c => [c, casarClasse(consulta, c)]).filter(([, m]) => m)
         .map(([c, [nivel, inicio, fim]]) => ({ c, nivel, inicio, fim }))
@@ -712,9 +661,10 @@ function mostrarOpcoes() {
   lista.replaceChildren();
   if (!busca.opcoes.length) lista.append(Object.assign(document.createElement("li"),
     { className: "vazia", textContent: "Nenhuma classe com esse nome." }));
-  busca.opcoes.forEach(({ c, inicio, fim }, k) => {
+  busca.opcoes.forEach(({ c, inicio, fim, atalho, quem }, k) => {
     const li = document.createElement("li");
     li.classList.toggle("ativa", k === busca.ativa);
+    li.classList.toggle("sugestao", !!quem);
     const amostra = document.createElement("i");
     amostra.style.background = cor(c.id);
     const nome = document.createElement("span");
@@ -725,10 +675,9 @@ function mostrarOpcoes() {
                   c.nome.slice(fim));
     else nome.textContent = c.nome;
     const material = Object.assign(document.createElement("span"),
-      { className: "material", textContent: c.material ?? "" });
+      { className: "material", textContent: quem ?? c.material ?? "" });
     li.append(amostra, nome, material);
-    if (c.atalho !== null && c.atalho <= 9)
-      li.append(Object.assign(document.createElement("kbd"), { textContent: c.atalho }));
+    if (atalho) li.append(Object.assign(document.createElement("kbd"), { textContent: atalho }));
     li.title = `id ${c.id}`;
     // mousedown com preventDefault: escolhe antes de a busca perder o foco
     li.onmousedown = e => { e.preventDefault(); escolherOpcao(k); };
@@ -772,7 +721,6 @@ function voltar(passo) {
   edicao[para].push({ caixas: edicao.caixas, sel: edicao.sel });
   edicao.caixas = estado.caixas;
   edicao.sel = estado.sel !== null && estado.sel < edicao.caixas.length ? estado.sel : null;
-  edicao.foco = null;
   edicao.novo = null;
   // Sem nada a desfazer, as caixas são as propostas como chegaram
   edicao.sujo = edicao.desfazer.length > 0;
@@ -841,7 +789,6 @@ $("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
 $("camada").onchange = desenhar;
 $("mostrar-caixas").onchange = atualizarVisibilidade;
 $("mostrar-rotulos").onchange = atualizarVisibilidade;
-$("mostrar-modelos").onchange = () => { if (edicao) edicao.foco = null; desenhar(); };
 $("anterior").onclick = () => { if (podeSair()) mostrar(atual - 1); };
 $("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
 $("salvar").onclick = () => enviar("salvar");
@@ -861,6 +808,11 @@ $("busca").onfocus = mostrarOpcoes;
 $("busca").onblur = () => { $("opcoes").hidden = true; };
 $("busca").onkeydown = e => {
   const n = busca.opcoes.length;
+  // Busca vazia numa caixa em conflito: 1–3 escolhem a sugestão
+  if (/^[1-9]$/.test(e.key) && !$("busca").value) {
+    const k = busca.opcoes.findIndex(o => o.atalho === Number(e.key));
+    if (k >= 0) { e.preventDefault(); escolherOpcao(k); return; }
+  }
   if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
     e.preventDefault();
     busca.ativa = (busca.ativa + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
@@ -880,7 +832,7 @@ $("busca").onkeydown = e => {
 $("area").onmousedown = e => {
   if (!editando()) return;
   if (edicao.novo) { e.preventDefault(); escolherPonto(e); }
-  else if (edicao.sel !== null || edicao.foco) selecionar(null);
+  else if (edicao.sel !== null) selecionar(null);
 };
 $("area").addEventListener("wheel", e => {
   if (!editando() || !edicao.novo?.lista?.length) return;
@@ -922,20 +874,15 @@ document.addEventListener("keydown", e => {
     else if (["Escape", "n", "N"].includes(e.key)) { e.preventDefault(); cancelarNova(); }
     return;
   }
-  if ((e.key === "n" || e.key === "N") && edicao.sel === null && !emFoco()) {
+  if ((e.key === "n" || e.key === "N") && edicao.sel === null) {
     e.preventDefault();
     iniciarNova();
-  } else if (e.key === "Tab") {
+  } else if (e.key === "Tab" && edicao.caixas.length) {
     e.preventDefault();
     selecionarVizinha(e.shiftKey ? -1 : 1);
-  } else if (e.key === "Enter" && emFoco()) {
+  } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && edicao.sel !== null) {
+    // Com uma caixa selecionada, uma letra já começa a busca (inclusive o d)
     e.preventDefault();
-    incluirFoco();
-  } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && (edicao.sel !== null || emFoco())) {
-    // Com uma caixa selecionada, uma letra já começa a busca (inclusive o d);
-    // numa proposta em foco, inclui-a antes
-    e.preventDefault();
-    incluirFoco(false);
     abrirBusca();
     $("busca").value = e.key;
     busca.ativa = 0;
@@ -943,9 +890,10 @@ document.addEventListener("keydown", e => {
   } else if (e.key === "Enter") {
     e.preventDefault();
     enviar("salvar", true);
-  } else if (/^[1-9]$/.test(e.key) && classes.some(c => c.atalho === Number(e.key))) {
-    incluirFoco(false);
-    trocarClasse(classes.find(c => c.atalho === Number(e.key)).id);
+  } else if (/^[1-9]$/.test(e.key) && edicao.sel !== null) {
+    // Numa caixa em conflito, 1–3 escolhem uma das sugestões dos anotadores
+    const sugestao = sugestoesDe(edicao.caixas[edicao.sel])[Number(e.key) - 1];
+    if (sugestao) trocarClasse(sugestao.id);
   } else if (e.key === "Delete" || e.key === "Backspace") {
     e.preventDefault();
     remover();

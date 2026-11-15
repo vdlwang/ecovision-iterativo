@@ -921,12 +921,14 @@ IOU_CANDIDATA_REPETIDA = 0.9  # candidatas de anotadores diferentes quase iguais
 def voto_para_revisao(saida, nome, nomes):
     """
     A base da revisão de uma imagem, do voto vigente; None sem voto:
-    - caixas: as do voto, [{indice, id, nome, conf, caixa, anotadores}]; no
-      teste (união), sem classe, confiança nem anotadores (seção 4);
-    - propostas: {anotador: [{indice, id, nome, conf, caixa}]}, as caixas
-      visíveis de cada proposta usada que não entraram em nenhuma caixa do
-      voto, que a página mostra para incluir com um clique; abaixo de
-      confianca_classe, sem a classe (id e nome None);
+    - caixas: as do voto, uma por objeto, [{indice, id, nome, conf, caixa,
+      anotadores, sugestoes}]. No treino, uma caixa sem classe é um conflito
+      (os anotadores não a acharam todos, ou discordam da classe), e
+      sugestoes lista as classes que eles propuseram, uma por classe:
+      [{id, nome, anotadores: [{anotador, conf}]}], das propostas por mais
+      anotadores para menos e, no empate, da maior confiança; só classes do
+      data.yaml, mesmo abaixo de confianca_classe. No teste (união), sem
+      classe, confiança, anotadores nem sugestões (seção 4);
     - candidatas: [{anotador, indice, conf, caixa}], as caixas abaixo do
       limiar de leitura de todas as propostas, sem as quase iguais a uma mais
       confiante, para a caixa por clique.
@@ -942,35 +944,38 @@ def voto_para_revisao(saida, nome, nomes):
             return None
         _, propostas, caixas_voto = _contexto_voto(con, voto)
     uniao = voto["resultado"] == "uniao"
-    usadas = {m for c in caixas_voto for m in c["membros"]}
-    fora, candidatas = {}, []
+    por_anotador = {p["anotador"]: p for p, _ in propostas}
+    candidatas = []
     for proposta, limiar in propostas:
-        a = proposta["anotador"]
-        classe_visivel = limiares(proposta)[1]
-        fora[a] = []
-        for k, (classe, conf, caixa) in enumerate(proposta["caixas"]):
+        for k, (_, conf, caixa) in enumerate(proposta["caixas"]):
             if conf < limiar:
-                candidatas.append({"anotador": a, "indice": k, "conf": conf,
+                candidatas.append({"anotador": proposta["anotador"], "indice": k, "conf": conf,
                                    "caixa": [round(v, 6) for v in caixa]})
-            elif (a, k) not in usadas:
-                mostra = conf >= classe_visivel and not uniao
-                fora[a].append(dict(caixa_json(ids.get(classe) if mostra else None,
-                                               classe if mostra else None, conf, caixa),
-                                    indice=k))
     unicas = []
     for c in sorted(candidatas, key=lambda c: c["conf"], reverse=True):
         if all(_iou(c["caixa"], u["caixa"]) < IOU_CANDIDATA_REPETIDA for u in unicas):
             unicas.append(c)
+
+    def sugestoes(membros):
+        por_classe = {}
+        for a, k in membros:
+            classe, conf, _ = por_anotador[a]["caixas"][k]
+            if classe in ids:
+                por_classe.setdefault(classe, []).append({"anotador": a, "conf": conf})
+        return [{"id": ids[c], "nome": c, "anotadores": quem}
+                for c, quem in sorted(por_classe.items(), key=lambda t: (
+                    -len(t[1]), -max(q["conf"] for q in t[1])))]
+
     return {
         "id": voto["id"], "resultado": voto["resultado"], "motivo": voto["motivo"],
         "conjunto": imagem["conjunto"],
         "caixas": [dict(caixa_json(None, None, None, c["caixa"]), indice=c["indice"],
-                        anotadores=[]) if uniao else
+                        anotadores=[], sugestoes=[]) if uniao else
                    dict(caixa_json(c["classe_id"], nomes.get(c["classe_id"]), c["conf"],
                                    c["caixa"]), indice=c["indice"],
-                        anotadores=sorted({a for a, _ in c["membros"]}))
+                        anotadores=sorted({a for a, _ in c["membros"]}),
+                        sugestoes=[] if c["classe_id"] is not None else sugestoes(c["membros"]))
                    for c in caixas_voto],
-        "propostas": {a: l for a, l in fora.items() if l},
         "candidatas": unicas,
     }
 

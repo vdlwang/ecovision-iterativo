@@ -157,9 +157,12 @@ def test_detalhe_traz_o_voto_como_base(servidor, saida):
         "id": voto(saida, "a.jpg"), "resultado": "falhou", "motivo": "quantidade",
         "conjunto": "treino",
         "caixas": [{"id": 1, "nome": "Lata", "conf": 0.9, "caixa": [0.1, 0.1, 0.5, 0.5],
-                    "indice": 0, "anotadores": DUPLA}],
-        "propostas": {"falso": [{"id": 0, "nome": "Garrafa", "conf": 0.6,
-                                 "caixa": [0.6, 0.1, 0.9, 0.9], "indice": 1}]},
+                    "indice": 0, "anotadores": DUPLA, "sugestoes": []},
+                   # a garrafa, só de falso: conflito, com a classe dele como sugestão
+                   {"id": None, "nome": None, "conf": 0.6, "caixa": [0.6, 0.1, 0.9, 0.9],
+                    "indice": 1, "anotadores": ["falso"], "sugestoes": [
+                        {"id": 0, "nome": "Garrafa",
+                         "anotadores": [{"anotador": "falso", "conf": 0.6}]}]}],
         "candidatas": []}
     _, dados = pedir_json(servidor + "/api/imagens/e.jpg")
     assert dados["final"] == [{"id": 1, "nome": "Lata", "conf": None,
@@ -174,7 +177,7 @@ def test_detalhe_do_teste_sem_classe_nem_confianca(servidor):
     assert dados["voto"]["resultado"] == "uniao" and dados["voto"]["conjunto"] == "teste"
     assert dados["voto"]["caixas"] == [{"id": None, "nome": None, "conf": None,
                                         "caixa": [0.1, 0.1, 0.5, 0.5], "indice": 0,
-                                        "anotadores": []}]
+                                        "anotadores": [], "sugestoes": []}]
     # nem pelas camadas de propostas
     assert dados["propostas"] == {} and b"Lata" not in corpo
 
@@ -215,8 +218,7 @@ def enviar(url, corpo, tipo="application/json", host=None):
 
 def test_salvar_grava_rotulo_registro_e_status(servidor, saida):
     caixas = [do_voto(saida, "a.jpg", 0, 0),                  # a lata do voto vira garrafa
-              {"id": 0, "caixa": [0.6, 0.1, 0.9, 0.9], "origem": "proposta",
-               "anotador": "falso", "indice": 1}]               # a garrafa só de falso
+              do_voto(saida, "a.jpg", 1, 0)]                    # o conflito recebe a classe
     status, dados = enviar(servidor + "/api/imagens/a.jpg",
                            {"acao": "salvar", "voto_id": voto(saida, "a.jpg"),
                             "tempo_ativo_s": 7, "caixas": caixas})
@@ -229,7 +231,7 @@ def test_salvar_grava_rotulo_registro_e_status(servidor, saida):
     assert revisao["voto_id"] == voto(saida, "a.jpg") and revisao["removidas"] == []
     assert [(c["origem"], c["anotador"], c["indice"], c["desfecho"])
             for c in revisao["caixas"]] == [("voto", None, 0, "classe_corrigida"),
-                                            ("proposta", "falso", 1, "adicionada")]
+                                            ("voto", None, 1, "classe_atribuida")]
     assert "a.jpg" in (saida / "revisadas.txt").read_text()
     # não está mais na fila, e não pode ser editada de novo
     _, fila = pedir_json(servidor + "/api/imagens")
@@ -261,24 +263,21 @@ def test_teste_recebe_a_classe_do_revisor(servidor, saida):
     assert (saida / "teste.txt").read_text() == "./images/t.jpg\n"
 
 
-def test_proposta_fora_do_voto_com_classe_escondida(servidor, saida):
+def test_conflito_sugere_mesmo_abaixo_de_confianca_classe(servidor, saida):
     gravar_proposta(saida, "a.jpg", [("Lata", 0.9), ("Garrafa", 0.25, OUTRA)])
     votar.votar(saida, DUPLA)     # proposta nova de falso: a imagem é votada de novo
-    status, tipo, corpo = pedir(servidor + "/api/imagens/a.jpg")
-    dados = json.loads(corpo)
-    # abaixo de confianca_classe, a página recebe a caixa sem a classe, nem pelo nome
-    assert dados["voto"]["propostas"] == {"falso": [
-        {"id": None, "nome": None, "conf": 0.25, "caixa": [0.6, 0.1, 0.9, 0.9], "indice": 1}]}
-    assert b"Garrafa" not in corpo
-    caixa = {"id": None, "caixa": [0.6, 0.1, 0.9, 0.9], "origem": "proposta",
-             "anotador": "falso", "indice": 1}
+    _, dados = pedir_json(servidor + "/api/imagens/a.jpg")
+    conflito = dados["voto"]["caixas"][1]
+    assert (conflito["id"], conflito["sugestoes"]) == (None, [
+        {"id": 0, "nome": "Garrafa", "anotadores": [{"anotador": "falso", "conf": 0.25}]}])
+    caixa = {"id": None, "caixa": [0.6, 0.1, 0.9, 0.9], "origem": "voto", "indice": 1}
     url, corpo = servidor + "/api/imagens/a.jpg", {"acao": "salvar",
                                                    "voto_id": dados["voto"]["id"]}
     status, erro = enviar(url, dict(corpo, caixas=[caixa]))
     assert status == 400 and "fora do data.yaml" in erro["erro"]
     status, dados = enviar(url, dict(corpo, caixas=[dict(caixa, id=0)]))
     assert status == 200, dados
-    assert dados["revisao"]["caixas"][0]["desfecho"] == "adicionada"
+    assert dados["revisao"]["caixas"][0]["desfecho"] == "classe_atribuida"
     assert dados["revisao"]["removidas"] == [0]
 
 
@@ -316,7 +315,7 @@ def test_descartar_apaga_o_rotulo(saida):
     registro = formato.revisar(saida, "a.jpg", {"acao": "descartar",
                                                 "voto_id": voto(saida, "a.jpg")}, "agora")
     assert not (saida / "labels" / "a.txt").exists()
-    assert registro["removidas"] == [0] and registro["caixas"] == []
+    assert registro["removidas"] == [0, 1] and registro["caixas"] == []
     assert formato.ler_estado(saida)["a.jpg"]["status"] == "descartada"
     assert formato.ler_revisao(saida, "a.jpg")["acao"] == "descartar"
 

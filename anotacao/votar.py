@@ -4,7 +4,9 @@ propostas vigentes de cada anotador no banco da saída e aprova a imagem só se
 todos concordam: mesma quantidade de caixas, e cada caixa casa (mesma classe,
 IoU >= 0,5) com uma de cada um dos outros. A aprovada recebe as caixas de
 consenso (a mediana de cada coordenada; a confiança é a menor) como rótulo em
-labels/ e entra no treino.txt; a que falha fica pendente, para a revisão.
+labels/ e entra no treino.txt; a que falha fica pendente, para a revisão,
+com uma caixa por objeto: de consenso, se todos a acharam com a mesma
+classe, ou em conflito, com as classes propostas como sugestões.
 
     python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-14a
     python anotacao/anotar.py -o anotacoes --anotador grounding-dino   # e owlv2, yolo
@@ -12,8 +14,7 @@ labels/ e entra no treino.txt; a que falha fica pendente, para a revisão.
 
 Só vota imagens pendentes com proposta de todos os anotadores. Nos lotes de
 teste não há voto de classe: grava a união das caixas dos anotadores, sem
-classe, e todas vão à revisão (seção 4). Nas de treino que falham, guarda as
-caixas que tiveram consenso, de onde a revisão parte. Toda revisão parte de um
+classe, e todas vão à revisão (seção 4). Toda revisão parte de um
 voto: imagem não votada não é revisável. Cada
 anotador é lido no limiar de leitura gravado na proposta (--limiares troca),
 com a classe sugerida mesmo abaixo de confianca_classe: ela só é escondida do
@@ -133,12 +134,32 @@ def unir(listas, limiar_iou=IOU_VOTO):
              g["membros"]) for g in grupos]
 
 
+def caixas_da_revisao(listas, limiar_iou=IOU_VOTO):
+    """
+    Uma caixa por objeto, para a revisão de uma imagem de treino que falhou
+    no voto: a união das caixas dos N anotadores (unir()), em que um grupo
+    achado por todos com a mesma classe é consenso (a classe e a menor
+    confiança) e qualquer outro é conflito (classe None e a maior confiança).
+    O revisor escolhe a classe do conflito entre as dos membros.
+    """
+    caixas = []
+    for _, conf, caixa, membros in unir(listas, limiar_iou):
+        grupo = [listas[a][j] for a, j in membros]
+        classes = {g[0] for g in grupo}
+        if len(membros) == len(listas) and len(classes) == 1:
+            caixas.append((classes.pop(), min(g[1] for g in grupo), caixa, membros))
+        else:
+            caixas.append((None, conf, caixa, membros))
+    return caixas
+
+
 def decisor(limiares=None, limiar_iou=IOU_VOTO):
     """
     A função de decisão que o saida.votar() chama com as propostas de uma
     imagem e o conjunto do lote. limiares: um por anotador, None para o
-    gravado na proposta. No treino, o voto NooN estrito, guardando as caixas
-    de consenso mesmo quando falha (a revisão parte delas); no teste, a união
+    gravado na proposta. No treino, o voto NooN estrito: a aprovada guarda as
+    caixas de consenso, e a que falha, uma caixa por objeto, de consenso ou em
+    conflito (caixas_da_revisao), de onde a revisão parte; no teste, a união
     sem classe.
     """
     def decidir(propostas, conjunto):
@@ -156,6 +177,8 @@ def decisor(limiares=None, limiar_iou=IOU_VOTO):
             caixas = consenso_com_membros(listas, limiar_iou) if any(listas) else []
             motivo = motivo_falha(listas, caixas)
             resultado = "falhou" if motivo else "aprovada"
+            if motivo:
+                caixas = caixas_da_revisao(listas, limiar_iou)
         # posição na lista filtrada -> índice da caixa na proposta
         caixas = [(classe, conf, caixa, [(a, indices[a][j]) for a, j in membros])
                   for classe, conf, caixa, membros in caixas]

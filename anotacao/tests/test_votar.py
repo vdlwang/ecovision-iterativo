@@ -120,9 +120,11 @@ def test_falhou_fica_pendente_sem_rotulo(tmp_path):
         "l1_z.jpg": ("pendente", "falhou", "vazia")}
     assert not list((saida / "labels").glob("*.txt"))
     assert linhas(saida, "treino.txt") == []
-    # a que falhou guarda o consenso que houve (a garrafa), base da revisão
-    assert [c["id"] for c in formato.ler_voto(saida, "l1_x.jpg")["caixas"]] == [0]
-    assert formato.ler_voto(saida, "l1_y.jpg")["caixas"] == []
+    # a que falhou guarda uma caixa por objeto: consenso (a garrafa dos três)
+    # ou conflito, sem classe (a lata que c não achou; a classe em disputa em y)
+    assert [c["id"] for c in formato.ler_voto(saida, "l1_x.jpg")["caixas"]] == [0, None]
+    assert [c["id"] for c in formato.ler_voto(saida, "l1_y.jpg")["caixas"]] == [None]
+    assert formato.ler_voto(saida, "l1_z.jpg")["caixas"] == []
 
 
 def test_so_pendentes_com_proposta_de_todos_e_teste_unido(tmp_path):
@@ -233,7 +235,7 @@ def test_revisao_humana_vale_mais_que_o_voto(tmp_path):
 
 def test_revisao_parte_do_voto_e_registra_a_origem(tmp_path):
     saida = criar(tmp_path)
-    fora = ("Tampa", 0.3, (0.8, 0.8, 0.9, 0.9))       # só b: visível, sem classe mostrada
+    fora = ("Tampa", 0.3, (0.8, 0.8, 0.9, 0.9))       # só b, abaixo de confianca_classe
     fraca = ("Lata", 0.1, (0.6, 0.1, 0.7, 0.2))        # candidata de c
     ids = propor(saida, "l1_x.jpg", {"a": [GARRAFA, LATA], "b": [GARRAFA, fora],
                                      "c": [GARRAFA, fraca]})
@@ -241,30 +243,52 @@ def test_revisao_parte_do_voto_e_registra_a_origem(tmp_path):
     base = formato.voto_para_revisao(saida, "l1_x.jpg", formato.nomes_classes(saida))
     assert (base["resultado"], base["motivo"], base["conjunto"]) == ("falhou", "quantidade",
                                                                   "treino")
+    # uma caixa por objeto: a garrafa é consenso; a lata (só a) e a tampa (só b)
+    # são conflitos, com a classe proposta como sugestão, mesmo abaixo de 0,35
     assert [(c["indice"], c["nome"], c["anotadores"]) for c in base["caixas"]] == \
-        [(0, "Garrafa", TRIO)]
-    # fora do consenso: a lata de a (com classe) e a caixa de b abaixo de 0,35 (sem)
-    assert {a: [(p["indice"], p["nome"]) for p in l] for a, l in base["propostas"].items()} == \
-        {"a": [(1, "Lata")], "b": [(1, None)]}
+        [(0, "Garrafa", TRIO), (1, None, ["a"]), (2, None, ["b"])]
+    assert [c["sugestoes"] for c in base["caixas"]] == [
+        [], [{"id": 1, "nome": "Lata", "anotadores": [{"anotador": "a", "conf": 0.8}]}],
+        [{"id": 2, "nome": "Tampa", "anotadores": [{"anotador": "b", "conf": 0.3}]}]]
+    assert "propostas" not in base
     assert [(c["anotador"], c["indice"]) for c in base["candidatas"]] == [("c", 1)]
 
     caixas = [{"id": 1, "caixa": list(GARRAFA[2]), "origem": "voto", "indice": 0},
-              {"id": 1, "caixa": list(LATA[2]), "origem": "proposta", "anotador": "a",
-               "indice": 1},
+              {"id": 1, "caixa": list(LATA[2]), "origem": "voto", "indice": 1},
               {"id": 2, "caixa": list(fraca[2]), "origem": "candidata", "anotador": "c",
                "indice": 1}]
     registro = formato.revisar(saida, "l1_x.jpg", pedido(saida, "l1_x.jpg", caixas=caixas,
                                                          tempo=12), "t")
     assert [(c["origem"], c["anotador"], c["indice"], c["desfecho"])
             for c in registro["caixas"]] == [("voto", None, 0, "classe_corrigida"),
-                                             ("proposta", "a", 1, "adicionada"),
+                                             ("voto", None, 1, "classe_atribuida"),
                                              ("candidata", "c", 1, "adicionada")]
-    assert registro["removidas"] == [] and registro["voto_id"] == base["id"]
+    assert registro["removidas"] == [2] and registro["voto_id"] == base["id"]
     with formato.abrir(saida) as con:
         assert {r[0] for r in con.execute("SELECT proposta_id FROM caixas_revisao "
-                                          "WHERE proposta_id IS NOT NULL")} == \
-            {ids["a"], ids["c"]}
+                                          "WHERE proposta_id IS NOT NULL")} == {ids["c"]}
     assert len(linhas(saida, "labels/l1_x.txt")) == 3
+
+
+def test_sugestoes_por_classe_dos_mais_votados_para_os_menos(tmp_path):
+    saida = criar(tmp_path)
+    caixa = GARRAFA[2]
+    propor(saida, "l1_x.jpg", {"a": [("Lata", 0.6, caixa)], "b": [("Lata", 0.5, caixa)],
+                               "c": [("Garrafa", 0.9, caixa), ("Pneu", 0.9, LATA[2])]})
+    votar.votar(saida, TRIO)
+    caixas = formato.voto_para_revisao(saida, "l1_x.jpg", formato.nomes_classes(saida))["caixas"]
+    assert [(s["nome"], [q["anotador"] for q in s["anotadores"]])
+            for s in caixas[0]["sugestoes"]] == [("Lata", ["a", "b"]), ("Garrafa", ["c"])]
+    # classe fora do data.yaml não vira sugestão: o conflito vem sem nenhuma
+    assert caixas[1]["sugestoes"] == []
+
+
+def test_caixas_da_revisao_consenso_so_com_todos_na_mesma_classe():
+    g, l = GARRAFA, LATA
+    caixas = votar.caixas_da_revisao([[g, l], [perto(g, 0.01), l], [perto(g, 0.02)]])
+    assert [(c[0], round(c[1], 2), c[3]) for c in caixas] == [
+        ("Garrafa", 0.9, [(0, 0), (1, 0), (2, 0)]),     # os três, mesma classe
+        (None, 0.8, [(0, 1), (1, 1)])]                  # dois de três: conflito
 
 
 def test_teste_sem_classe_e_classe_atribuida(tmp_path):
@@ -275,7 +299,7 @@ def test_teste_sem_classe_e_classe_atribuida(tmp_path):
     # o revisor do teste não vê classe, confiança nem quem propôs (seção 4)
     assert all(c["id"] is None and c["nome"] is None and c["conf"] is None
                and c["anotadores"] == [] for c in base["caixas"])
-    assert base["propostas"] == {}
+    assert all(c["sugestoes"] == [] for c in base["caixas"])
     caixas = [{"id": 1, "caixa": c["caixa"], "origem": "voto", "indice": c["indice"]}
               for c in base["caixas"]]
     registro = formato.revisar(saida, "t1_x.jpg", pedido(saida, "t1_x.jpg", caixas=caixas), "t")
