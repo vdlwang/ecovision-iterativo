@@ -185,32 +185,42 @@ export function useStableWebSocket(
     maxReconnectDelay = 10000,
   } = options;
 
-  const [connected, setConnected] = useState(false);
-  const [readyState, setReadyState] = useState<number>(WebSocket.CLOSED);
-
   const connection = useMemo(
     () => getSharedConnection(url, { heartbeatInterval, initialReconnectDelay, maxReconnectDelay }),
     [url, heartbeatInterval, initialReconnectDelay, maxReconnectDelay]
   );
 
-  const listenerRef = useRef<ConnectionListener>({});
-  listenerRef.current = {
-    onMessage,
-    onOpen,
-    onClose,
-    onError,
-    setConnected,
-    setReadyState,
-  };
+  // O socket é compartilhado: um painel que monta com ele já aberto não recebe
+  // onopen, então o estado inicial vem do socket atual
+  const estadoAtual = () => connection.ws?.readyState ?? WebSocket.CLOSED;
+  const [connected, setConnected] = useState(() => estadoAtual() === WebSocket.OPEN);
+  const [readyState, setReadyState] = useState<number>(estadoAtual);
+
+  // Callbacks da última renderização, lidos pelo listener fixo abaixo
+  const callbacksRef = useRef({ onMessage, onOpen, onClose, onError });
+  callbacksRef.current = { onMessage, onOpen, onClose, onError };
 
   useEffect(() => {
+    // Mesmo objeto no add e no delete, chamando sempre os callbacks atuais
+    const listener: ConnectionListener = {
+      onMessage: (event) => callbacksRef.current.onMessage?.(event),
+      onOpen: () => callbacksRef.current.onOpen?.(),
+      onClose: () => callbacksRef.current.onClose?.(),
+      onError: (event) => callbacksRef.current.onError?.(event),
+      setConnected,
+      setReadyState,
+    };
     connection.refCount += 1;
-    connection.listeners.add(listenerRef.current);
+    connection.listeners.add(listener);
     // Start connection only once and let the pool handle reconnects
     connection.connect();
+    // Sincroniza com o socket, caso ele já estivesse aberto
+    const estado = connection.ws?.readyState ?? WebSocket.CLOSED;
+    setReadyState(estado);
+    setConnected(estado === WebSocket.OPEN);
 
     return () => {
-      connection.listeners.delete(listenerRef.current);
+      connection.listeners.delete(listener);
       connection.refCount -= 1;
 
       if (connection.refCount <= 0) {

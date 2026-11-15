@@ -19,7 +19,7 @@ pio device monitor -b 115200
 | GPIO 32 | Sinal do servo (MG996R) |
 | GPIO 22 | IN1 da ponte H L298N (PWM) |
 | GPIO 23 | IN2 da ponte H L298N |
-| GPIO 2  | LED (configurado, não usado) |
+| GPIO 2  | LED da placa: aceso = motor ligado; pisca enquanto o servo segura a posição |
 
 ## Funcionamento
 
@@ -29,7 +29,7 @@ Três tarefas FreeRTOS:
 - `motorControl`: com o motor ligado, aplica PWM 255 no IN1 (velocidade fixa, um sentido).
 - `servoControl`: consome uma fila de até 8 ângulos; move o servo, mantém 5 s e volta para 175°.
 
-O motor começa **desligado** até receber `MOTOR ON`.
+No boot, o motor começa **desligado** até receber `MOTOR ON`, e o servo vai para a posição de repouso (175°).
 
 ## Comandos Serial (115200 baud, terminados em `\n`)
 
@@ -39,8 +39,11 @@ O motor começa **desligado** até receber `MOTOR ON`.
 | `MOTOR OFF` | `OK MOTOR OFF` | Desliga a esteira |
 | `SERVO <n>` | `Servo movido para <n> graus` | Enfileira o ângulo `n` |
 | `<n>` (0–180) | `Servo movido para <n> graus` | Igual a `SERVO <n>` |
+| `PING` | `PONG` | Testa a comunicação, sem mover nada |
 
-⚠️ Comandos não reconhecidos não são rejeitados: o texto é convertido com `toInt()`, que devolve 0, e o servo vai para 0°. Isso inclui o `PING` oferecido pelo `backend/testes_serial.py`.
+A resposta `Servo movido` sai quando o servo começa o movimento. Se ele estiver ocupado com um ângulo anterior, isso pode levar até 5 s por item na fila.
+
+Erros: `ERR: comando invalido.` para texto não reconhecido, `ERR: angulo invalido (0..180).` para `SERVO` com argumento fora da faixa ou não numérico, `ERR: fila do servo cheia.` quando já há 8 ângulos esperando. Em todos os casos, o servo não se move.
 
 ## Troubleshooting
 
