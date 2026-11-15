@@ -1,0 +1,35 @@
+# Anotadores da pipeline (pipeline.py; OBJETIVO.md, seção 6, tarefa T14).
+#
+# anotadores: quem anota, na ordem em que roda e em que vota (o primeiro dá a
+#   ordem das caixas de consenso). Ao menos dois.
+#   nome:   nome com que as propostas são gravadas e que o voto usa (o --nome
+#           do anotar.py): minúsculas, dígitos, '.', '_' e '-'
+#   tipo:   o anotador do anotar.py (--anotador): grounding-dino, owlv2, yolo
+#   opcoes: opcional; opções do anotar.py sem o '--': as de detecção (modelo,
+#           piso, confianca, confianca-classe, iou, area-maxima, contencao) e
+#           as do próprio tipo (owlv2-frase, yolo-lado). Sem elas, valem os
+#           padrões do anotar.py. Cada execução grava a versão e os parâmetros
+#           que usou, e a votação grava esta configuração (RNF07).
+#
+# voto: opcional.
+#   iou: IoU mínimo para duas caixas casarem (padrão: 0.5)
+#
+# O trio é o da decisão 17: Grounding DINO, OWLv2 e o YOLO da equipe. A cada
+# ciclo, o YOLO retreinado (T12) troca o best.pt no terceiro.
+
+anotadores:
+  - nome: grounding-dino
+    tipo: grounding-dino
+    opcoes:
+      modelo: IDEA-Research/grounding-dino-tiny
+  - nome: owlv2
+    tipo: owlv2
+    opcoes:
+      modelo: google/owlv2-base-patch16-ensemble
+  - nome: yolo
+    tipo: yolo
+    opcoes:
+      modelo: yolo_models/taco/best.pt
+
+voto:
+  iou: 0.5

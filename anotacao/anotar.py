@@ -601,7 +601,8 @@ def escolher_imagens(parser, args, linhas):
     return pedidas
 
 
-def main(argv=None):
+def criar_parser():
+    """O parser da linha de comando (também usado pelo pipeline.py)."""
     parser = argparse.ArgumentParser(
         description="Propõe caixas para as imagens importadas com um anotador automático.")
     parser.add_argument("imagens", nargs="*",
@@ -653,13 +654,27 @@ def main(argv=None):
                                f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
     for anotador in ANOTADORES.values():
         anotador.opcoes(parser)
+    return parser
+
+
+def ler_argumentos(argv=None):
+    """
+    Lê e confere os argumentos, sem carregar modelo nem tocar na saída:
+    (parser, args). O pipeline.py confere assim a configuração de todos os
+    anotadores antes de rodar o primeiro.
+    """
+    parser = criar_parser()
     args = parser.parse_args(argv)
     if not 0 <= args.piso <= args.confianca <= 1:
         parser.error("os limiares têm de valer 0 <= --piso <= --confianca <= 1")
     if args.nome is not None and not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", args.nome):
         parser.error("--nome só com minúsculas, dígitos, '.', '_' e '-'")
     args.pasta = args.nome or args.anotador
+    return parser, args
 
+
+def main(argv=None):
+    parser, args = ler_argumentos(argv)
     if not formato.existe(args.saida):
         parser.error(f"{args.saida} não tem imagens importadas (use o importar.py antes)")
     if args.exportar:

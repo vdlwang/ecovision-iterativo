@@ -22,6 +22,13 @@ python anotacao/votar.py anotacoes                       # voto entre os anotado
 python anotacao/revisar.py anotacoes --abrir             # revisão, a partir do voto
 ```
 
+Ou, de uma vez, com os anotadores de [`anotadores.yaml`](anotadores.yaml) ([Pipeline](#pipeline)):
+
+```bash
+python anotacao/pipeline.py -o anotacoes fotos/ --lote 2026-11-15a   # importa, anota e vota
+python anotacao/pipeline.py -o anotacoes                             # retoma o que faltou
+```
+
 ### Importar
 
 O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote, com a largura e a altura. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
@@ -97,6 +104,25 @@ python anotacao/votar.py anotacoes --anotadores grounding-dino yolo --limiares g
 | `--limiares` | gravados | Um limiar de leitura por anotador, ou `g` |
 | `--iou` | `0.5` | IoU mínimo para duas caixas casarem |
 | `--revotar` | — | Vota de novo as já votadas com as mesmas propostas |
+
+### Pipeline
+
+O `pipeline.py` encadeia os três passos acima (`OBJETIVO.md`, seção 6, T14): importa um lote (se receber entradas), roda o `anotar.py` com cada anotador de [`anotadores.yaml`](anotadores.yaml), um de cada vez (o modelo do anterior é liberado antes de carregar o próximo), e vota com eles, na ordem do arquivo: voto NooN nos lotes de treino, união sem classe nos de teste.
+
+- **Retomável**: a unidade de trabalho é (imagem, anotador). Cada proposta é gravada numa transação, o `anotar.py` pula as imagens que já têm proposta do anotador e o voto pula as já votadas com as mesmas propostas. Interrompida (Ctrl+C, queda do Colab), basta rodar o mesmo comando; sem nada a fazer, nenhum modelo é carregado. Sem entradas, anota e vota o que já foi importado, de qualquer lote.
+- **Conferência antes de tudo**: o `anotadores.yaml` e as opções de cada anotador passam pelo `anotar.py` antes de importar ou carregar qualquer modelo, para um erro no terceiro não aparecer depois de horas de GPU.
+- **Registro**: cada execução grava a versão e os parâmetros do anotador, como no `anotar.py`, e a votação grava a configuração inteira (RNF07).
+
+O `anotadores.yaml` lista os anotadores (`nome`, `tipo` e `opcoes`, as opções do `anotar.py` sem o `--`: as de detecção e as do próprio tipo, como `yolo-lado`) e o `iou` do voto. O do repositório tem o trio da decisão 17. Para comparar outra configuração, copie o arquivo e passe `--config`.
+
+| Opção | Padrão | |
+|---|---|---|
+| `-o`, `--saida` | `anotacoes` | Diretório de saída |
+| `--config` | `anotacao/anotadores.yaml` | Anotadores e voto |
+| `--classes` | `anotacao/classes.yaml` | Lista de classes |
+| `--dispositivo` | `cuda` se houver | Para todos os anotadores |
+| `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` |
+| `--lote`, `--conjunto`, `--regiao`, `--lado-maximo`, `--link` | — | Como no `importar.py`; só com entradas |
 
 ## Google Colab
 
@@ -235,7 +261,7 @@ Um **detector** é uma subclasse de `Detector` em `anotar.py`, registrada no dic
 - `carregar()`: carrega o modelo `self.versao` em `self.dispositivo` (se `None`, o detector escolhe);
 - `pontuar(imagem)`: recebe a imagem PIL em RGB e devolve `(pontuacoes, caixas)`, a pontuação de cada classe (na ordem de `classes.yaml`) em cada caixa bruta, como lista de listas ou tensor, e as caixas `(x1, y1, x2, y2)` normalizadas de 0 a 1.
 
-A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. Argumentos próprios do construtor vêm das opções por `argumentos(args)`. O que cada um faz com o `prompt` das classes é dele (o `Yolo` o ignora e casa as classes pelo nome com as do modelo). `GroundingDino`, `Owlv2` e `Yolo` são os exemplos.
+A base faz o resto, igual para todos: escolhe a classe de cada caixa (com a de reserva), aplica o piso, a área máxima, o NMS sem classe e a contenção, e grava os limiares de leitura em `parametros`. Opções próprias do detector entram em `opcoes(parser)`; as de detecção são comuns. Argumentos próprios do construtor vêm das opções por `argumentos(args)`. O que cada um faz com o `prompt` das classes é dele (o `Yolo` o ignora e casa as classes pelo nome com as do modelo). `GroundingDino`, `Owlv2` e `Yolo` são os exemplos. Para a pipeline usá-lo, acrescente-o ao `anotadores.yaml` com `tipo` igual ao `nome` da classe; as opções próprias dele entram em `opcoes` se ficarem num grupo de argumentos com esse mesmo título.
 
 Um anotador que não detecta (por exemplo, um que só reclassifica as caixas de outro) pode implementar a interface direto: `nome`, `opcoes(parser)`, `criar(classes, args)` e, na instância, `versao`, `parametros` e `anotar(imagem) -> [(id da classe, confiança, caixa normalizada)]`.
 

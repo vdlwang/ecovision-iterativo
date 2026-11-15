@@ -187,14 +187,40 @@ def decisor(limiares=None, limiar_iou=IOU_VOTO):
 
 
 def votar(saida, anotadores=TRIO, limiares=None, limiar_iou=IOU_VOTO, revotar=False,
-          agora=None):
-    """Vota as imagens da saída (saida.votar); devolve o resumo dele."""
+          agora=None, configuracao=None):
+    """
+    Vota as imagens da saída (saida.votar); devolve o resumo dele.
+    configuracao: a dos anotadores (pipeline.py), gravada nos parâmetros da
+    votação (RNF07).
+    """
     if limiares is not None and len(limiares) != len(anotadores):
         raise ValueError("um limiar por anotador")
     parametros = {"iou": limiar_iou,
                   "limiares": dict(zip(anotadores, limiares or [None] * len(anotadores)))}
+    if configuracao is not None:
+        parametros["configuracao"] = configuracao
     return formato.votar(saida, anotadores, decisor(limiares, limiar_iou), parametros,
                          revotar, agora)
+
+
+def imprimir_resumo(saida, anotadores, r):
+    """Imprime o resumo de votar(): aprovadas, motivos das falhas, puladas."""
+    votadas = len(r["aprovadas"]) + len(r["falhou"])
+    print(f"Voto {len(anotadores)}oo{len(anotadores)} de "
+          f"{', '.join(anotadores)}: {votadas} imagem(ns) de treino votada(s), "
+          f"{len(r['uniao'])} de teste unida(s) sem classe")
+    if votadas:
+        motivos = {}
+        for m in r["falhou"].values():
+            motivos[m] = motivos.get(m, 0) + 1
+        print(f"  aprovadas: {len(r['aprovadas'])} ({len(r['aprovadas']) / votadas:.0%}); "
+              f"falharam: {len(r['falhou'])}"
+              + (f" ({', '.join(f'{m} {q}' for m, q in sorted(motivos.items()))})"
+                 if motivos else ""))
+    print(f"  puladas: {r['ja_votadas']} já votada(s) com as mesmas propostas, "
+          f"{r['incompletas']} sem proposta de todos")
+    linhas = (Path(saida) / "treino.txt").read_text(encoding="utf-8").splitlines()
+    print(f"treino.txt: {len(linhas)} imagem(ns) (aprovadas e revisadas)")
 
 
 def main(argv=None):
@@ -236,22 +262,7 @@ def main(argv=None):
                          f"{', '.join(formato.anotadores(args.saida)) or 'nenhum'})")
 
     r = votar(args.saida, args.anotadores, limiares, args.iou, args.revotar)
-    votadas = len(r["aprovadas"]) + len(r["falhou"])
-    print(f"Voto {len(args.anotadores)}oo{len(args.anotadores)} de "
-          f"{', '.join(args.anotadores)}: {votadas} imagem(ns) de treino votada(s), "
-          f"{len(r['uniao'])} de teste unida(s) sem classe")
-    if votadas:
-        motivos = {}
-        for m in r["falhou"].values():
-            motivos[m] = motivos.get(m, 0) + 1
-        print(f"  aprovadas: {len(r['aprovadas'])} ({len(r['aprovadas']) / votadas:.0%}); "
-              f"falharam: {len(r['falhou'])}"
-              + (f" ({', '.join(f'{m} {q}' for m, q in sorted(motivos.items()))})"
-                 if motivos else ""))
-    print(f"  puladas: {r['ja_votadas']} já votada(s) com as mesmas propostas, "
-          f"{r['incompletas']} sem proposta de todos")
-    linhas = (args.saida / "treino.txt").read_text(encoding="utf-8").splitlines()
-    print(f"treino.txt: {len(linhas)} imagem(ns) (aprovadas e revisadas)")
+    imprimir_resumo(args.saida, args.anotadores, r)
 
 
 if __name__ == "__main__":
