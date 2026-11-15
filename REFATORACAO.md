@@ -167,7 +167,7 @@ Firmware novo gravado. Backend + frontend rodando, esteira ligada. Acompanhar o 
 
 ### E. Padronização (14, 19, 20)
 
-Sem hardware: as fotos de `legado/database/tcc-0CF/YOLO_dataset/validation/images` como `camera_index` e `serial_port` inexistente (restaurar o `config.json` depois). Já conferido sem a UI: níveis e threads no log, `ECOVISION_LOG=DEBUG` com as detecções por quadro, disparo em modo demo e Ctrl+C. Os passos com ESP32 entram nos blocos B e D.
+Sem hardware: as fotos de `legado/database/tcc-0CF/YOLO_dataset/validation/images` como `camera_index` e `serial_port` inexistente (restaurar o `config.json` depois). Já conferido sem a UI: níveis e threads no log, `--debug=true` com as detecções por quadro, disparo em modo demo e Ctrl+C. Os passos com ESP32 entram nos blocos B e D.
 
 | # | Passo | Esperado |
 |---|---|---|
@@ -175,12 +175,12 @@ Sem hardware: as fotos de `legado/database/tcc-0CF/YOLO_dataset/validation/image
 | 19 | Detecções Ativas com papelão, lata, garrafa e uma classe `other` (ex.: `carded blister pack`) | Ícones 📄, 🔩, ♻️ (ou 🍾 no vidro) e 📦, pelo `material` e não pelo nome |
 | 20 | Vídeo no Monitor com detecções | Uma caixa só por objeto (antes havia a do cv2, mais fina, por baixo da do canvas); o label mostra classe, material e confiança, com fundo do tamanho do texto |
 | 20 | Objeto encostado na borda de cima do quadro | O label fica dentro da caixa, visível |
-| 14 | Subir o backend sem variável | Linhas `hora INFO [thread] ...`; nenhuma linha por quadro; sem logs do websockets |
-| 14 | `ECOVISION_LOG=DEBUG` | Também `Quadro N: classe (material) conf` e, com ESP32, `→ ESP32: <comando>` a cada envio |
-| 14 | `ECOVISION_LOG=xyz` | Sobe normalmente em INFO |
+| 14 | Subir o backend sem argumentos | Linhas `hora INFO [thread] ...`; nenhuma linha por quadro; sem logs do websockets |
+| 14 | `--debug=true` (e `--debug` sozinho) | Também `Quadro N: classe (material) conf` e, com ESP32, `→ ESP32: <comando>` a cada envio |
+| 14 | `--debug=xyz` | Sai com `error: argument --debug: esperado true ou false` |
 | 14 | Com ESP32: passar um objeto e clicar Ligar/Parar | `Disparando: ...`, `ESP32: Servo movido ...` e `ESP32: OK MOTOR ...` em INFO, da thread `serial` |
 | 14 | Desconectar o cabo USB | `ERROR ... [DEMO] Falha ao ler da serial ...`, uma vez |
-| 14 | Windows (cmd): `set ECOVISION_LOG=DEBUG && python ecovision_local_modf.py` e `run.bat` | DEBUG funciona; acentos e `→` aparecem legíveis no console (se não, `chcp 65001`) |
+| 14 | Windows (cmd): `python ecovision_local_modf.py --debug=true` e `run.bat --debug=true` | DEBUG funciona; acentos e `→` aparecem legíveis no console (se não, `chcp 65001`) |
 
 ### F. Versões fixadas (31)
 

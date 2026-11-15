@@ -48,7 +48,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Lógica de detecção** separada em `backend/deteccao.py`, sem câmera, serial nem YOLO (`53d7b51`).
 - **Frontend:** URL do backend em `src/config.ts`, badge de conexão único (`BadgeBackend`) e ícone das detecções pelo material enviado pelo backend (`dd09a68`).
 - **Caixas** desenhadas só pelo frontend, com label de classe, material e confiança do tamanho do texto; antes, cv2 e canvas desenhavam as duas (`822aceb`).
-- **Logs** com `logging` (hora, nível, thread); `ECOVISION_LOG=DEBUG` mostra cada comando ao ESP32 e as detecções de cada quadro (`fa797e9`, `c313f8d`).
+- **Logs** com `logging` (hora, nível, thread); `--debug=true` mostra cada comando ao ESP32 e as detecções de cada quadro, também via `run.sh`/`run.bat` (`fa797e9`, `6892bb2`; antes era a variável `ECOVISION_LOG=DEBUG`).
 - **Versões fixadas** (`==`) em `backend/requirements*.txt`, testadas com Python 3.14; o mínimo passa a ser Python 3.12 (`3acfb23`).
 
 ## 5. Testes
