@@ -576,11 +576,14 @@ function ordemLeitura(caixas) {
   return linhas.flatMap(linha => linha.sort((a, b) => cx(a) - cx(b)));
 }
 
+// Numa caixa em conflito, o Tab já abre a busca com as sugestões, como o
+// clique; nas outras, não, para o Enter seguinte continuar salvando
 function selecionarVizinha(passo) {
   const ordem = ordemLeitura(edicao.caixas), n = ordem.length;
   if (!n) return;
   const i = ordem.indexOf(edicao.sel);
   selecionar(i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]);
+  if (sugestoesDe(edicao.caixas[edicao.sel]).length) abrirBusca();
 }
 
 // --- busca da classe ----------------------------------------------------------
