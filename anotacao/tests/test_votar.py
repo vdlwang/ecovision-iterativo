@@ -90,10 +90,8 @@ def test_aprovada_grava_consenso_rotulo_e_treino(tmp_path):
     assert rotulo[0] == formato.linha_yolo(0, (0.11, 0.11, 0.31, 0.31))
     assert linhas(saida, "treino.txt") == ["./images/l1_x.jpg"]
     assert linhas(saida, "teste.txt") == [] and linhas(saida, "revisadas.txt") == []
-    texto = (saida / "data.yaml").read_text(encoding="utf-8")
-    assert texto.startswith("# Nenhuma imagem de teste")
-    dados = yaml.safe_load(texto)
-    assert (dados["train"], dados["val"]) == ("treino.txt", "treino.txt")
+    dados = yaml.safe_load((saida / "data.yaml").read_text(encoding="utf-8"))
+    assert (dados["train"], dados["val"]) == ("treino.txt", "teste.txt")
     voto = formato.ler_voto(saida, "l1_x.jpg")
     assert voto["anotadores"] == TRIO and voto["data"] == "t"
     assert voto["parametros"] == {"iou": 0.5, "limiares": {"a": None, "b": None, "c": None}}
@@ -191,11 +189,9 @@ def test_revisao_humana_vale_mais_que_o_voto(tmp_path):
     assert linhas(saida, "labels/l1_x.txt") == [formato.linha_yolo(2, (0.1, 0.1, 0.2, 0.2))]
     assert votar.votar(saida, TRIO)["aprovadas"] == []     # não é mais pendente
     assert linhas(saida, "treino.txt") == ["./images/l1_x.jpg"]
-    # revisada de teste vai ao teste.txt, e o val do data.yaml passa a ser ele
+    # revisada de teste vai ao teste.txt, o val do data.yaml
     formato.revisar(saida, "t1_x.jpg", {"acao": "salvar", "caixas": []}, "t")
     assert linhas(saida, "teste.txt") == ["./images/t1_x.jpg"]
-    texto = (saida / "data.yaml").read_text(encoding="utf-8")
-    assert not texto.startswith("#") and yaml.safe_load(texto)["val"] == "teste.txt"
     assert linhas(saida, "revisadas.txt") == ["./images/l1_x.jpg", "./images/t1_x.jpg"]
 
 

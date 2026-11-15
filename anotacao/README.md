@@ -108,7 +108,7 @@ anotacoes/
 ├── images/lote_foto.jpg               # gravada pelo importar.py
 ├── labels/lote_foto.txt               # gerado do banco: rótulos finais (YOLO) das revisadas e aprovadas
 ├── treino.txt                         # gerado do banco: treino aprovadas pelo voto ou revisadas; train do data.yaml
-├── teste.txt                          # gerado do banco: teste revisadas; val do data.yaml
+├── teste.txt                          # gerado do banco: teste revisadas; val do data.yaml (vazio: não treina)
 ├── revisadas.txt                      # gerado do banco: as revisadas por humano, de qualquer conjunto
 ├── data.yaml                          # gerado do banco: names (TACO + Background), train e val
 ├── previa/grounding-dino/foto.jpg     # só com --previa
@@ -133,7 +133,7 @@ As propostas ficam separadas dos rótulos por dois motivos. O Ultralytics trata 
 
 Várias execuções podem gravar no mesmo diretório. Se o `classes.yaml` tiver outras classes, o banco as troca quando nenhuma revisão guarda caixas (as propostas guardam a classe pelo nome; fundo e descarte não têm caixas); depois disso, só aceita classes novas no fim, porque os ids deixariam de bater. Saídas dos formatos anteriores (com `imagens.csv`, só com `labels/`, ou um banco de outra versão do esquema) são recusadas, sem migração: importe de novo numa saída nova. Toda imagem entra pelo `importar.py`, num lote, que dá o conjunto; não há imagem sem lote.
 
-**Treino e teste** são divididos por lote (sessão de captura, nunca por imagem; monografia, seção 5.3.5), no `importar.py`. O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`. Enquanto nenhuma imagem de teste foi revisada, o `val` também é o `treino.txt`, com um aviso no arquivo, porque o Ultralytics não treina sem `val`. Nesse caso, as métricas de validação não medem generalização.
+**Treino e teste** são divididos por lote (sessão de captura, nunca por imagem; monografia, seção 5.3.5), no `importar.py`. O `treino.txt` recebe as imagens de treino aprovadas pelo voto ou revisadas, e o `teste.txt`, só as de teste revisadas (seção 2 do `OBJETIVO.md`). Uma imagem com rótulo final tem `.txt` em `labels/`: a revisada, com as caixas da revisão, e a aprovada pelo voto que ainda não foi revisada, com as caixas de consenso. O `data.yaml` usa `treino.txt` como `train` e `teste.txt` como `val`: a validação do YOLO é feita nas imagens de teste, anotadas por humanos sem a classe proposta (seção 4 do `OBJETIVO.md`). Enquanto nenhuma imagem de teste foi revisada, o `teste.txt` fica vazio e o Ultralytics não treina, de propósito.
 
 O diretório `anotacoes/` está no `.gitignore`: imagens não vão para o repositório (RNF10).
 

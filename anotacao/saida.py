@@ -592,27 +592,20 @@ LISTAS = {
 def exportar_listas(con, saida):
     """
     treino.txt, teste.txt, revisadas.txt e o data.yaml, que aponta para as
-    duas primeiras. Enquanto nenhuma imagem de teste foi revisada, o val do
-    data.yaml é o treino.txt (o Ultralytics não treina sem val), com um aviso
-    no arquivo: as métricas de validação, aí, não medem nada.
+    duas primeiras: o val do treino do YOLO é a base de teste, anotada por
+    humanos sem pré-anotação de classe (OBJETIVO.md, seção 4). Sem imagem de
+    teste revisada, o teste.txt fica vazio e não dá para treinar, de propósito.
     """
     saida = Path(saida)
-    tamanhos = {}
     for arquivo, condicao in LISTAS.items():
         # "./" faz o Ultralytics resolver o caminho a partir da pasta do .txt
         nomes = [f"./images/{r[0]}" for r in con.execute(
             "SELECT i.nome FROM imagens i JOIN lotes l ON l.nome = i.lote "
             f"WHERE {condicao} ORDER BY i.id")]
-        tamanhos[arquivo] = len(nomes)
         gravar_atomico(saida / arquivo, "".join(n + "\n" for n in nomes))
-    val, aviso = "teste.txt", ""
-    if not tamanhos["teste.txt"]:
-        val = "treino.txt"
-        aviso = ("# Nenhuma imagem de teste revisada ainda: val aponta para o treino,\n"
-                 "# e as métricas de validação não medem generalização.\n")
     # Sem 'path': o Ultralytics usa a pasta do data.yaml
-    gravar_atomico(saida / "data.yaml", aviso + yaml.safe_dump(
-        {"train": "treino.txt", "val": val, "names": _nomes(con)},
+    gravar_atomico(saida / "data.yaml", yaml.safe_dump(
+        {"train": "treino.txt", "val": "teste.txt", "names": _nomes(con)},
         allow_unicode=True, sort_keys=False))
 
 

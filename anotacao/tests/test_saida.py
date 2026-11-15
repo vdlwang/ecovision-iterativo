@@ -31,7 +31,7 @@ def test_preparar_cria_banco_classes_e_arquivos(tmp_path):
     assert formato.existe(tmp_path)
     assert formato.nomes_classes(tmp_path) == {0: "Garrafa", 1: "Tampa", 2: "Lata"}
     dados = yaml.safe_load((tmp_path / "data.yaml").read_text(encoding="utf-8"))
-    assert dados == {"train": "treino.txt", "val": "treino.txt",
+    assert dados == {"train": "treino.txt", "val": "teste.txt",
                      "names": {0: "Garrafa", 1: "Tampa", 2: "Lata"}}
     for lista in ("treino.txt", "teste.txt", "revisadas.txt"):
         assert (tmp_path / lista).read_text() == ""
