@@ -20,8 +20,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Argumentos vao para o backend (ex.: run.bat --debug=true)
 echo [1/3] Iniciando Backend Python...
-start "EcoVision Backend" cmd /k "cd backend && python ecovision_local_modf.py"
+start "EcoVision Backend" cmd /k "cd backend && python ecovision_local_modf.py %*"
 timeout /t 3 /nobreak >nul
 
 echo [2/3] Iniciando Frontend React...

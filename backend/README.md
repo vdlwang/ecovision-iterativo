@@ -22,9 +22,11 @@ O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o bac
 O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo` e `serial`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
 
 ```bash
-ECOVISION_LOG=DEBUG python ecovision_local_modf.py          # Linux/macOS
-set ECOVISION_LOG=DEBUG && python ecovision_local_modf.py   # Windows (cmd)
+python ecovision_local_modf.py --debug=true
+../run.sh --debug=true      # ou run.bat --debug=true: o argumento vai para o backend
 ```
+
+`--debug` sozinho equivale a `--debug=true`; o padrão é `false`. Um valor que não seja verdadeiro/falso (`true`/`false`, `1`/`0`, `sim`/`não`) faz o backend sair com erro de uso.
 
 As bibliotecas (websockets etc.) só aparecem a partir de WARNING.
 

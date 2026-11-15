@@ -17,11 +17,14 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+# Argumentos vão para o backend (ex.: ./run.sh --debug=true)
+ARGS_BACKEND="$*"
+
 echo "[1/3] Iniciando Backend Python..."
 cd backend
-gnome-terminal -- bash -c "python3 ecovision_local_modf.py; exec bash" || \
-xterm -e "python3 ecovision_local_modf.py" || \
-python3 ecovision_local_modf.py &
+gnome-terminal -- bash -c "python3 ecovision_local_modf.py $ARGS_BACKEND; exec bash" || \
+xterm -e "python3 ecovision_local_modf.py $ARGS_BACKEND" || \
+python3 ecovision_local_modf.py "$@" &
 cd ..
 sleep 3
 

@@ -9,9 +9,9 @@ import time
 import cv2
 import base64
 import json
+import argparse
 import asyncio
 import logging
-import os
 import websockets
 from pathlib import Path
 from threading import Thread, Lock
@@ -19,7 +19,7 @@ from threading import Thread, Lock
 from deteccao import deteccoes_do_quadro, angulo_a_disparar
 
 # ==== Logging ====
-# INFO por padrão; ECOVISION_LOG=DEBUG mostra também cada comando enviado ao
+# INFO por padrão; --debug=true mostra também cada comando enviado ao
 # ESP32 e as detecções de cada quadro. Bibliotecas (websockets etc.) ficam em WARNING.
 logging.basicConfig(
     level=logging.WARNING,
@@ -27,8 +27,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("ecovision")
-_nivel = os.environ.get("ECOVISION_LOG", "INFO").strip().upper()  # "set X=DEBUG && ..." no cmd deixa um espaço
-log.setLevel(_nivel if isinstance(logging.getLevelName(_nivel), int) else logging.INFO)
+log.setLevel(logging.INFO)  # main() troca para DEBUG com --debug=true
 
 # ==== Configuração ====
 BACKEND_DIR = Path(__file__).parent
@@ -351,6 +350,26 @@ def run_yolo_stream(model):
             pass
 
 # ==== Main ====
+def _booleano(valor):
+    """Converte o valor de --debug ("true"/"false", "1"/"0", "sim"/"não")"""
+    v = valor.strip().lower()
+    if v in ("true", "1", "sim", "s", "yes", "y", "on"):
+        return True
+    if v in ("false", "0", "não", "nao", "n", "no", "off"):
+        return False
+    raise argparse.ArgumentTypeError(f"esperado true ou false, recebido '{valor}'")
+
+
+def ler_argumentos():
+    parser = argparse.ArgumentParser(description="EcoVision: YOLO + ESP32 + WebSocket")
+    parser.add_argument(
+        "--debug", type=_booleano, nargs="?", const=True, default=False, metavar="true|false",
+        help="mostra cada comando enviado ao ESP32 e as detecções de cada quadro "
+             "(padrão: false; --debug sozinho equivale a --debug=true)",
+    )
+    return parser.parse_args()
+
+
 async def main():
     """Inicia WebSocket server e thread YOLO"""
     log.info("EcoVision - Sistema de Reciclagem com IA")
@@ -372,6 +391,8 @@ async def main():
         await asyncio.Future()  # Roda forever
 
 if __name__ == "__main__":
+    if ler_argumentos().debug:
+        log.setLevel(logging.DEBUG)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
