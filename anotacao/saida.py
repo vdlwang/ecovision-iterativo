@@ -1174,13 +1174,59 @@ def revisar(saida, nome, pedido, agora):
     return ler_revisao(saida, nome)
 
 
+def ler_registros(saida):
+    """
+    O que o metricas.py (T10) mede, uma entrada por imagem registrada, na
+    ordem de registro: {nome, conjunto, status, voto, revisao}.
+    - voto (None sem voto): o vigente, {resultado, motivo, auditoria, caixas:
+      [(nome da classe ou None, caixa)], propostas: [{anotador, limiar,
+      caixas: [(classe, confianca, caixa)]}]}, as propostas que ele usou, na
+      ordem dos anotadores, com todas as caixas (o limiar diz as visíveis);
+    - revisao (None sem revisão): a vigente, {acao, tempo_ativo_s, caixas:
+      [(nome da classe, caixa, origem, desfecho)], removidas: quantas caixas
+      do voto ela apagou; 0 no teste, em que a união não vai à página}. Ela parte sempre do voto vigente: só pendentes são
+      votadas e revisadas, e a revisada não volta a pendente.
+    Caixas normalizadas (x1, y1, x2, y2).
+    """
+    if not existe(saida):
+        return []
+    registros = []
+    with abrir(saida) as con:
+        nomes = _nomes(con)
+        for imagem in con.execute("SELECT * FROM imagens ORDER BY id").fetchall():
+            registro = {"nome": imagem["nome"], "conjunto": imagem["conjunto"],
+                        "status": imagem["status"], "voto": None, "revisao": None}
+            voto = _voto_vigente(con, imagem["id"])
+            if voto is not None:
+                _, propostas, caixas = _contexto_voto(con, voto)
+                registro["voto"] = {
+                    "resultado": voto["resultado"], "motivo": voto["motivo"],
+                    "auditoria": bool(voto["auditoria"]),
+                    "caixas": [(nomes.get(c["classe_id"]), c["caixa"]) for c in caixas],
+                    "propostas": [{"anotador": p["anotador"], "limiar": l, "caixas": p["caixas"]}
+                                  for p, l in propostas]}
+            revisao = _revisao_vigente(con, imagem["id"])
+            if revisao is not None:
+                caixas = _caixas_revisao(con, revisao["id"])
+                n_voto = con.execute("SELECT COUNT(*) FROM caixas_voto WHERE voto_id = ?",
+                                     (revisao["voto_id"],)).fetchone()[0]
+                registro["revisao"] = {
+                    "acao": revisao["acao"], "tempo_ativo_s": revisao["tempo_ativo_s"],
+                    "caixas": [(nomes.get(c["classe_id"]), (c["x1"], c["y1"], c["x2"], c["y2"]),
+                                c["origem"], c["desfecho"]) for c in caixas],
+                    "removidas": 0 if imagem["conjunto"] == "teste" else
+                    n_voto - len({c["voto_indice"] for c in caixas if c["origem"] == "voto"})}
+            registros.append(registro)
+    return registros
+
+
 def ler_revisao(saida, nome):
     """
     A revisão vigente da imagem, ou None: {imagem, acao, data, tempo_ativo_s,
     revisor, voto_id, caixas: [{id, caixa, origem, indice, anotador,
     desfecho}], removidas}. indice: na caixa do voto (origem voto) ou na
     proposta do anotador; removidas: os índices das caixas do voto que
-    nenhuma caixa final cita.
+    nenhuma caixa final cita ([] no teste, em que a união não vai à página).
     """
     if not existe(saida):
         return None
@@ -1209,4 +1255,5 @@ def ler_revisao(saida, nome):
         return {"imagem": nome, "acao": revisao["acao"], "data": revisao["data"],
                 "tempo_ativo_s": revisao["tempo_ativo_s"], "revisor": revisao["revisor"],
                 "voto_id": revisao["voto_id"], "caixas": caixas,
-                "removidas": [k for k in do_voto if k not in usadas]}
+                "removidas": [] if imagem["conjunto"] == "teste" else
+                [k for k in do_voto if k not in usadas]}

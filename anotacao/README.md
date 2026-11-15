@@ -321,6 +321,28 @@ Os limiares abaixo do `piso` das propostas não são medidos (faltariam caixas a
 
 Os rótulos da equipe usam nomes TACO; entram só as classes que estão em `classes.yaml`, casadas pelo nome, e os polígonos viram a caixa que os contém. Antes disso, o `avaliar.py` aplica [`correcoes_rotulos.yaml`](correcoes_rotulos.yaml): a equipe rotulou todo vidro como `Glass bottle`, e as 97 caixas são, na verdade, potes, copos, taças, tigelas e 3 latas. O arquivo indica a linha de cada `.txt` e confere a classe original; `legado/` não é editado. `--sem-correcoes` usa os rótulos como estão, e `--correcoes` aponta para outro arquivo. As quatro validações são as mesmas cenas fotografadas de jeitos diferentes, então somá-las não equivale a quatro vezes mais dados; serve para comparar anotadores, que não treinaram nelas.
 
+## Métricas
+
+O `metricas.py` (RF13, T10) lê o banco da saída e mede o uso da anotação, sem rodar modelo nem mudar nada:
+
+```bash
+python anotacao/metricas.py anotacoes                      # tabelas no terminal
+python anotacao/metricas.py anotacoes --json metricas.json # e todas as medidas em JSON
+```
+
+| Bloco | O que mede |
+|---|---|
+| Voto | Imagens de treino votadas, aprovadas (e quantas na auditoria cega) e reprovadas por motivo; de teste unidas; pendentes sem voto |
+| Auditoria | Das aprovadas sorteadas (T8) já revistas, a fração **correta por inteiro** (o revisor aceitou todas as caixas de consenso, sem trocar classe, remover nem acrescentar; descartar conta como erro), com o intervalo de Wilson de 95% (a amostra é pequena: 5% das aprovadas), e o destino de cada caixa de consenso |
+| Correções | O desfecho de cada caixa da revisão vigente (aceita, classe corrigida, classe atribuída, adicionada de uma proposta ou candidata), as caixas do voto removidas e as descartadas, por grupo: `falhou`, `auditoria`, `aprovada` (revista pelo filtro) e `teste` |
+| Tempo | Tempo ativo de revisão por imagem (mediana e média) e por objeto (soma dos tempos sobre a soma das caixas salvas), por grupo |
+| Anotadores | Precisão e recall de cada anotador frente à revisão salva, das caixas visíveis da proposta que o voto usou (casamento guloso, IoU ≥ `--iou`, padrão 0,5), sem e com a classe, separados em treino e teste |
+
+Cuidados ao ler:
+- **Treino é enviesado**: a revisão parte das caixas do voto e herda delas (viés de automação), então a precisão dos anotadores no treino sai otimista. O **teste**, revisado sem pré-anotação, é a referência, mas as caixas dele ainda vêm das candidatas dos anotadores (sem desenho à mão, decisão 12): um objeto que nenhum anotador cobre não entra, e o recall sai otimista também.
+- **Tempo por clique**: o tempo do teste é o da revisão por clique, não o da anotação manual.
+- Só conta a revisão vigente de cada imagem, e só a revisão salva entra na precisão e no recall (descartada não tem caixas finais). No teste, nenhuma caixa conta como removida: a união do voto não vai à página.
+
 ## Próximos passos
 
 O plano do framework de anotação e da página de revisão (escopo atual) está em [`PLANO-REVISAO.md`](PLANO-REVISAO.md); o sistema completo, com voto entre anotadores e bases de treino e teste, em [`OBJETIVO.md`](../OBJETIVO.md).
