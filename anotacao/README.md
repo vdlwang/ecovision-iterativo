@@ -179,7 +179,7 @@ Caixa do voto intocada aparece tracejada, com a confiança; caixa corrigida ou i
 | Ação | Mouse | Teclado |
 |---|---|---|
 | Selecionar caixa | clique (já abre a busca) | `Tab` / `Shift+Tab`, em ordem de leitura |
-| Incluir uma proposta de um modelo fora do voto | clique na caixa pontilhada | — |
+| Incluir uma proposta de um modelo fora do voto | clique na caixa pontilhada | com ela em foco pelo `Tab`: `Enter` inclui; uma letra ou `1`–`9` incluem e já dão a classe |
 | Trocar a classe | escrever no campo de busca e clicar na opção | com a caixa selecionada, escrever (a primeira letra já abre a busca); `↑`/`↓` e `Enter` escolhem |
 | Trocar para uma classe do anotador | — | `1`–`9`, na ordem de `classes` no `classes.yaml` |
 | Remover caixa | "Remover caixa" | `Del` |
@@ -189,7 +189,7 @@ Caixa do voto intocada aparece tracejada, com a confiança; caixa corrigida ou i
 | Salvar e ir para a próxima | "Salvar e próxima" | `Enter`, que pede confirmação (`Enter` confirma, `Esc` cancela); `Ctrl+S` (`Cmd+S` no Mac) salva direto, também com a busca aberta |
 | Descartar a imagem (inútil para treino) | "Descartar imagem" | `D` sem caixa selecionada (com uma selecionada, o `d` vai para a busca); sempre pede confirmação |
 
-O `Tab` segue a ordem de leitura pelos centros das caixas: linhas de cima para baixo e, em cada linha, da esquerda para a direita. Uma caixa entra na linha atual se o centro dela cai na faixa vertical da primeira caixa da linha, a mais alta. O campo de busca mostra a posição da caixa nessa ordem ("caixa 2 de 7").
+O `Tab` passa por todas as caixas da imagem, as da edição e as pontilhadas (se visíveis), na ordem de leitura pelos centros: linhas de cima para baixo e, em cada linha, da esquerda para a direita. Uma caixa entra na linha atual se o centro dela cai na faixa vertical da primeira caixa da linha, a mais alta. O campo de busca mostra a posição da caixa nessa ordem ("caixa 2 de 7").
 
 A busca oferece qualquer classe do `data.yaml` e mostra até 9 opções. Não diferencia maiúsculas nem acentos e casa, nesta ordem: o início do nome, o início de uma palavra ("can" → `Drink can`), as iniciais ("cpb" → `Clear plastic bottle`), um trecho qualquer e o material, em português ou inglês ("vidro" → as classes de vidro do anotador; só elas têm material). Nos empates, vêm antes as classes usadas há pouco e as do anotador. Com o campo vazio, a lista mostra essas mesmas. Na busca, `Esc` fecha sem trocar e `Tab` passa para a caixa seguinte.
 

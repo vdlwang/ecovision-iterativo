@@ -153,7 +153,7 @@
         <kbd>↑</kbd><kbd>↓</kbd> e <kbd>Enter</kbd> escolhem. <kbd>Enter</kbd> salva, com
         confirmação; <kbd>Ctrl+S</kbd>, direto. <kbd>1</kbd>–<kbd>9</kbd>: classes do anotador;
         <kbd>Esc</kbd> desfaz a seleção. Pontilhadas: propostas de um modelo fora do voto,
-        um clique inclui. <kbd>N</kbd> e um clique no objeto: nova caixa.
+        um clique inclui; o <kbd>Tab</kbd> também passa por elas, e <kbd>Enter</kbd> inclui. <kbd>N</kbd> e um clique no objeto: nova caixa.
         <kbd>Ctrl+Z</kbd> desfaz; <kbd>Ctrl+Shift+Z</kbd>, refaz.</span>
     </div>
   </div>
@@ -177,8 +177,9 @@ let classes = [];     // /api/classes
 let fila = [];        // linhas de /api/imagens
 let atual = -1;       // índice na fila
 let detalhe = null;   // /api/imagens/<nome> da atual
-// {voto, teste, caixas: [{id, caixa, origem, indice, anotador, tocada}], sel, sujo,
-// novo, desfazer, refazer} se editável (pendente e votada); voto: o id do voto
+// {voto, teste, caixas: [{id, caixa, origem, indice, anotador, tocada}], sel, foco,
+// sujo, novo, desfazer, refazer} se editável; foco: a proposta pontilhada em que
+// o Tab parou, {anotador, indice} ou null (nunca junto com sel) (pendente e votada); voto: o id do voto
 // mostrado; origem: "voto" (indice na lista do voto), "proposta" ou "candidata"
 // (indice na proposta do anotador); novo: modo "nova caixa", {ponto, lista de
 // candidatas no ponto, i} ou null; desfazer/refazer: pilhas de {caixas, sel}
@@ -288,7 +289,7 @@ async function mostrar(i) {
     if (dados.status === "pendente" && dados.voto) {
       // A edição parte das caixas do voto: consenso no treino, união sem classe no teste
       edicao = { voto: dados.voto.id, teste: dados.voto.resultado === "uniao",
-        sel: null, sujo: false, novo: null, desfazer: [], refazer: [],
+        sel: null, foco: null, sujo: false, novo: null, desfazer: [], refazer: [],
         caixas: dados.voto.caixas.map(c =>
           ({ id: c.id, caixa: c.caixa, origem: "voto", indice: c.indice, tocada: false })) };
       tempo.ativo = 0;
@@ -402,14 +403,26 @@ function propostasFora() {
     .filter(p => !incluidas.has(`${anotador}\u0000${p.indice}`)).map(p => ({ anotador, p })));
 }
 
-function incluir(anotador, p) {
+function incluir(anotador, p, buscar = true) {
   if (!editando()) return;
   guardar();
   edicao.caixas.push({ id: p.id, caixa: p.caixa, origem: "proposta", anotador,
                        indice: p.indice, tocada: true });
   edicao.sel = edicao.caixas.length - 1;
+  edicao.foco = null;
   desenhar();
-  if (p.id === null) abrirBusca();
+  if (buscar && p.id === null) abrirBusca();
+}
+
+// A proposta pontilhada em foco (Tab), ou undefined
+const emFoco = () => edicao?.foco && propostasFora().find(({ anotador, p }) =>
+  anotador === edicao.foco.anotador && p.indice === edicao.foco.indice);
+
+// Inclui a proposta em foco; devolve se havia uma
+function incluirFoco(buscar = true) {
+  const f = emFoco();
+  if (f) incluir(f.anotador, f.p, buscar);
+  return !!f;
 }
 
 function desenharEdicao() {
@@ -422,6 +435,8 @@ function desenharEdicao() {
                                  + p.conf.toFixed(2), p.caixa, true);
       div.classList.add("modelo");
       div.title = `Proposta de ${anotador} fora do voto: clique para incluir`;
+      div.classList.toggle("selecionada", edicao.foco?.anotador === anotador
+                                          && edicao.foco?.indice === p.indice);
       div.onmousedown = e => { e.stopPropagation(); e.preventDefault(); incluir(anotador, p); };
       quadro.append(div);
     }
@@ -466,6 +481,10 @@ function desenharEdicao() {
   const fora = propostasFora().length;
   if (fora) legenda.append(` ${fora} proposta(s) de modelos fora do voto`
     + ($("mostrar-modelos").checked ? " (pontilhadas): clique para incluir." : ", ocultas."));
+  const foco = emFoco();
+  if (foco) legenda.append(Object.assign(document.createElement("b"), { textContent:
+    ` Em foco: proposta de ${foco.anotador}. Enter inclui; uma letra ou 1–9 incluem e dão `
+    + "a classe; Tab passa adiante." }));
   if (edicao.caixas.some(c => c.id === null))
     legenda.append(Object.assign(document.createElement("span"), { className: "erro",
       textContent: " " + AVISO_SEM_ID }));
@@ -510,6 +529,7 @@ function atualizarVisibilidade() {
 function selecionar(k) {
   if (!editando()) return;
   edicao.sel = k;
+  edicao.foco = null;
   desenhar();
 }
 
@@ -525,6 +545,7 @@ function iniciarNova() {
   if (!editando()) return;
   fecharBusca();
   edicao.sel = null;
+  edicao.foco = null;
   edicao.novo = { ponto: null, lista: null, i: 0 };
   desenhar();
 }
@@ -603,11 +624,22 @@ function ordemLeitura(caixas) {
   return linhas.flatMap(linha => linha.sort((a, b) => cx(a) - cx(b)));
 }
 
+// O Tab passa pelas caixas da edição e pelas propostas pontilhadas (se
+// visíveis), todas na mesma ordem de leitura
 function selecionarVizinha(passo) {
-  const ordem = ordemLeitura(edicao.caixas), n = ordem.length;
+  const itens = [...edicao.caixas.map((c, k) => ({ caixa: c.caixa, k })),
+                 ...($("mostrar-modelos").checked ? propostasFora() : [])
+                   .map(({ anotador, p }) => ({ caixa: p.caixa, anotador, indice: p.indice }))];
+  const ordem = ordemLeitura(itens), n = ordem.length;
   if (!n) return;
-  const i = ordem.indexOf(edicao.sel);
-  selecionar(i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]);
+  const atualItem = itens.findIndex(it => it.k !== undefined ? it.k === edicao.sel
+    : edicao.foco?.anotador === it.anotador && edicao.foco?.indice === it.indice);
+  const i = ordem.indexOf(atualItem);
+  const alvo = itens[i < 0 ? ordem[passo > 0 ? 0 : n - 1] : ordem[(i + passo + n) % n]];
+  if (alvo.k !== undefined) return selecionar(alvo.k);
+  edicao.sel = null;
+  edicao.foco = { anotador: alvo.anotador, indice: alvo.indice };
+  desenhar();
 }
 
 // --- busca da classe ----------------------------------------------------------
@@ -740,6 +772,7 @@ function voltar(passo) {
   edicao[para].push({ caixas: edicao.caixas, sel: edicao.sel });
   edicao.caixas = estado.caixas;
   edicao.sel = estado.sel !== null && estado.sel < edicao.caixas.length ? estado.sel : null;
+  edicao.foco = null;
   edicao.novo = null;
   // Sem nada a desfazer, as caixas são as propostas como chegaram
   edicao.sujo = edicao.desfazer.length > 0;
@@ -808,7 +841,7 @@ $("ordem").onchange = () => carregarFila(nomeAtual()).catch(erro);
 $("camada").onchange = desenhar;
 $("mostrar-caixas").onchange = atualizarVisibilidade;
 $("mostrar-rotulos").onchange = atualizarVisibilidade;
-$("mostrar-modelos").onchange = desenhar;
+$("mostrar-modelos").onchange = () => { if (edicao) edicao.foco = null; desenhar(); };
 $("anterior").onclick = () => { if (podeSair()) mostrar(atual - 1); };
 $("proxima").onclick = () => { if (podeSair()) mostrar(atual + 1); };
 $("salvar").onclick = () => enviar("salvar");
@@ -847,7 +880,7 @@ $("busca").onkeydown = e => {
 $("area").onmousedown = e => {
   if (!editando()) return;
   if (edicao.novo) { e.preventDefault(); escolherPonto(e); }
-  else if (edicao.sel !== null) selecionar(null);
+  else if (edicao.sel !== null || edicao.foco) selecionar(null);
 };
 $("area").addEventListener("wheel", e => {
   if (!editando() || !edicao.novo?.lista?.length) return;
@@ -889,15 +922,20 @@ document.addEventListener("keydown", e => {
     else if (["Escape", "n", "N"].includes(e.key)) { e.preventDefault(); cancelarNova(); }
     return;
   }
-  if ((e.key === "n" || e.key === "N") && edicao.sel === null) {
+  if ((e.key === "n" || e.key === "N") && edicao.sel === null && !emFoco()) {
     e.preventDefault();
     iniciarNova();
-  } else if (e.key === "Tab" && edicao.caixas.length) {
+  } else if (e.key === "Tab") {
     e.preventDefault();
     selecionarVizinha(e.shiftKey ? -1 : 1);
-  } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && edicao.sel !== null) {
-    // Com uma caixa selecionada, uma letra já começa a busca (inclusive o d)
+  } else if (e.key === "Enter" && emFoco()) {
     e.preventDefault();
+    incluirFoco();
+  } else if (e.key.length === 1 && /\p{L}/u.test(e.key) && (edicao.sel !== null || emFoco())) {
+    // Com uma caixa selecionada, uma letra já começa a busca (inclusive o d);
+    // numa proposta em foco, inclui-a antes
+    e.preventDefault();
+    incluirFoco(false);
     abrirBusca();
     $("busca").value = e.key;
     busca.ativa = 0;
@@ -906,6 +944,7 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
     enviar("salvar", true);
   } else if (/^[1-9]$/.test(e.key) && classes.some(c => c.atalho === Number(e.key))) {
+    incluirFoco(false);
     trocarClasse(classes.find(c => c.atalho === Number(e.key)).id);
   } else if (e.key === "Delete" || e.key === "Backspace") {
     e.preventDefault();
