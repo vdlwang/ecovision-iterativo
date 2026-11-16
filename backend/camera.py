@@ -302,22 +302,28 @@ class LeitorCamera:
 
     def _laco(self):
         proximo = time.monotonic()
-        while self._ativo:
-            ok, quadro = self.cap.read()
-            if not ok:
-                break
+        try:
+            while self._ativo:
+                ok, quadro = self.cap.read()
+                if not ok:
+                    break
+                with self._cond:
+                    self._quadro = quadro
+                    self._numero += 1
+                    self._cond.notify_all()
+                if self._ritmo:
+                    proximo += self._ritmo
+                    espera = proximo - time.monotonic()
+                    if espera > 0:
+                        time.sleep(espera)
+        finally:
+            # Só esta thread solta a captura, e só fora do read(): soltá-la
+            # de outra thread com um read() de rede bloqueado (stream HTTPS
+            # parado) derrubava o processo com SIGSEGV dentro do FFmpeg
+            self.cap.release()
             with self._cond:
-                self._quadro = quadro
-                self._numero += 1
+                self._ativo = False
                 self._cond.notify_all()
-            if self._ritmo:
-                proximo += self._ritmo
-                espera = proximo - time.monotonic()
-                if espera > 0:
-                    time.sleep(espera)
-        with self._cond:
-            self._ativo = False
-            self._cond.notify_all()
 
     def proximo(self, espera=ESPERA_QUADRO_S):
         """
@@ -333,7 +339,16 @@ class LeitorCamera:
             self._entregue = self._numero
             return self._quadro
 
-    def fechar(self):
+    def fechar(self, espera=2.0):
+        """
+        Pede à thread que pare e espera até `espera` segundos. Se ela está
+        presa num read() (stream de rede parado), segue sem esperar mais: a
+        thread solta a captura quando o read() voltar. Devolve True se ela
+        já terminou.
+        """
         self._ativo = False
-        self._thread.join(timeout=2)
-        self.cap.release()
+        self._thread.join(timeout=espera)
+        if self._thread.is_alive():
+            log.warning("Câmera: leitura ainda presa; a captura será solta quando ela voltar")
+            return False
+        return True

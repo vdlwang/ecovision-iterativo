@@ -234,6 +234,34 @@ def test_leitor_sem_quadro_novo_devolve_none():
     leitor.fechar()
 
 
+def test_fechar_nao_solta_a_captura_durante_um_read():
+    """Stream de rede parado: soltar a captura no meio do read() derrubava o processo."""
+    import threading
+    liberar = threading.Event()
+
+    class Presa(CameraFalsa):
+        def read(self):
+            if self.lidos == 0:
+                return super().read()
+            assert not self.solta, "release() durante o read()"
+            liberar.wait(5)
+            assert not self.solta, "release() durante o read()"
+            return False, None
+
+    criadas = []
+
+    def abrir_captura(f, b):
+        criadas.append(Presa(f, b))
+        return criadas[-1]
+    leitor = LeitorCamera("https://u:s@cam/video/mjpeg", {}, abrir_captura, plataforma="linux")
+    assert leitor.proximo(espera=1) is not None
+    assert leitor.fechar(espera=0.1) is False  # thread presa no read()
+    assert not criadas[0].solta
+    liberar.set()
+    leitor._thread.join(timeout=2)
+    assert criadas[0].solta  # solta pela própria thread, depois do read()
+
+
 def test_leitor_reaplica_ao_reabrir():
     ab = abridor(quadros=1)
     for _ in range(2):
