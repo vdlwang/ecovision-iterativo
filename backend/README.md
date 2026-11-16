@@ -98,6 +98,17 @@ O backend abre a câmera (`camera.py`) e aplica o bloco `camera` do `config.json
 - **Sistema**: testado no Linux (V4L2, Fedora 43, na máquina da esteira). No Windows, abre com DSHOW, e a tradução (`AUTO_EXPOSURE` 0,25/0,75, exposição em log2 de segundos) segue a documentação do OpenCV, **sem teste**.
 - **Índice no Linux**: cada câmera UVC cria dois nós, `/dev/videoN` (vídeo) e `/dev/videoN+1` (metadados, sem formatos). O `camera_index` é o do nó de vídeo: a DV20 hoje é o 2, não o 3. `v4l2-ctl --list-devices` mostra os nós.
 
+### Celular como câmera IP (medida temporária, 2026-11-16)
+
+Até a câmera nova chegar (critérios no [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md), etapa 6b), a esteira é testada com um celular Android rodando o app "Android IP Camera" (página de título *Android IP Camera*, HTTPS com certificado próprio, porta 4444, login e senha). A DV20 continua configurada no bloco `camera`; para voltar a ela, `camera_index: 2`.
+
+- **URL no `camera_index`**: a do stream, com as credenciais: `https://<usuário>:<senha>@<ip>:4444/video/mjpeg`. A raiz (`/`) é a página do app, não o vídeo. Caracteres especiais na senha vão codificados (`@` → `%40`).
+- **Senha já no primeiro pedido**: o FFmpeg (que o OpenCV usa para URL) pede primeiro sem senha e só a manda depois do 401; este app passa a responder **429 Too Many Requests** a todo pedido sem senha depois de alguns desses, e o stream não abre mais. O `camera.py` liga `auth_type=basic` do FFmpeg (variável `OPENCV_FFMPEG_CAPTURE_OPTIONS`) para URL com usuário e senha, e o problema some. Com o `curl`, o mesmo: `curl -sk -u usuário:senha https://<ip>:4444/video/mjpeg`.
+- **No navegador**, a página do app fica com o vídeo preto se aberta com `usuário:senha@` no endereço (o Chrome recusa o `fetch` do vídeo a partir de um endereço com credenciais). Abra `https://<ip>:4444/` sem elas, aceite o certificado e digite o login na janela. O app aceita poucos clientes no stream: com a página aberta, o backend pode não conseguir abrir.
+- **Ajustes no app**, pela página ou por `curl -sk -u usuário:senha "https://<ip>:4444/?<controle>=<valor>"`: `resolution` (ex.: `1280x720`; o celular em pé entrega 720×1280), `zoom` (digital, corta pelo centro), `exposure` (compensação, −10 a 10), `focus_distance` (−1 = autofoco), `contrast`, `fps`. O estado fica em `https://<ip>:4444/info.json`. O bloco `camera` do `config.json` não se aplica a URL (o backend avisa no log).
+- **Adotado em 2026-11-16**: lente traseira principal, `resolution=1280x720`, `zoom=1.2` (o máximo sem cortar a borda direita da lona, que está deslocada no quadro; para mais, centralizar o celular sobre a esteira), exposição e foco automáticos. Medido: 720×1280, ~9 fps lendo o stream sozinho, 11–12 fps no Monitor, 0,3% do quadro estourado com o pacote colorido sobre a lona (a DV20 estourava 7%). Com `resolution` padrão (960×720) o fps sobe para ~14.
+- **Limitações**: Wi-Fi (atraso e quadros perdidos pesam no acionamento do servo; conferir o fps no Monitor), bateria e aquecimento do celular, a sombra do suporte da DV20 na lona, e o celular em pé faz a esteira correr de cima para baixo no quadro (o sentido que a faixa `roi_y_min`/`roi_y_max` espera). A URL com a senha aparece no log e no `captura.jsonl` (pendente: mascarar).
+
 ### Calibração (`ajustar_camera.py`)
 
 Com o backend parado (a câmera só abre num programa por vez):

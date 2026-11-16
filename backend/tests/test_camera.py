@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
+import camera
 from camera import (LeitorCamera, abrir, conferir, fourcc_texto, propriedades,
                     tipo_fonte)
 from captura import Capturador
@@ -183,6 +184,17 @@ def test_url_nao_recebe_propriedades(caplog):
     assert cap.sets == [] and cap.backend is None
     assert rel["tipo"] == "url"
     assert "não se aplica" in caplog.text
+
+
+def test_url_com_senha_autentica_de_cara(monkeypatch):
+    monkeypatch.delenv(camera.VAR_OPCOES_FFMPEG, raising=False)
+    abrir("http://10.0.0.5:8080/video", {}, abridor(), plataforma="linux")
+    assert camera.VAR_OPCOES_FFMPEG not in __import__("os").environ
+    abrir("https://u:s@10.0.0.5:4444/video/mjpeg", {}, abridor(), plataforma="linux")
+    assert __import__("os").environ[camera.VAR_OPCOES_FFMPEG] == "auth_type;basic"
+    monkeypatch.setenv(camera.VAR_OPCOES_FFMPEG, "timeout;5000000")
+    abrir("https://u:s@10.0.0.5:4444/video/mjpeg", {}, abridor(), plataforma="linux")
+    assert __import__("os").environ[camera.VAR_OPCOES_FFMPEG] == "timeout;5000000|auth_type;basic"
 
 
 def test_url_sem_bloco_nao_avisa(caplog):

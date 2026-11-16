@@ -18,8 +18,10 @@ a função que abre a VideoCapture, para os testes passarem uma câmera falsa.
 """
 
 import logging
+import os
 import sys
 import time
+from urllib.parse import urlsplit
 from pathlib import Path
 from threading import Condition, Thread
 
@@ -106,6 +108,26 @@ def normalizar_fonte(fonte):
     if isinstance(fonte, str) and fonte.strip().isdigit():
         return int(fonte.strip())
     return fonte
+
+
+VAR_OPCOES_FFMPEG = "OPENCV_FFMPEG_CAPTURE_OPTIONS"
+
+
+def autenticar_de_cara(fonte):
+    """
+    URL com usuário e senha: o FFmpeg manda a senha já no primeiro pedido
+    (auth_type=basic). Sem isso, ele pede sem senha, recebe 401 e só depois
+    manda a senha; o app de câmera IP do Android responde 429 a todo pedido
+    sem senha depois de alguns desses, e o stream não abre mais. Vale para o
+    processo todo (a opção é lida pelo OpenCV a cada abertura) e não afeta
+    fontes sem senha.
+    """
+    if "@" not in urlsplit(str(fonte)).netloc:
+        return False
+    atual = os.environ.get(VAR_OPCOES_FFMPEG, "")
+    if "auth_type" not in atual:
+        os.environ[VAR_OPCOES_FFMPEG] = (atual + "|" if atual else "") + "auth_type;basic"
+    return True
 
 
 def fourcc_codigo(texto):
@@ -217,6 +239,8 @@ def abrir(fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None):
     fonte = normalizar_fonte(fonte)
     tipo = tipo_fonte(fonte)
     backend = nome_backend(plataforma) if tipo == "dispositivo" else None
+    if tipo == "url":
+        autenticar_de_cara(fonte)
     cap = abrir_captura(fonte, backend)
     if not cap.isOpened():
         cap.release()
