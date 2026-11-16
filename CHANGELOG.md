@@ -22,6 +22,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Serial:** escrita com trava, e ninguém espera resposta; uma thread registra tudo o que o ESP32 envia. Antes, a thread do YOLO e o WebSocket escreviam sem trava, e a leitura bloqueava o loop por até 1,5 s e podia ler a resposta de outro comando (`2701579`).
 - **Envio dos quadros:** um cliente lento perde quadros em vez de acumular envios e atrasar os outros; sem cliente conectado, o quadro nem é codificado (`c519981`).
 - **Confiança vale na hora:** o modelo roda com piso 0,1 e o filtro por `confidence` é feito a cada quadro; antes, o slider só valia depois de reiniciar (`ed0e5c2`).
+- **Estado do motor:** começa desligado e só muda quando o comando sai pela serial; antes, começava ligado e mudava até em modo demonstração, e o Monitor mostrava a esteira ligada sem ESP32. Quando o ESP32 reinicia (ex.: queda de tensão com o servo), o backend lê `ESP32 pronto.` e marca o motor desligado, como ele de fato fica (`403c5e1`).
 - `testes_serial.py` lê a porta do `config.json` (`05666aa`).
 
 ### Frontend
@@ -53,7 +54,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 
 ## 5. Testes
 
-- 25 testes pytest para `deteccao.py`, inclusive se toda classe do `best.pt` tem material (`7e54bfc`), e `test_requirements.py`, que confere as versões fixadas (`3acfb23`). Rodar com `python -m pytest backend/tests`.
+- 25 testes pytest para `deteccao.py`, inclusive se toda classe do `best.pt` tem material (`7e54bfc`), e `test_requirements.py`, que confere as versões fixadas (`3acfb23`). Testes do estado do motor (`motor.py`, `403c5e1`). Rodar com `python -m pytest backend/tests`.
 
 ## Ainda como na tese
 

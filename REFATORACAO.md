@@ -87,8 +87,8 @@ Encontrados na revisão antes do merge (2026-11-15). Decisão: não bloqueiam o 
 | # | Status | Problema | Correção sugerida |
 |---|---|---|---|
 | 36 | [ ] | "Testar Conexão Serial" (`ConfigModelPanel.tsx`, `testConnection`) manda `MOTOR ON` e, 2 s depois, sempre `MOTOR OFF`: com a esteira rodando, ela fica parada. Em modo demo, mostra "Teste enviado!" sem serial. | Restaurar o estado anterior do motor; exigir `serial_port`, como os botões do Monitor. |
-| 37 | [ ] | Reset do ESP32 (ex.: queda de tensão com o MG996R) volta o motor desligado, mas o backend segue com `motor_running = True` e a UI mostra a esteira ligada. | Em `read_serial_loop`, ao ler `ESP32 pronto.`, reenviar o último estado do motor (ou marcá-lo desligado). |
-| 38 | [ ] | `SystemState.motor_running` começa `True`: sem ESP32 o Monitor mostra a esteira ligada. O handler ignora o retorno de `send_line`. | Começar `False`; só marcar `True`/`False` se o comando foi enviado. |
+| 37 | [x] `403c5e1` | Reset do ESP32 (ex.: queda de tensão com o MG996R) volta o motor desligado, mas o backend segue com `motor_running = True` e a UI mostra a esteira ligada. | Em `read_serial_loop`, ao ler `ESP32 pronto.`, reenviar o último estado do motor (ou marcá-lo desligado). |
+| 38 | [x] `403c5e1` | `SystemState.motor_running` começa `True`: sem ESP32 o Monitor mostra a esteira ligada. O handler ignora o retorno de `send_line`. | Começar `False`; só marcar `True`/`False` se o comando foi enviado. |
 | 39 | [ ] | Serial não reconecta: após falha de escrita/leitura (cabo USB mexido), o backend fica em modo demo até reiniciar. | Tentar reabrir a porta periodicamente, como já é feito com a câmera. |
 | 40 | [ ] | `config.json` antigo sem `class_to_angle` ou `servo_actuation_seconds` gera `KeyError` no laço da câmera, logado como "Erro no stream da câmera" a cada 5 s. | Completar as chaves faltantes com os padrões em `load_config()`. |
 

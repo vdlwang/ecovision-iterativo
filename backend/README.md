@@ -63,7 +63,7 @@ Do frontend para o backend:
 
 Do backend para o frontend:
 
-- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas).
+- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas).
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 
 ## Testes automatizados
