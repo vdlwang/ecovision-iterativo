@@ -12,6 +12,8 @@ interface Detection {
   material: string;
   confidence: number;
   bbox: [number, number, number, number];
+  // ID da trilha do rastreador (T15); null sem rastreamento
+  id?: number | null;
 }
 
 interface FrameData {
@@ -59,7 +61,7 @@ export function MonitorPanel() {
                 ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
                 // Label com a largura do texto; dentro da caixa se não couber acima
-                const label = `${det.class} (${det.material}) ${(det.confidence * 100).toFixed(1)}%`;
+                const label = `${det.id != null ? `#${det.id} ` : ''}${det.class} (${det.material}) ${(det.confidence * 100).toFixed(1)}%`;
                 ctx.font = '14px monospace';
                 const larguraLabel = ctx.measureText(label).width + 10;
                 const topoLabel = y1 >= 25 ? y1 - 25 : y1;

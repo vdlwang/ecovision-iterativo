@@ -17,7 +17,7 @@ import websockets
 from pathlib import Path
 from threading import Thread, Lock
 
-from deteccao import deteccoes_do_quadro, angulo_a_disparar
+from deteccao import deteccoes_do_quadro, DisparosPorTrilha
 from motor import EstadoMotor
 from captura import Capturador, PADROES_CAPTURA, completar_config
 from camera import LeitorCamera, PADROES_CAMERA, ESPERA_QUADRO_S, descrever
@@ -47,6 +47,10 @@ SERIAL_RETRY_SECONDS = 5
 # roda com este piso e o filtro por config['confidence'] é feito a cada quadro
 CONF_MINIMA_MODELO = 0.1
 
+# Rastreador do Ultralytics (T15): cada caixa ganha o ID da trilha, e o servo
+# dispara uma vez por objeto (deteccao.DisparosPorTrilha)
+RASTREADOR = "bytetrack.yaml"
+
 # Configuração padrão: a da tese, mais o bloco da captura (T4)
 CONFIG_PADRAO = {
     "serial_port": "COM8",
@@ -63,7 +67,7 @@ CONFIG_PADRAO = {
         "paper": 110
     },
     "servo_actuation_seconds": 5.0,
-    # detection_cooldown agora é fixo no código (DETECTION_COOLDOWN)
+    # detection_cooldown: ignorado; o disparo é uma vez por objeto rastreado (T15)
     "captura": PADROES_CAPTURA,
     # Resolução, formato, exposição... pedidos à câmera (camera.py); null = padrão
     "camera": PADROES_CAMERA,
@@ -102,8 +106,6 @@ class SystemState:
         self.motor = EstadoMotor()
         self.processing = False
         self.processing_started_at = 0.0
-        # timestamp da última detecção enviada ao ESP32
-        self.last_detection_ts = 0.0
         self.current_detections = []
         self.fps = 0
         self.serial_port = None
@@ -329,6 +331,9 @@ def run_yolo_stream(model):
 def laco_yolo(model, leitor):
     """Um quadro por vez: o mais recente da câmera (os intermediários são pulados)"""
     imgsz = config['camera']['imgsz']
+    # Câmera (re)aberta: trilhas e IDs recomeçam (persist=False no primeiro quadro)
+    disparos = DisparosPorTrilha()
+    persistir = False
     frame_count = 0
     # FPS medido em janelas de 1 s (a média desde o início escondia quedas)
     fps_frames = 0
@@ -338,8 +343,10 @@ def laco_yolo(model, leitor):
         frame = leitor.proximo()
         if frame is None:
             return
-        result = model(frame, conf=min(CONF_MINIMA_MODELO, config['confidence']),
-                       imgsz=imgsz, verbose=False)[0]
+        result = model.track(frame, persist=persistir, tracker=RASTREADOR,
+                             conf=min(CONF_MINIMA_MODELO, config['confidence']),
+                             imgsz=imgsz, verbose=False)[0]
+        persistir = True
         frame_count += 1
         if frame_count == 1:
             log.info("Stream YOLO iniciado!")
@@ -365,25 +372,26 @@ def laco_yolo(model, leitor):
                 boxes.conf.cpu().numpy(),
                 boxes.xyxy.cpu().numpy(),
                 config['confidence'],
+                None if boxes.id is None else boxes.id.cpu().numpy(),
             )
         if detections:
             log.debug("Quadro %d: %s", frame_count, ", ".join(
-                f"{d['class']} ({d['material']}) {d['confidence']:.2f}" for d in detections))
-        
-        # Dispara o servo para a primeira detecção que cumpre as condições
+                f"#{d['id']} {d['class']} ({d['material']}) {d['confidence']:.2f}" for d in detections))
+
+        # Dispara o servo uma vez por objeto, quando a trilha dele cruza a faixa
         now = time.time()
-        for det in detections:
-            angle = angulo_a_disparar(det, H, config, state.processing,
-                                      now - state.last_detection_ts)
-            if angle is None:
-                continue
-            log.info("Disparando: %s → %s → %d°", det['class'], det['material'], angle)
-            send_angle(state.serial_port, angle)
-            
+        disparo = disparos.quadro(detections, H, config, now, state.processing)
+        if disparo:
+            log.info("Disparando: #%d → %s → %d° (votos: %s)", disparo['id'], disparo['material'],
+                     disparo['angulo'], ", ".join(f"{m} {v:.1f}" for m, v in
+                                                  sorted(disparo['votos'].items(), key=lambda x: -x[1])))
+            send_angle(state.serial_port, disparo['angulo'])
             state.processing = True
             state.processing_started_at = now
-            state.last_detection_ts = now
-        
+        while disparos.perdidas_ocupado:
+            log.warning("Objeto #%d cruzou a faixa com o servo ocupado e não foi separado",
+                        disparos.perdidas_ocupado.pop(0))
+
         state.current_detections = detections
 
         # Captura para a anotação (T4): roda com ou sem cliente conectado

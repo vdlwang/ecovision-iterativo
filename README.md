@@ -80,7 +80,7 @@ Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 
 ## Limitações conhecidas
 
-- **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Objetos que chegam nesse intervalo são ignorados.
+- **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Cada objeto é rastreado e dispara uma vez ao cruzar a faixa, mas os que cruzam nesse intervalo não são separados (o log avisa).
 - **O login é simulado:** não há autenticação real.
 
 ## Licença

@@ -11,7 +11,7 @@ python ecovision_local_modf.py      # pode ser chamado de qualquer pasta
 
 As versões em `requirements.txt` são fixas (`==`), as testadas com Python 3.14; o numpy 2.5 exige Python 3.12+. Para usar a GPU, instale antes a build CUDA do `torch` da mesma versão (instruções em pytorch.org); o pip a aceita no lugar da fixada. Para atualizar, troque todas as versões juntas, rode os testes e o bloco de verificação, e só então retreine o modelo.
 
-- **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). Quando um objeto entra na ROI, envia o ângulo na hora e ignora novas detecções até passar `servo_actuation_seconds`. O intervalo mínimo entre disparos é fixo no código (`DETECTION_COOLDOWN = 1.5` s, em `deteccao.py`).
+- **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). O YOLO roda com rastreamento (abaixo, "Rastreamento"): cada objeto dispara o servo uma vez, quando cruza a ROI, e o sistema fica ocupado por `servo_actuation_seconds`.
 - **`motor.py`** guarda o estado do motor (`EstadoMotor`), e **`captura.py`** a captura para a anotação (abaixo); ambos sem câmera nem serial, testáveis sem hardware.
 - **`camera.py`** abre a câmera, aplica o bloco `camera` do `config.json` e a lê numa thread própria, entregando ao YOLO só o quadro mais recente (abaixo, "Câmera"). **`ajustar_camera.py`** é a ferramenta de calibração.
 - **`deteccao.py`** guarda a lógica que não depende de câmera nem de serial: a tabela `taco_to_material`, o filtro das caixas pela confiança (`deteccoes_do_quadro`) e a decisão de disparar o servo (`angulo_a_disparar`).
@@ -47,7 +47,7 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 | `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
 | `captura` | Captura de quadros para a anotação (abaixo): `ativa`, `pasta`, `intervalo_s`, `travessia_s`, `diferenca_minima`, `qualidade_jpeg` |
 | `camera` | O que pedir à câmera (abaixo, "Câmera"): `largura`, `altura`, `fourcc`, `fps`, `exposicao`, `temperatura_cor`, `foco`, `ganho`, `imgsz` |
-| `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o intervalo é `DETECTION_COOLDOWN` no código |
+| `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o disparo é uma vez por objeto rastreado |
 
 `serial_port`, `baud_rate`, `camera_index`, `camera` e `model_path` só passam a valer depois de reiniciar o backend. `confidence`, `class_to_angle` e a ROI valem na hora.
 
@@ -124,6 +124,19 @@ python ajustar_camera.py --camera 2 --listar             # outra câmera que a d
 
 `--varrer` aceita `exposicao`, `temperatura_cor`, `foco`, `ganho`, `brilho`, `contraste`, `saturacao`, `nitidez` e `gama`, parte do bloco `camera` do `config.json` e muda só o campo varrido. Os quadros vão para `capturas/ajuste/<AAAAMMDDTHHMMSS>/`, com o valor no nome, e cada linha impressa diz o valor lido de volta e o brilho médio. O roteiro da calibração está na etapa 6b do [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md). Sem argumentos, o programa sai com código 1 se houver divergência.
 
+## Rastreamento (T15)
+
+O YOLO roda com `model.track(..., persist=True, tracker="bytetrack.yaml")` (ByteTrack do Ultralytics; dependência `lap`): cada caixa traz o ID da trilha do objeto (`id` nas detecções do WebSocket e do `captura.jsonl`; o Monitor o mostra como `#id`). A decisão é de `deteccao.DisparosPorTrilha`:
+
+- **Uma vez por objeto:** a trilha dispara quando o centro dela está na faixa `roi_y_min`..`roi_y_max` ou a atravessou desde o quadro anterior (a 12 fps, um objeto rápido pode pular a faixa). Um objeto parado na faixa não dispara de novo, e dois objetos próximos disparam os dois, se o servo estiver livre. Substitui o intervalo fixo de 1,5 s entre disparos (`DETECTION_COOLDOWN`), que ignorava o segundo objeto e podia disparar duas vezes pelo mesmo.
+- **Material votado:** a soma das confianças por material em todos os quadros da trilha (sem `other`), não a classe do quadro do disparo. O log diz os votos: `Disparando: #4 → plastic → 50° (votos: plastic 5.9)`.
+- **Servo ocupado:** depois de um disparo, o sistema fica ocupado por `servo_actuation_seconds` (o firmware segura cada ângulo 5 s). Uma trilha que cruza a faixa ocupada ainda dispara se estiver dentro dela quando o servo liberar; se sair sem disparar, o log avisa: `Objeto #5 cruzou a faixa com o servo ocupado e não foi separado`. Antes, era ignorada sem registro.
+- **Troca de ID:** se o rastreador perde um objeto já disparado e o acha de novo com outro ID (até 1 s depois, sobrepondo a última caixa), o novo ID herda o disparo.
+- **Reabertura da câmera:** as trilhas recomeçam (`persist=False` no primeiro quadro).
+- Só o que o rastreador confirmou vira detecção: uma caixa vista num quadro isolado não aparece no Monitor.
+
+Conferido em 2026-11-16 com vídeos sintéticos (recortes das fotos da equipe descendo sobre um quadro real da esteira, a 12 fps): cada objeto detectado disparou uma vez, com o material certo; dois objetos a 0,75 s um do outro dispararam os dois com o servo livre em 0,5 s, e com 5 s o segundo gerou o aviso. Falta conferir na esteira.
+
 ## Detecção
 
 Cada classe TACO detectada é convertida em material pela tabela `taco_to_material` de `deteccao.py` (por exemplo, `drink can` → `metal`, `corrugated carton` → `paper`). Classes fora dos quatro grupos viram `other` e não acionam o servo.
@@ -142,7 +155,7 @@ Do frontend para o backend:
 
 Do backend para o frontend:
 
-- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas).
+- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox", "id"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas).
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 
 ## Testes automatizados
@@ -152,7 +165,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests               # de backend/; da raiz: python -m pytest backend/tests
 ```
 
-Cobrem `deteccao.py`, `motor.py`, `captura.py`, `camera.py` (com uma câmera falsa: ordem das propriedades, tradução por sistema, divergências, URL, leitor) e os requirements (`test_requirements.py`: toda dependência com `==`, e a versão instalada igual à fixada; pacote ausente é pulado). Em `deteccao.py`: o mapeamento TACO → material (inclusive se toda classe do `best.pt` tem entrada na tabela), o filtro por confiança e a decisão de disparo (ROI, ocupado, cooldown). Não precisam de câmera nem de ESP32. Câmera, serial, WebSocket e frontend continuam sendo testados à mão.
+Cobrem `deteccao.py`, `motor.py`, `captura.py`, `camera.py` (com uma câmera falsa: ordem das propriedades, tradução por sistema, divergências, URL, leitor) e os requirements (`test_requirements.py`: toda dependência com `==`, e a versão instalada igual à fixada; pacote ausente é pulado). Em `deteccao.py`: o mapeamento TACO → material (inclusive se toda classe do `best.pt` tem entrada na tabela), o filtro por confiança e o disparo por trilha, com trilhas sintéticas (dois objetos próximos, objeto parado na faixa, faixa pulada entre dois quadros, classe oscilando, servo ocupado, troca de ID). Não precisam de câmera nem de ESP32. Câmera, serial, WebSocket e frontend continuam sendo testados à mão.
 
 ## Scripts de teste
 
