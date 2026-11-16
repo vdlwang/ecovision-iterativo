@@ -12,6 +12,7 @@ python ecovision_local_modf.py      # pode ser chamado de qualquer pasta
 As versões em `requirements.txt` são fixas (`==`), as testadas com Python 3.14; o numpy 2.5 exige Python 3.12+. Para usar a GPU, instale antes a build CUDA do `torch` da mesma versão (instruções em pytorch.org); o pip a aceita no lugar da fixada. Para atualizar, troque todas as versões juntas, rode os testes e o bloco de verificação, e só então retreine o modelo.
 
 - **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). Quando um objeto entra na ROI, envia o ângulo na hora e ignora novas detecções até passar `servo_actuation_seconds`. O intervalo mínimo entre disparos é fixo no código (`DETECTION_COOLDOWN = 1.5` s, em `deteccao.py`).
+- **`motor.py`** guarda o estado do motor (`EstadoMotor`), e **`captura.py`** a captura para a anotação (abaixo); ambos sem câmera nem serial, testáveis sem hardware.
 - **`deteccao.py`** guarda a lógica que não depende de câmera nem de serial: a tabela `taco_to_material`, o filtro das caixas pela confiança (`deteccoes_do_quadro`) e a decisão de disparar o servo (`angulo_a_disparar`).
 - A variante anterior, `ecovision_local.py`, enfileirava os materiais detectados e os enviava um a um, usando `detection_cooldown`. Foi removida; está na tag `tese-final` (`git show tese-final:backend/ecovision_local.py`).
 
@@ -19,7 +20,7 @@ O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o bac
 
 ### Logs
 
-O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo` e `serial`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
+O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo`, `serial` e, com a captura, `captura`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
 
 ```bash
 python ecovision_local_modf.py --debug=true
@@ -32,7 +33,7 @@ As bibliotecas (websockets etc.) só aparecem a partir de WARNING.
 
 ## `config.json`
 
-Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão definidos em `load_config()`. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar". O `config.example.json` traz os mesmos valores padrão, como referência para editar à mão (por exemplo, `cp config.example.json config.json`).
+Lido na inicialização a partir de `backend/config.json`. Se o arquivo não existir, é criado com os valores padrão (`CONFIG_PADRAO`). Se faltar alguma chave (um `config.json` de versão anterior, sem `class_to_angle` ou sem `captura`), o backend usa o padrão dela e avisa no log; o arquivo só é regravado quando a UI salva. É configuração local da máquina e está no `.gitignore`. O frontend também grava neste arquivo ao clicar em "Salvar". O `config.example.json` traz os mesmos valores padrão, como referência para editar à mão (por exemplo, `cp config.example.json config.json`).
 
 | Campo | Uso |
 |-------|-----|
@@ -43,9 +44,34 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 | `roi_y_min`, `roi_y_max` | Faixa horizontal do quadro (fração da altura) em que o centro do objeto dispara o servo |
 | `class_to_angle` | Ângulo do servo por material: chaves `plastic`, `metal`, `glass`, `paper` |
 | `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
+| `captura` | Captura de quadros para a anotação (abaixo): `ativa`, `pasta`, `intervalo_s`, `travessia_s`, `diferenca_minima`, `qualidade_jpeg` |
 | `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o intervalo é `DETECTION_COOLDOWN` no código |
 
 `serial_port`, `baud_rate`, `camera_index` e `model_path` só passam a valer depois de reiniciar o backend. `confidence`, `class_to_angle` e a ROI valem na hora.
+
+## Captura para a anotação (T4)
+
+Grava quadros da esteira para o ciclo de anotação (`anotacao/`, tarefa T4 do [`OBJETIVO.md`](../OBJETIVO.md); plano em [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md)). Desligada por padrão; liga com `captura.ativa` no `config.json` ou na linha de comando, que tem prioridade:
+
+```bash
+python ecovision_local_modf.py --capturar=true     # --capturar sozinho equivale a true
+../run.sh --capturar=true
+```
+
+Quando grava:
+
+- nunca a menos de `intervalo_s` (Δ, padrão 10 s) da captura anterior;
+- **motor ligado**: a cada Δ, depois de `travessia_s` (padrão 5 s) desde que o motor ligou. Com a esteira em velocidade constante, o tempo dá o deslocamento: com Δ acima do tempo de um objeto cruzar o campo da câmera, o mesmo objeto não aparece em duas capturas, e a espera depois de ligar evita gravar de novo o que estava parado no campo. Meça a travessia na esteira e ajuste os dois valores;
+- **motor desligado ou modo demonstração**: só quando o quadro difere do último gravado (diferença média em cinza, numa miniatura, de pelo menos `diferenca_minima`, padrão 10 em 0–255): objetos postos à mão, esteira parada.
+
+O estado do motor é o do último comando que saiu pela serial. A captura independe de haver cliente no WebSocket e não muda a detecção nem o acionamento.
+
+Cada execução que grava cria `<pasta>/<AAAAMMDDTHHMMSS>/` (padrão `backend/capturas/`, no `.gitignore`; caminho relativo é resolvido a partir de `backend/`), com:
+
+- um JPEG por quadro, na resolução em que a câmera entrega (hoje a padrão do driver; fixá-la é a etapa 6 do plano), qualidade `qualidade_jpeg` (95), sem as caixas, com nome `<AAAAMMDDTHHMMSS.mmm>Z.jpg` e o horário de captura em UTC no EXIF (`DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal`), que a importação usa para conferir que duas imagens não são próximas demais;
+- `captura.jsonl`: a primeira linha (`"tipo": "sessao"`) com o bloco `captura`, a câmera, o modelo e a confiança; depois uma linha por quadro (`"tipo": "quadro"`), com arquivo, horário, largura, altura, `motor_ligado`, a diferença para o anterior (motor desligado) e as detecções do YOLO.
+
+A gravação roda numa thread própria (`captura`), com fila de 4 quadros: o YOLO não espera o disco, e um quadro que não cabe na fila é descartado com um aviso. Ao encerrar com Ctrl+C, a fila é gravada antes de sair, e o log diz quantos quadros foram gravados.
 
 Cada classe TACO detectada é convertida em material pela tabela `taco_to_material` de `deteccao.py` (por exemplo, `drink can` → `metal`, `corrugated carton` → `paper`). Classes fora dos quatro grupos viram `other` e não acionam o servo.
 

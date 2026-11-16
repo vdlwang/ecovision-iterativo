@@ -23,6 +23,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Envio dos quadros:** um cliente lento perde quadros em vez de acumular envios e atrasar os outros; sem cliente conectado, o quadro nem é codificado (`c519981`).
 - **Confiança vale na hora:** o modelo roda com piso 0,1 e o filtro por `confidence` é feito a cada quadro; antes, o slider só valia depois de reiniciar (`ed0e5c2`).
 - **Estado do motor:** começa desligado e só muda quando o comando sai pela serial; antes, começava ligado e mudava até em modo demonstração, e o Monitor mostrava a esteira ligada sem ESP32. Quando o ESP32 reinicia (ex.: queda de tensão com o servo), o backend lê `ESP32 pronto.` e marca o motor desligado, como ele de fato fica (`403c5e1`).
+- **`config.json` de versão anterior** sem alguma chave (ex.: `class_to_angle`) usa o padrão dela, com um aviso no log; antes dava `KeyError` no laço da câmera a cada 5 s (`5fe875b`).
 - `testes_serial.py` lê a porta do `config.json` (`05666aa`).
 
 ### Frontend
@@ -54,7 +55,11 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 
 ## 5. Testes
 
-- 25 testes pytest para `deteccao.py`, inclusive se toda classe do `best.pt` tem material (`7e54bfc`), e `test_requirements.py`, que confere as versões fixadas (`3acfb23`). Testes do estado do motor (`motor.py`, `403c5e1`). Rodar com `python -m pytest backend/tests`.
+- 25 testes pytest para `deteccao.py`, inclusive se toda classe do `best.pt` tem material (`7e54bfc`), e `test_requirements.py`, que confere as versões fixadas (`3acfb23`). Testes do estado do motor (`motor.py`, `403c5e1`) e da captura (`captura.py`, `5fe875b`). Rodar com `python -m pytest backend/tests`.
+
+## 6. Recursos novos
+
+- **Captura para a anotação** (T4 do `OBJETIVO.md`): com `--capturar=true` ou `captura.ativa`, o backend grava quadros da esteira espaçados no tempo (no mínimo a cada `intervalo_s`; com o motor desligado, só quando a cena muda), em JPEG com o horário UTC no EXIF, mais um `captura.jsonl` por sessão. Desligada por padrão; não muda a detecção nem o acionamento. Pillow passa a ser dependência fixada (`5fe875b`; detalhes no `backend/README.md`).
 
 ## Ainda como na tese
 
