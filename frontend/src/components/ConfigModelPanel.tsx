@@ -43,11 +43,17 @@ export function ConfigModelPanel() {
   // Índice da webcam ("0") ou URL de stream; guardado como texto
   const [cameraIndex, setCameraIndex] = useState('0');
   const [connected, setConnected] = useState(false);
+  // Estado real, dos quadros: porta aberta (null em modo demo) e último comando de motor enviado
+  const [serialAtiva, setSerialAtiva] = useState<string | null>(null);
+  const [motorRunning, setMotorRunning] = useState(false);
   const { connected: wsConnected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'config') {
+        if ('frame' in data) {
+          setSerialAtiva(data.serial_port ?? null);
+          setMotorRunning(Boolean(data.motor_running));
+        } else if (data.type === 'config') {
           if (data.confidence !== undefined) setConfidence(data.confidence);
           if (data.model_path) {
             setModelPath(data.model_path);
@@ -92,12 +98,20 @@ export function ConfigModelPanel() {
     }
   };
 
+  // Inverte o motor por 2 s e o devolve ao estado em que estava
   const testConnection = () => {
-    if (send({ command: 'MOTOR ON' })) {
+    if (!serialAtiva) {
+      toast.error('Sem serial: o backend está em modo demonstração');
+      return;
+    }
+    const estava = motorRunning;
+    if (send({ command: estava ? 'MOTOR OFF' : 'MOTOR ON' })) {
       setTimeout(() => {
-        send({ command: 'MOTOR OFF' });
+        send({ command: estava ? 'MOTOR ON' : 'MOTOR OFF' });
       }, 2000);
-      toast.success('Teste de conexão enviado! Verifique o motor.');
+      toast.success(estava
+        ? 'Teste enviado: a esteira para por 2 s e volta a andar.'
+        : 'Teste enviado: a esteira anda por 2 s e para.');
     } else {
       toast.error('Backend desconectado');
     }
@@ -215,6 +229,7 @@ export function ConfigModelPanel() {
 
               <Button
                 onClick={testConnection}
+                disabled={!connected || !serialAtiva}
                 variant="outline"
                 className="w-full bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700"
               >
@@ -239,7 +254,7 @@ export function ConfigModelPanel() {
                 className="bg-neutral-800 border-neutral-700 text-white"
               />
               <p className="text-neutral-500 text-xs mt-1">
-                Webcam: 0 (primeira câmera); tente 1, 2 se não funcionar. Celular: URL do stream de vídeo, não da página do app
+                Webcam: 0 (primeira câmera); tente 1, 2 se não funcionar (no Linux, cada câmera ocupa dois índices: 0, 2, 4...). Celular: URL do stream de vídeo, não da página do app
               </p>
             </div>
           </Card>

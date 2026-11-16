@@ -40,6 +40,8 @@ CONFIG_FILE = BACKEND_DIR / "config.json"
 
 # Espera antes de reabrir a câmera depois de uma falha (em segundos)
 CAMERA_RETRY_SECONDS = 5
+# Espera entre tentativas de abrir a serial (sem porta no início ou depois de uma falha)
+SERIAL_RETRY_SECONDS = 5
 
 # O conf passado ao YOLO fica fixo enquanto o stream roda; por isso o modelo
 # roda com este piso e o filtro por config['confidence'] é feito a cada quadro
@@ -135,12 +137,12 @@ def send_line(ser, msg):
         # levanta PermissionError("WriteFile failed..."). Neste caso
         # desativamos a serial para evitar quedas no WebSocket e seguimos em
         # modo demonstração.
-        log.error("[DEMO] Falha ao enviar para serial (%s); desativando serial", exc)
+        log.error("[DEMO] Falha ao enviar para serial (%s); desativando serial até reabrir", exc)
         state.serial_port = None
         return False
 
 def read_serial_loop(ser):
-    """Thread que registra tudo o que o ESP32 envia.
+    """Registra tudo o que o ESP32 envia, até a porta cair (roda na thread `serial`).
 
     Ninguém espera resposta depois de mandar um comando: o firmware só
     responde a um ângulo quando ele sai da fila (até 5 s por item), então a
@@ -151,7 +153,7 @@ def read_serial_loop(ser):
             line = ser.readline().decode("utf-8", errors="ignore").strip()
         except Exception as exc:
             if state.serial_port is ser:
-                log.error("[DEMO] Falha ao ler da serial (%s); desativando serial", exc)
+                log.error("[DEMO] Falha ao ler da serial (%s); desativando serial até reabrir", exc)
                 state.serial_port = None
             return
         if line:
@@ -236,24 +238,62 @@ def broadcast_frame(message):
         envios_pendentes[client] = envio
 
 # ==== YOLO Processing ====
-def process_yolo_stream():
-    """Thread principal: YOLO + Serial + WebSocket broadcast"""
-    # Conectar serial
+encerrando = False
+
+def abrir_serial():
+    """Abre a porta do config.json e espera o reset do ESP32"""
+    ser = serial.Serial(config['serial_port'], config['baud_rate'], timeout=1)
     try:
-        ser = serial.Serial(config['serial_port'], config['baud_rate'], timeout=1)
         time.sleep(2.5)  # Aguarda reset do ESP32
         ser.reset_input_buffer()
         ser.reset_output_buffer()
+    except Exception:
+        ser.close()
+        raise
+    return ser
+
+def manter_serial():
+    """
+    Thread `serial`: abre a porta, registra o que o ESP32 envia e, se a porta
+    cai (cabo USB mexido, falha de escrita), tenta reabri-la a cada
+    SERIAL_RETRY_SECONDS, como a câmera. Sem porta, o backend segue em modo
+    demonstração enquanto isso. O motor só é ligado na conexão da partida: uma
+    reconexão não religa a esteira (o ESP32 volta do reset com o motor parado,
+    e o backend lê `ESP32 pronto.`).
+    """
+    partida = True
+    avisou = False
+    while not encerrando:
+        try:
+            ser = abrir_serial()
+        except Exception as e:
+            if not avisou:
+                log.warning("Erro ao conectar serial (%s); modo demonstração, nova tentativa a cada %d s",
+                            e, SERIAL_RETRY_SECONDS)
+                avisou = True
+            else:
+                log.debug("Serial ainda indisponível: %s", e)
+            partida = False
+            time.sleep(SERIAL_RETRY_SECONDS)
+            continue
+        avisou = False
         state.serial_port = ser
         log.info("Serial conectada: %s", config['serial_port'])
-        Thread(target=read_serial_loop, args=(ser,), name="serial", daemon=True).start()
-        
-        # Liga motor inicial
-        motor_on(ser)
-    except Exception as e:
-        log.warning("Erro ao conectar serial (%s); continuando sem serial (modo demonstração)", e)
-        state.serial_port = None
-    
+        if partida:
+            motor_on(ser)  # liga o motor ao iniciar o backend
+            partida = False
+        read_serial_loop(ser)  # volta quando a porta cai
+        if encerrando:
+            return
+        try:
+            ser.close()
+        except Exception:
+            pass
+        log.warning("Serial perdida; tentando reabrir a cada %d s", SERIAL_RETRY_SECONDS)
+        time.sleep(SERIAL_RETRY_SECONDS)
+
+def process_yolo_stream():
+    """Thread principal: YOLO + WebSocket broadcast (a serial tem a sua thread)"""
     # Carregar YOLO
     log.info("Carregando modelo YOLO: %s", config['model_path'])
     # Caminho relativo é resolvido a partir de backend/, não do diretório atual
@@ -424,7 +464,8 @@ async def main():
     global SERVER_LOOP
     SERVER_LOOP = asyncio.get_running_loop()
 
-    # Inicia thread YOLO
+    # Serial (com reconexão) e YOLO, cada um na sua thread
+    Thread(target=manter_serial, name="serial", daemon=True).start()
     yolo_thread = Thread(target=process_yolo_stream, name="yolo", daemon=True)
     yolo_thread.start()
     
@@ -457,6 +498,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Encerrando EcoVision...")
+        encerrando = True
         if capturador is not None:
             capturador.fechar()
         ser = state.serial_port
