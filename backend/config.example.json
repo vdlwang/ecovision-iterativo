@@ -12,5 +12,13 @@
     "glass": 130,
     "paper": 110
   },
-  "servo_actuation_seconds": 5.0
+  "servo_actuation_seconds": 5.0,
+  "captura": {
+    "ativa": false,
+    "pasta": "capturas",
+    "intervalo_s": 10.0,
+    "travessia_s": 5.0,
+    "diferenca_minima": 10.0,
+    "qualidade_jpeg": 95
+  }
 }

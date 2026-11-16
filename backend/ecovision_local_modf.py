@@ -10,6 +10,7 @@ import cv2
 import base64
 import json
 import argparse
+from datetime import datetime, timezone
 import asyncio
 import logging
 import websockets
@@ -18,6 +19,7 @@ from threading import Thread, Lock
 
 from deteccao import deteccoes_do_quadro, angulo_a_disparar
 from motor import EstadoMotor
+from captura import Capturador, PADROES_CAPTURA, completar_config
 
 # ==== Logging ====
 # INFO por padrão; --debug=true mostra também cada comando enviado ao
@@ -41,35 +43,46 @@ CAMERA_RETRY_SECONDS = 5
 # roda com este piso e o filtro por config['confidence'] é feito a cada quadro
 CONF_MINIMA_MODELO = 0.1
 
+# Configuração padrão: a da tese, mais o bloco da captura (T4)
+CONFIG_PADRAO = {
+    "serial_port": "COM8",
+    "baud_rate": 115200,
+    "camera_index": 0,
+    "model_path": "../yolo_models/taco/best.pt",
+    "confidence": 0.35,
+    "roi_y_min": 0.45,
+    "roi_y_max": 0.55,
+    "class_to_angle": {
+        "plastic": 50,
+        "metal": 150,
+        "glass": 130,
+        "paper": 110
+    },
+    "servo_actuation_seconds": 5.0,
+    # detection_cooldown agora é fixo no código (DETECTION_COOLDOWN)
+    "captura": PADROES_CAPTURA,
+}
+
 def load_config():
-    """Carrega configuração do arquivo JSON"""
+    """Carrega config.json, completando as chaves que faltam com os padrões.
+
+    Um config.json de uma versão anterior (sem class_to_angle, sem o bloco
+    captura...) funciona sem ser editado; o arquivo só é regravado quando a UI
+    salva. Sem o arquivo, ele é criado com os padrões.
+    """
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    # Configuração padrão
-    default_config = {
-        "serial_port": "COM8",
-        "baud_rate": 115200,
-        "camera_index": 0,
-        "model_path": "../yolo_models/taco/best.pt",
-        "confidence": 0.35,
-        "roi_y_min": 0.45,
-        "roi_y_max": 0.55,
-        "class_to_angle": {
-            "plastic": 50,
-            "metal": 150,
-            "glass": 130,
-            "paper": 110
-        },
-        "servo_actuation_seconds": 5.0
-        # detection_cooldown agora é fixo no código (DETECTION_COOLDOWN)
-    }
-    
-    # Salva configuração padrão
+            lido = json.load(f)
+        faltando = [k for k in CONFIG_PADRAO if k not in lido]
+        if faltando:
+            log.warning("config.json sem %s; usando os padrões", ", ".join(faltando))
+        cfg = {**json.loads(json.dumps(CONFIG_PADRAO)), **lido}
+        cfg['captura'] = completar_config(cfg.get('captura'))
+        return cfg
+
+    default_config = json.loads(json.dumps(CONFIG_PADRAO))
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(default_config, f, indent=2)
-    
     return default_config
 
 config = load_config()
@@ -91,6 +104,8 @@ class SystemState:
 
 state = SystemState()
 SERVER_LOOP: asyncio.AbstractEventLoop | None = None
+# Captura de quadros para a anotação (T4); None se desativada
+capturador: Capturador | None = None
 
 # ==== Serial (ESP32) ====
 # A thread do YOLO (ângulos) e o handler do WebSocket (motor, teste de ângulo)
@@ -318,6 +333,15 @@ def run_yolo_stream(model):
             state.last_detection_ts = now
         
         state.current_detections = detections
+
+        # Captura para a anotação (T4): roda com ou sem cliente conectado
+        if capturador is not None:
+            try:
+                capturador.quadro(frame, time.monotonic(), datetime.now(timezone.utc),
+                                  state.motor.ligado_desde,
+                                  {"detections": detections, "fps": state.fps})
+            except Exception:
+                log.exception("Captura: erro ao avaliar o quadro")
         
         # Finaliza processamento (o motor fica como o usuário deixou)
         if state.processing:
@@ -369,6 +393,11 @@ def ler_argumentos():
         help="mostra cada comando enviado ao ESP32 e as detecções de cada quadro "
              "(padrão: false; --debug sozinho equivale a --debug=true)",
     )
+    parser.add_argument(
+        "--capturar", type=_booleano, nargs="?", const=True, default=None, metavar="true|false",
+        help="grava quadros da esteira para a anotação (T4; backend/PLANO-CAPTURA.md); "
+             "padrão: captura.ativa do config.json",
+    )
     return parser.parse_args()
 
 
@@ -392,13 +421,32 @@ async def main():
         log.info("WebSocket server rodando!")
         await asyncio.Future()  # Roda forever
 
+def iniciar_captura(ativa):
+    """Cria o capturador se a captura está ativa (--capturar ou captura.ativa)."""
+    cfg = config['captura']
+    if not (cfg['ativa'] if ativa is None else ativa):
+        return None
+    pasta = Path(cfg['pasta'])
+    if not pasta.is_absolute():
+        pasta = BACKEND_DIR / pasta
+    log.info("Captura ativa: a cada %.1f s no mínimo (travessia %.1f s), em %s",
+             cfg['intervalo_s'], cfg['travessia_s'], pasta)
+    return Capturador(pasta, {**cfg, 'ativa': True}, {"camera_index": config['camera_index'],
+                                   "model_path": config['model_path'],
+                                   "confidence": config['confidence']})
+
+
 if __name__ == "__main__":
-    if ler_argumentos().debug:
+    args = ler_argumentos()
+    if args.debug:
         log.setLevel(logging.DEBUG)
+    capturador = iniciar_captura(args.capturar)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Encerrando EcoVision...")
+        if capturador is not None:
+            capturador.fechar()
         ser = state.serial_port
         if ser:
             state.serial_port = None  # encerra a thread de leitura

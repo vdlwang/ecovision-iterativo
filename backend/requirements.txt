@@ -6,6 +6,7 @@ ultralytics==8.4.183
 torch==2.14.1          # GPU: instale antes a build CUDA da mesma versão (pytorch.org)
 torchvision==0.29.1
 opencv-python==5.0.0.93
+pillow==13.0.0         # captura (T4): JPEG com o horário no EXIF
 pyserial==3.5
 websockets==17.3
 numpy==2.5.4
