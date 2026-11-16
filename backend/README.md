@@ -84,10 +84,10 @@ O backend abre a câmera (`camera.py`) e aplica o bloco `camera` do `config.json
 | `largura`, `altura` | `null` | Resolução pedida (ex.: 1280×720). Na DV20, use 1280×720: o sensor é 16:9, e 640×480 mostra o mesmo campo espremido na horizontal (objetos distorcidos), não um campo maior nem menor |
 | `fourcc` | `null` | Formato do stream, ex.: `"MJPG"`. Em YUYV, resolução alta cai para ~10 fps; sem `fourcc`, a câmera da esteira (DV20) abre em YUYV 640×480 a 10 fps |
 | `fps` | `null` | Taxa pedida |
-| `exposicao` | `null` | `null` = automática; número = manual, na unidade do driver (V4L2: `exposure_time_absolute`; a DV20 aceita 80 a 100000, e a unidade não é a de 100 µs da especificação: escolha pela varredura) |
+| `exposicao` | `null` | `null` = automática; número = manual, na unidade do driver (V4L2: `exposure_time_absolute`; a DV20 aceita 80 a 100000, em ~2 µs e não nos 100 µs da especificação: 60000 ≈ 120 ms já derruba o fps para 8; escolha pela varredura) |
 | `temperatura_cor` | `null` | `null` = balanço de branco automático; em kelvin = manual. A DV20 não tem o automático, e o manual é aceito e lido de volta mas não muda a imagem (3500 a 6500 dão o mesmo quadro) |
 | `foco` | `null` | `null` = autofoco; número = foco manual fixo (a DV20 não tem foco) |
-| `ganho` | `null` | Ganho manual; `null` = não mexer |
+| `ganho` | `null` | Ganho manual; `null` = não mexer. Na DV20, aceito e lido de volta, mas sem efeito na imagem |
 | `brilho`, `contraste`, `saturacao`, `nitidez`, `gama` | `null` | Controles de imagem, na unidade do driver; `null` = não mexer. Na DV20, use-os: ela liga com valores internos que dão uma imagem azulada, enquanto o driver informa 0 (e 0 posto de verdade deixa a imagem preta). Escolhidos em 2026-11-16: 0, 256, 384, 128, 20 |
 | `imgsz` | `640` | Tamanho de entrada passado ao YOLO (o `best.pt` treinou com 640) |
 
