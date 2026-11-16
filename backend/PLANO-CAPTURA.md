@@ -78,7 +78,7 @@ Planejada em 2026-11-16. Objetivo: os quadros da operação e os da captura saem
 - o backend com a webcam deste computador (Linux, V4L2), com e sem o bloco `camera`: vídeo no Monitor, valores lidos de volta e `captura.jsonl`; com um vídeo como `camera_index`, a captura continua igual à da etapa 3;
 - o tempo do quadro até o disparo não pode piorar: comparar o fps do Monitor antes e depois na mesma câmera.
 
-**Pendência**: o sistema operacional da máquina da esteira. As unidades de exposição e de autofoco mudam entre DSHOW e V4L2, e a equipe desenvolveu no Windows. Testar a 6a no sistema da máquina da esteira, ou levar as duas traduções testadas.
+**Máquina da esteira (decidido em 2026-11-16)**: a 6a é desenvolvida e testada na própria máquina que roda a esteira, em Linux (Fedora 43), com o backend V4L2 do OpenCV. A tradução para DSHOW (Windows, onde a equipe desenvolveu) entra só se for simples, e fica marcada como não testada no código e no `backend/README.md`.
 
 ### 6b. Calibração (primeiro passo na esteira)
 
