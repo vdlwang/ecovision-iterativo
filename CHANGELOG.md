@@ -60,6 +60,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 ## 6. Recursos novos
 
 - **Captura para a anotação** (T4 do `OBJETIVO.md`): com `--capturar=true` ou `captura.ativa`, o backend grava quadros da esteira espaçados no tempo (no mínimo a cada `intervalo_s`; com o motor desligado, só quando a cena muda), em JPEG com o horário UTC no EXIF, mais um `captura.jsonl` por sessão. Desligada por padrão; não muda a detecção nem o acionamento. Pillow passa a ser dependência fixada (`5fe875b`; detalhes no `backend/README.md`).
+- **Janela Δ na importação** (T4, `40e76d5`): o `anotacao/importar.py` lê o horário de captura (EXIF, senão o nome das fotos de celular) e põe no mesmo conjunto (treino ou teste) as imagens a menos de `--janela` segundos uma da outra, contando as já importadas; avisa se um grupo já estava nos dois conjuntos. O banco da anotação passa ao esquema v7 (`imagens.capturada_em`); saídas v6 são recusadas e têm de ser reimportadas (detalhes no `anotacao/README.md`).
 
 ## Ainda como na tese
 

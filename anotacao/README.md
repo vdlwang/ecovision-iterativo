@@ -16,6 +16,7 @@ No Linux, o torch do PyPI já vem com CUDA; no Windows, ele é só para CPU, e p
 
 ```bash
 python anotacao/importar.py fotos/ -o anotacoes --lote 2026-11-11a   # copia para anotacoes/images
+python anotacao/importar.py backend/capturas/20261115T230000Z/ -o anotacoes --lote 2026-11-15b
 python anotacao/anotar.py -o anotacoes --previa          # anota as pendentes ainda sem proposta
 python anotacao/anotar.py 2026-11-11a_foto.jpg -o anotacoes --sobrescrever
 python anotacao/votar.py anotacoes                       # voto entre os anotadores
@@ -31,10 +32,11 @@ python anotacao/pipeline.py -o anotacoes                             # retoma o 
 
 ### Importar
 
-O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote (a importação), com a largura, a altura e o conjunto. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
+O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra no banco da saída (`anotacoes.sqlite`) como `pendente`, no lote (a importação), com a largura, a altura, o conjunto e o horário de captura. Todos os anotadores leem de lá; nenhum copia imagens (`OBJETIVO.md`, seção 6). Importar de novo pula as imagens já importadas.
 
 - **A imagem muda o mínimo**: é copiada byte a byte, a não ser que o EXIF a gire (fotos de celular; ela é gravada já girada, e as caixas valem para ela) ou que passe de `--lado-maximo`. Sem normalizar cor nem recortar: a base de treino tem de parecer com o que a câmera vê na operação.
-- **Conjunto por imagem**: cada imagem vai para `treino` ou `teste` pelo hash do nome final (`<lote>_<nome>`), cerca de 1 em cada 10 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força o de todas as imagens da importação. Depois de gravado no banco, não muda. Sortear por imagem só não vaza cenas entre as bases porque a captura (T4) não grava quadros próximos demais (decisão 7 do `OBJETIVO.md`, revista em 2026-11-15); com o T4, a captura grava o horário de cada quadro, espaçado em pelo menos uma janela Δ, e a importação passa a acusar imagens mais próximas que Δ (pelo horário da captura ou do EXIF) e a pô-las no mesmo conjunto.
+- **Conjunto por imagem**: cada imagem vai para `treino` ou `teste` pelo hash do nome final (`<lote>_<nome>`), cerca de 1 em cada 10 para o teste, sempre o mesmo para o mesmo nome; `--conjunto` força o de todas as imagens da importação. Depois de gravado no banco, não muda. Sortear por imagem só não vaza cenas entre as bases porque a captura (T4) não grava quadros próximos demais (decisão 7 do `OBJETIVO.md`, revista em 2026-11-15), e a importação confere isso pela janela, abaixo.
+- **Janela Δ** (`--janela`, padrão 10 s, o `intervalo_s` padrão da captura; `0` desliga): o horário de captura de cada imagem é lido do arquivo de origem, antes de qualquer regravação: o `DateTimeOriginal` do EXIF, com os milissegundos e o fuso (como o backend grava; sem fuso, hora local da máquina), senão o nome no padrão das câmeras de celular (`20250503_140329.jpg`, hora local). Fica no banco em UTC (`imagens.capturada_em`). Em ordem de horário, imagens a menos de Δ da anterior, em cadeia e contando as já importadas, formam um grupo, que vai inteiro a um conjunto: o das já importadas do grupo (havendo as duas, o da mais próxima no tempo), senão o sorteio pelo nome da primeira; `--conjunto` vence. A importação lista os grupos. Com a captura espaçada em Δ, todo grupo tem uma imagem só, e a lista sai vazia. Um lote novo pode ligar imagens já importadas em conjuntos diferentes, que não mudam mais: a importação avisa. Por isso, importe cada sessão de captura num lote só, de uma vez. Sem horário, o sorteio por imagem, sem conferência.
 - **Região de interesse** (`--regiao X1 Y1 X2 Y2`, de 0 a 1): os anotadores descartam caixas com o **centro** fora dela (a mesa em volta da esteira). A imagem continua inteira.
 
 | Opção | Padrão | |
@@ -42,6 +44,7 @@ O `importar.py` grava cada imagem uma vez em `images/<lote>_<nome>` e a registra
 | `-o`, `--saida` | `anotacoes` | Diretório de saída |
 | `--lote` | obrigatório | Nome do lote de captura: letras, dígitos, `.` e `-` (o `_` separa o lote do nome da imagem) |
 | `--conjunto` | sorteio | `treino` ou `teste`, para todas as imagens da importação |
+| `--janela` | 10 | Δ em segundos: imagens capturadas a menos disso uma da outra vão ao mesmo conjunto; `0` desliga |
 | `--regiao` | — | Região de interesse do lote, normalizada |
 | `--lado-maximo` | — | Reduz imagens com o lado maior acima disso (só para fotos grandes de outra origem; a da esteira fica na resolução nativa) |
 | `--link` | — | Link (hardlink, ou simbólico se não der) em vez de cópia, quando a imagem não precisa ser regravada |
@@ -124,7 +127,7 @@ O `anotadores.yaml` lista os anotadores (`nome`, `tipo` e `opcoes`, as opções 
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | Para todos os anotadores |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` |
-| `--lote`, `--conjunto`, `--regiao`, `--lado-maximo`, `--link` | — | Como no `importar.py`; só com entradas |
+| `--lote`, `--conjunto`, `--regiao`, `--lado-maximo`, `--link`, `--janela` | — | Como no `importar.py`; só com entradas |
 
 ## Google Colab
 
@@ -152,7 +155,7 @@ O **banco** (SQLite, biblioteca padrão do Python) é a fonte do estado; `labels
 |---|---|
 | `classes` | O id YOLO e o nome de cada classe de `nomes` do `classes.yaml`; só aceita acréscimo no fim depois que alguma revisão ou algum voto guarda caixa com classe |
 | `lotes` | Região de interesse e data de cada lote (importação); o conjunto (`treino` ou `teste`) é de cada imagem, em `imagens` |
-| `imagens` | Nome, tamanho, lote, conjunto, status (`pendente`, `revisada`, `descartada`) e, do voto vigente (T6, T8), `voto`, `motivo` e `auditoria` |
+| `imagens` | Nome, tamanho, lote, conjunto, horário de captura (`capturada_em`, UTC, nulo sem horário), status (`pendente`, `revisada`, `descartada`) e, do voto vigente (T6, T8), `voto`, `motivo` e `auditoria` |
 | `execucoes` | Uma por chamada do `anotar.py`: o nome do anotador (o de `--nome`), o tipo, a versão do modelo, os parâmetros (com os limiares de leitura) e o hash das classes |
 | `propostas`, `caixas_propostas` | O que cada execução propôs em cada imagem: todas as caixas desde o piso, com a classe pelo nome e a confiança, coordenadas de 0 a 1 |
 | `votacoes`, `votos`, `votos_propostas`, `caixas_voto`, `caixas_voto_membros` | Cada rodada do `votar.py` (anotadores e parâmetros) e, por imagem votada, o resultado (`aprovada`, `falhou`, `uniao`), o motivo, se entrou na auditoria cega, as propostas usadas com o limiar de cada uma, as caixas (de consenso no treino, da união sem classe no teste) e de quais caixas das propostas cada uma veio. O resultado do voto vigente é repetido em `imagens.voto`, `imagens.motivo` e `imagens.auditoria` |
