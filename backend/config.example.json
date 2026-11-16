@@ -30,6 +30,11 @@
     "temperatura_cor": null,
     "foco": null,
     "ganho": null,
+    "brilho": null,
+    "contraste": null,
+    "saturacao": null,
+    "nitidez": null,
+    "gama": null,
     "imgsz": 640
   }
 }

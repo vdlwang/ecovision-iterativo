@@ -42,6 +42,14 @@ PADROES_CAMERA = {
     "foco": None,
     # None = não mexer
     "ganho": None,
+    # Controles de imagem, na unidade do driver; None = não mexer. A DV20
+    # liga com valores internos diferentes dos que o driver informa (lê 0 e
+    # mostra a imagem azulada), então só vale o valor posto a cada abertura
+    "brilho": None,
+    "contraste": None,
+    "saturacao": None,
+    "nitidez": None,
+    "gama": None,
     # Passado ao YOLO (o best.pt treinou com 640)
     "imgsz": 640,
 }
@@ -49,6 +57,15 @@ PADROES_CAMERA = {
 # Valor do controle automático em cada backend: (manual, automático)
 AUTO_EXPOSICAO = {"V4L2": (1, 3), "DSHOW": (0.25, 0.75)}
 AUTO_LIGA_DESLIGA = (0, 1)
+
+# Controles de imagem, aplicados depois da exposição e do ganho
+CONTROLES_IMAGEM = (
+    ("brilho", cv2.CAP_PROP_BRIGHTNESS),
+    ("contraste", cv2.CAP_PROP_CONTRAST),
+    ("saturacao", cv2.CAP_PROP_SATURATION),
+    ("nitidez", cv2.CAP_PROP_SHARPNESS),
+    ("gama", cv2.CAP_PROP_GAMMA),
+)
 
 # Diferença tolerada entre o pedido e o lido de volta
 TOLERANCIA = 0.5
@@ -129,6 +146,9 @@ def propriedades(cfg, backend):
         pares.append(("exposicao", cv2.CAP_PROP_EXPOSURE, cfg["exposicao"]))
     if cfg["ganho"] is not None:
         pares.append(("ganho", cv2.CAP_PROP_GAIN, cfg["ganho"]))
+    for nome, prop in CONTROLES_IMAGEM:
+        if cfg[nome] is not None:
+            pares.append((nome, prop, cfg[nome]))
 
     desliga, liga = AUTO_LIGA_DESLIGA
     if cfg["temperatura_cor"] is None:

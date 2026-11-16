@@ -7,6 +7,7 @@ backend parado: a câmera só abre num programa por vez.
     python ajustar_camera.py --listar                 # formatos e resoluções, com o fps medido
     python ajustar_camera.py --varrer exposicao 100 200 400 800
     python ajustar_camera.py --varrer temperatura_cor 3500 4500 5500
+    python ajustar_camera.py --varrer saturacao 256 384 511
 
 Os quadros vão para capturas/ajuste/<horário>/, com o valor no nome. A
 varredura parte do bloco camera do config.json e muda só o campo varrido.
@@ -33,7 +34,8 @@ BACKEND_DIR = Path(__file__).parent
 CONFIG_FILE = BACKEND_DIR / "config.json"
 PASTA_AJUSTE = BACKEND_DIR / "capturas" / "ajuste"
 
-CAMPOS_VARRIVEIS = ("exposicao", "temperatura_cor", "foco", "ganho")
+CAMPOS_VARRIVEIS = ("exposicao", "temperatura_cor", "foco", "ganho",
+                    "brilho", "contraste", "saturacao", "nitidez", "gama")
 RESOLUCOES_COMUNS = [(640, 480), (800, 600), (1280, 720), (1920, 1080)]
 ACOMODAR_S = 1.0  # quadros descartados depois de mudar um valor (a exposição demora a assentar)
 MEDIR_FPS_S = 3.0

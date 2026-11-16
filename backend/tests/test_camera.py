@@ -90,6 +90,14 @@ def test_ordem_formato_antes_da_resolucao_e_auto_antes_do_manual():
     assert valores["fourcc"] == cv2.VideoWriter_fourcc(*"MJPG")
 
 
+def test_controles_de_imagem_depois_do_ganho():
+    cfg = {"ganho": 4, "contraste": 256, "saturacao": 384, "gama": 20}
+    pares = propriedades(cfg, "V4L2")
+    assert nomes(pares) == ["exposicao_auto", "ganho", "contraste", "saturacao", "gama",
+                            "temperatura_cor_auto", "foco_auto"]
+    assert propriedades({"saturacao": 384}, None) == []  # vídeo/URL: nada
+
+
 def test_traducao_dshow():
     valores = {n: v for n, _p, v in propriedades({"exposicao": -6}, "DSHOW")}
     assert valores["exposicao_auto"] == 0.25
