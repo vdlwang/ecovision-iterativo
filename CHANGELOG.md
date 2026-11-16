@@ -24,6 +24,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Confiança vale na hora:** o modelo roda com piso 0,1 e o filtro por `confidence` é feito a cada quadro; antes, o slider só valia depois de reiniciar (`ed0e5c2`).
 - **Estado do motor:** começa desligado e só muda quando o comando sai pela serial; antes, começava ligado e mudava até em modo demonstração, e o Monitor mostrava a esteira ligada sem ESP32. Quando o ESP32 reinicia (ex.: queda de tensão com o servo), o backend lê `ESP32 pronto.` e marca o motor desligado, como ele de fato fica (`403c5e1`).
 - **`config.json` de versão anterior** sem alguma chave (ex.: `class_to_angle`) usa o padrão dela, com um aviso no log; antes dava `KeyError` no laço da câmera a cada 5 s (`5fe875b`).
+- **Serial reconecta:** a porta é reaberta a cada 5 s, na partida e depois de uma queda (cabo USB mexido); antes, o backend ficava em modo demonstração até reiniciar. Uma reconexão não religa a esteira (`9e83f65`).
 - `testes_serial.py` lê a porta do `config.json` (`05666aa`).
 
 ### Frontend
@@ -33,6 +34,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Seletor de modelo** lista os pesos TACO reais, com `best.pt` como padrão; antes oferecia `yolov8l`/`yolov8x`, que não existem, e não oferecia o `best.pt` (`cbdf60a`). O `yolov8s.pt` ficou fora da lista por ser tido como COCO; é TACO (veja `yolo_models/README.md`).
 - **Status do Monitor:** mostra a porta serial real (ou "Demo"), e câmera/YOLO só aparecem ativos quando chegam quadros (`2cbf56f`).
 - **Backend offline:** "Salvar" desabilitado (`026269d`); as páginas de configuração ficam bloqueadas, e os botões da esteira exigem serial (`5b24934`).
+- **"Testar Conexão Serial"** devolve o motor ao estado em que estava (antes, sempre terminava em `MOTOR OFF`, parando a esteira que estava andando) e exige a serial ativa (`9e83f65`).
 - **Badge de conexão ao trocar de painel:** um painel aberto com o socket já conectado mostrava "Backend Offline" (e bloqueava "Salvar") até o backend reconectar; o estado agora vem do socket compartilhado ao montar, e os listeners do socket não ficam mais órfãos ao sair do painel (`4052b4e`).
 
 ### Firmware

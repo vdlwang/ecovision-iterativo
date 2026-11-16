@@ -109,7 +109,7 @@ Os valores escolhidos valem para a operação e para a captura de todas as sess�
 Roteiro de 2026-11-16. Começa depois da 6b, com a câmera já fixada.
 
 **Antes de ir**:
-- Recomendado: corrigir os itens 36 e 39 do `REFATORACAO.md`. "Testar Conexão Serial" sempre termina em `MOTOR OFF`, e um clique na sessão para a esteira sem aviso, com a captura passando ao ramo de motor desligado. Um cabo USB mexido deixa o backend em modo demo até reiniciar.
+- ~~Recomendado: corrigir os itens 36 e 39 do `REFATORACAO.md`.~~ Feitos em 2026-11-16 (`9e83f65`): "Testar Conexão Serial" devolve o motor ao estado em que estava (antes, sempre terminava em `MOTOR OFF`: um clique na sessão parava a esteira sem aviso, com a captura passando ao ramo de motor desligado), e a serial é reaberta a cada 5 s depois de um cabo USB mexido (antes, modo demo até reiniciar). Testado com o ESP32 simulado num pty; falta conferir com o ESP32 de verdade.
 - Na máquina da esteira: venv com `backend/requirements.txt`, `python -m pytest backend/tests` passando, `python backend/test_connection.py` achando a câmera e a porta, e `serial_port`/`camera_index` certos no `config.json` (a DV20 é o índice 2, não o 3).
 - Levar objetos dos quatro materiais, os mais variados possível (cada um passa uma vez, decisão 19), um cronômetro ou o celular para filmar, e onde anotar.
 

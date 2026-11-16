@@ -23,7 +23,7 @@ O código veio de um export do Figma. Os componentes importam pacotes com versã
 
 **Cancelas de Separação:** ângulo do servo para cada material (Plástico, Metal, Vidro, Papel). "Testar" move o servo para o ângulo escolhido, e "Salvar Configuração" grava `class_to_angle` em `backend/config.json`. Os ângulos passam a valer sem reiniciar o backend.
 
-**Configuração do Modelo:** modelo (os pesos TACO de `yolo_models/taco/`, com o `best.pt` como padrão; veja [`yolo_models/README.md`](../yolo_models/README.md)), confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. A confiança passa a valer na hora; modelo, câmera, porta serial e baud rate só depois de **reiniciar o backend**. "Testar Conexão Serial" liga o motor por 2 s e o desliga: serve só para conferir se o ESP32 responde.
+**Configuração do Modelo:** modelo (os pesos TACO de `yolo_models/taco/`, com o `best.pt` como padrão; veja [`yolo_models/README.md`](../yolo_models/README.md)), confiança mínima, porta serial, baud rate e câmera (índice da webcam ou URL de stream, por exemplo `http://<ip>:8080/video` do app IP Webcam). "Salvar Configuração" grava no `backend/config.json`. A confiança passa a valer na hora; modelo, câmera, porta serial e baud rate só depois de **reiniciar o backend**. "Testar Conexão Serial" inverte o motor por 2 s e o devolve ao estado em que estava (com a esteira andando, ela para e volta a andar): serve só para conferir se o ESP32 responde. Como os botões do Monitor, exige a serial ativa. No Linux, cada webcam ocupa dois índices (o segundo é de metadados): use 0, 2, 4...
 
 ## Problemas conhecidos
 
@@ -35,4 +35,4 @@ Veja [Limitações conhecidas](../README.md#limitações-conhecidas) no README p
 
 **Configurações só com o backend rodando:** os painéis Modelo e Cancelas leem e gravam o `backend/config.json` pelo backend. Offline, ficam desabilitados na barra lateral; se o backend cair com um deles aberto, a interface volta para o Monitor.
 
-**Esteira só com o ESP32:** os botões Ligar/Parar do Monitor ficam desabilitados com o backend offline ou em modo demo (sem porta serial).
+**Esteira só com o ESP32:** os botões Ligar/Parar do Monitor e "Testar Conexão Serial" ficam desabilitados com o backend offline ou em modo demo (sem porta serial). O backend tenta reabrir a porta a cada 5 s, e eles voltam sozinhos quando o ESP32 é reconectado.

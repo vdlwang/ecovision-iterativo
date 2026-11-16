@@ -74,7 +74,7 @@ python backend/ecovision_local_modf.py    # backend: WebSocket em ws://localhost
 cd frontend && npm run dev                # interface em http://localhost:5173
 ```
 
-Sem a porta serial disponível, o backend continua em modo demonstração (detecta e transmite, mas não aciona nada).
+Sem a porta serial disponível, o backend continua em modo demonstração (detecta e transmite, mas não aciona nada) e tenta reabri-la a cada 5 s.
 
 Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 

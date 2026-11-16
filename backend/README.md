@@ -17,7 +17,7 @@ As versões em `requirements.txt` são fixas (`==`), as testadas com Python 3.14
 - **`deteccao.py`** guarda a lógica que não depende de câmera nem de serial: a tabela `taco_to_material`, o filtro das caixas pela confiança (`deteccoes_do_quadro`) e a decisão de disparar o servo (`angulo_a_disparar`).
 - A variante anterior, `ecovision_local.py`, enfileirava os materiais detectados e os enviava um a um, usando `detection_cooldown`. Foi removida; está na tag `tese-final` (`git show tese-final:backend/ecovision_local.py`).
 
-O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o backend segue em modo demonstração: detecta e transmite, mas não aciona o ESP32.
+O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o backend segue em modo demonstração: detecta e transmite, mas não aciona o ESP32. A thread `serial` tenta abrir a porta a cada 5 s (`SERIAL_RETRY_SECONDS`), na partida e depois de uma queda (cabo USB mexido, falha de escrita ou leitura), e sai do modo demonstração sozinha quando consegue. O motor só é ligado na conexão da partida: uma reconexão não religa a esteira. Abrir a porta reinicia o ESP32, que volta com o motor parado; o backend lê `ESP32 pronto.` e marca o motor desligado. Se o sistema der outro nome à porta depois de reconectar o cabo (`/dev/ttyACM0` vira `/dev/ttyACM1`), a reconexão não a acha: corrija `serial_port` e reinicie.
 
 ### Logs
 
