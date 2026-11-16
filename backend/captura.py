@@ -23,9 +23,9 @@ espera o disco, e um quadro que não cabe na fila é descartado.
 import json
 import logging
 import queue
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 
 import numpy as np
 from PIL import Image
@@ -122,6 +122,8 @@ class Sessao:
         self.pasta.mkdir(parents=True, exist_ok=False)
         self.qualidade = qualidade
         self.registro = self.pasta / "captura.jsonl"
+        # A thread de gravação e a do YOLO (reabertura da câmera) escrevem no registro
+        self._trava_registro = Lock()
         self._escrever_linha({"tipo": "sessao", **cabecalho})
         self.fila = queue.Queue(maxsize=TAMANHO_FILA)
         self.gravados = 0
@@ -130,7 +132,7 @@ class Sessao:
         self.thread.start()
 
     def _escrever_linha(self, dados):
-        with open(self.registro, "a", encoding="utf-8") as f:
+        with self._trava_registro, open(self.registro, "a", encoding="utf-8") as f:
             f.write(json.dumps(dados, ensure_ascii=False) + "\n")
 
     def enviar(self, quadro_bgr, horario, info):
@@ -177,6 +179,20 @@ class Capturador:
         self.sessao = None
         self.ultima_captura = None
         self.ultima_miniatura = None
+
+    def camera_aberta(self, relatorio, horario=None):
+        """
+        Registra a câmera (camera.abrir: pedido, lido de volta, efetivo). Antes
+        da primeira captura, vai na linha da sessão; depois (reabertura), numa
+        linha "camera" do captura.jsonl.
+        """
+        if self.sessao is None:
+            self.cabecalho["camera"] = relatorio
+            return
+        horario = horario or datetime.now(timezone.utc)
+        self.sessao._escrever_linha({"tipo": "camera",
+                                     "horario": horario.astimezone(timezone.utc).isoformat(),
+                                     "camera": relatorio})
 
     def quadro(self, quadro_bgr, agora, horario, ligado_desde, info=None):
         """

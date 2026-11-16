@@ -20,6 +20,8 @@ from threading import Thread, Lock
 from deteccao import deteccoes_do_quadro, angulo_a_disparar
 from motor import EstadoMotor
 from captura import Capturador, PADROES_CAPTURA, completar_config
+from camera import LeitorCamera, PADROES_CAMERA, ESPERA_QUADRO_S, descrever
+from camera import completar_config as completar_camera
 
 # ==== Logging ====
 # INFO por padrão; --debug=true mostra também cada comando enviado ao
@@ -61,6 +63,8 @@ CONFIG_PADRAO = {
     "servo_actuation_seconds": 5.0,
     # detection_cooldown agora é fixo no código (DETECTION_COOLDOWN)
     "captura": PADROES_CAPTURA,
+    # Resolução, formato, exposição... pedidos à câmera (camera.py); null = padrão
+    "camera": PADROES_CAMERA,
 }
 
 def load_config():
@@ -78,6 +82,7 @@ def load_config():
             log.warning("config.json sem %s; usando os padrões", ", ".join(faltando))
         cfg = {**json.loads(json.dumps(CONFIG_PADRAO)), **lido}
         cfg['captura'] = completar_config(cfg.get('captura'))
+        cfg['camera'] = completar_camera(cfg.get('camera'))
         return cfg
 
     default_config = json.loads(json.dumps(CONFIG_PADRAO))
@@ -262,34 +267,43 @@ def process_yolo_stream():
     while True:
         try:
             run_yolo_stream(model)
-            log.warning("Stream da câmera terminou; reabrindo em %d s", CAMERA_RETRY_SECONDS)
+            log.warning("Leitura da câmera terminou (falha, %d s sem quadro ou fim do vídeo); "
+                        "reabrindo em %d s", ESPERA_QUADRO_S, CAMERA_RETRY_SECONDS)
         except Exception as e:
             log.error("Erro no stream da câmera (%s): %s. Nova tentativa em %d s",
                       config['camera_index'], e, CAMERA_RETRY_SECONDS)
         time.sleep(CAMERA_RETRY_SECONDS)
 
 def run_yolo_stream(model):
-    """Roda o YOLO sobre a câmera até o stream terminar ou falhar"""
-    results_gen = model(
-        source=config['camera_index'],
-        conf=min(CONF_MINIMA_MODELO, config['confidence']),
-        show=False,  # Não mostra janela OpenCV
-        stream=True,
-        verbose=False
-    )
-    
+    """Roda o YOLO sobre a câmera até a leitura terminar ou falhar"""
     log.info("Abrindo câmera: %s", config['camera_index'])
-    
+    leitor = LeitorCamera(config['camera_index'], config['camera'])
+    log.info(descrever(leitor.relatorio))
+    if capturador is not None:
+        capturador.camera_aberta(leitor.relatorio)
+    try:
+        laco_yolo(model, leitor)
+    finally:
+        leitor.fechar()
+
+def laco_yolo(model, leitor):
+    """Um quadro por vez: o mais recente da câmera (os intermediários são pulados)"""
+    imgsz = config['camera']['imgsz']
     frame_count = 0
     # FPS medido em janelas de 1 s (a média desde o início escondia quedas)
     fps_frames = 0
     fps_start = time.time()
-    
-    for result in results_gen:
+
+    while True:
+        frame = leitor.proximo()
+        if frame is None:
+            return
+        result = model(frame, conf=min(CONF_MINIMA_MODELO, config['confidence']),
+                       imgsz=imgsz, verbose=False)[0]
         frame_count += 1
         if frame_count == 1:
             log.info("Stream YOLO iniciado!")
-        
+
         # Calcula FPS
         fps_frames += 1
         elapsed = time.time() - fps_start
@@ -297,9 +311,7 @@ def run_yolo_stream(model):
             state.fps = round(fps_frames / elapsed)
             fps_frames = 0
             fps_start = time.time()
-        
-        # Extrai frame original
-        frame = result.orig_img
+
         H, W = result.orig_shape
         
         # Processa detecções
