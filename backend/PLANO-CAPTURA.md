@@ -56,6 +56,26 @@ Os grupos nos dois conjuntos aparecem quando um lote posterior liga imagens já 
 - **Câmera reposicionada** (mais alta): o quadro pega a largura toda da esteira e o foco ficou bom; as bordas de cima e de baixo pegam o que está fora da lona (cabos, mesa), o que a região de interesse da anotação (`--regiao`) corta.
 - **Exposição**: varrida com a esteira andando, na luz ambiente da sala. A unidade da DV20 é de ~2 µs (60000 derruba o fps para 8, 80000 para 6). Para a lona ficar tão clara quanto no automático, são precisos ~60000 (~120 ms); com 15000 (~30 ms) a imagem sai quase preta, e o ganho não faz efeito (54 de brilho com ganho 4 e com 7). Uma exposição de ~100 ms com a esteira andando borra os objetos. No automático, os brancos estouram (10% do quadro a 250+ com objetos brancos), porque a lona escura domina a média. **Conclusão**: falta luz; a exposição manual curta só serve com iluminação forte sobre a esteira. Fica no automático até lá.
 - **A DV20 é fraca para o trabalho**: 12 fps em qualquer resolução, ganho e temperatura de cor que não fazem efeito, sem foco ajustável, valores internos que o driver informa errado. Recomendado trocá-la por uma webcam UVC com exposição, balanço de branco e foco manuais funcionando e 30 fps reais em 720p, e iluminar a esteira (o que vale com qualquer câmera).
+- **Comparação com o celular** (mesma cena, um pacote de café colorido sobre a lona, luz ambiente): a foto do celular sem flash registra o pacote inteiro com as cores certas e a lona com textura; a DV20 estoura a metade colorida do pacote (7% do quadro a 250+) e deixa a lona cinza-esverdeada. A luz da sala basta para um sensor bom; o limite da DV20 é a faixa dinâmica: com a lona preta e um objeto claro juntos, a exposição automática clareia pela lona e estoura o objeto. Ressalva: a foto do celular é parada, com exposição longa e várias exposições somadas; a comparação justa é um vídeo do celular a 30 fps. A foto com flash mostra o efeito de uma luz direta e forte: tudo nítido e uniforme.
+- **Montagem**: o suporte e a própria câmera fazem sombra na lona quando a luz vem de cima, perto dela; iluminar dos dois lados da esteira, em ângulo. A colcha estampada ao lado da esteira entra na faixa de baixo do quadro, e os cabos na de cima: a região de interesse da anotação os corta, mas na operação a estampa pode gerar detecções falsas (cobrir com superfície lisa ou afastar). A fita escura na emenda da lona aparece em muitos quadros; não é objeto.
+
+### Critérios para a câmera nova
+
+Medidos na DV20 o que falta; a nova deve ter, conferido com o `ajustar_camera.py` antes de adotar:
+
+| Critério | Por quê | Como conferir |
+|---|---|---|
+| UVC (sem driver) | Roda no Linux pelo V4L2, como o `camera.py` espera | `v4l2-ctl --list-devices` a mostra; `--list-formats-ext` lista formatos |
+| 30 fps reais em 1280×720, em MJPG | A DV20 dá 12 em qualquer resolução; mais quadros por travessia, disparo mais preciso | `ajustar_camera.py --listar`, com a exposição manual curta já posta |
+| Exposição manual que funciona, curta | Sem borrão com a esteira andando (alvo: ≤10 ms com a luz nova) | `--varrer exposicao`: o brilho muda com o valor, e o fps não cai |
+| Ganho manual que funciona | Compensa a exposição curta | `--varrer ganho`: o brilho muda (na DV20, não muda) |
+| Balanço de branco manual que funciona | Cor igual entre sessões | `--varrer temperatura_cor`: a cor muda (na DV20, não muda) |
+| Foco manual (ou fixo nítido à altura da montagem) | Autofoco "caçando" borra quadros | `--varrer foco`, ou um quadro nítido da lona |
+| Boa faixa dinâmica | Objeto claro sobre a lona preta sem estourar | Amostra com um objeto branco e um colorido: menos de 1% do quadro a 250+ e a lona com textura |
+| Campo de visão que cubra a largura da esteira à altura possível | Sem cortar objetos nas bordas | Amostra: as duas bordas da lona no quadro |
+| Valores lidos de volta iguais aos pedidos | O backend confere e registra; a DV20 informa valores internos errados | `ajustar_camera.py` sem argumentos sai com código 0 |
+
+Obturador global não é preciso na velocidade desta esteira, se a exposição for curta. Com a câmera nova, refazer a 6b inteira (o bloco `camera` é de cada câmera).
 
 ## Etapa 6: câmera configurada
 
