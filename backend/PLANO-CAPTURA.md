@@ -20,11 +20,11 @@ Plano da tarefa T4 do [`OBJETIVO.md`](../OBJETIVO.md): o backend grava quadros d
 | 3 | [x] `5fe875b` | **Integração no backend.** Bloco `captura` no `config.json`: `ativa` (padrão `false`), `pasta`, `intervalo_s` (Δ, padrão 10), `travessia_s`, `diferenca_minima`; o `load_config()` completa as chaves que faltam (resolve o item 40). Liga por `--capturar=true` ou por `ativa`. Cada execução grava em `capturas/<data-hora UTC>/` (gitignored): JPEG 95 por Pillow com o horário no EXIF (`DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal`) e no nome, e `captura.jsonl` com a configuração da sessão e uma linha por quadro (horário, motor, resolução, detecções). Thread de gravação com fila curta. Pillow fixado no `requirements.txt` | pytest; backend em modo demo com vídeo ou pasta como câmera: arquivos, EXIF e espaçamento |
 | 4 | [x] `40e76d5` | **`importar.py`: conferência de Δ.** Lê o horário do EXIF antes de regravar (a regravação o descarta); sem fuso, hora local. Coluna `imagens.capturada_em` (pode ser nula; esquema v7, sem migração). `--janela` (Δ em segundos, padrão 10; também no `anotadores.yaml`): em ordem de horário, cada imagem nova com outra a menos de Δ (no banco ou no próprio lote) herda o conjunto dela e é listada no relatório; vizinhas em conjuntos diferentes geram aviso; sem horário, sorteio por imagem como hoje | pytest com EXIF sintético; importar os 4 cenários de `legado/database` (mesmas cenas, segundos de diferença) e conferir que cada cena cai num conjunto só |
 | 5 | [x] | **Documentação**: `backend/README.md` (bloco `captura`, `--capturar`), `anotacao/README.md` (`--janela`, `capturada_em`), `OBJETIVO.md` (T4), `REFATORACAO.md` (37, 38, 40), `CHANGELOG.md`, `CLAUDE.md` | — |
-| 6a | [ ] | **Câmera aberta pelo backend** (antes da ida à esteira, decisão 3 revista): o backend abre a `cv2.VideoCapture`, aplica o bloco `camera` do `config.json` (resolução, formato, exposição, balanço de branco, foco), confere o que a câmera aceitou e passa os quadros ao YOLO com `imgsz` explícito; tudo registrado no `captura.jsonl`. Sem o bloco, comporta-se como hoje. `ajustar_camera.py` para a calibração. Detalhes em [Etapa 6](#etapa-6-câmera-configurada) | pytest de `camera.py` com câmera falsa; backend com a webcam local e com vídeo |
+| 6a | [x] `6316da1` | **Câmera aberta pelo backend** (antes da ida à esteira, decisão 3 revista): o backend abre a `cv2.VideoCapture`, aplica o bloco `camera` do `config.json` (resolução, formato, exposição, balanço de branco, foco), confere o que a câmera aceitou e passa os quadros ao YOLO com `imgsz` explícito; tudo registrado no `captura.jsonl`. Sem o bloco, comporta-se como hoje. `ajustar_camera.py` para a calibração. Detalhes em [Etapa 6](#etapa-6-câmera-configurada) | pytest de `camera.py` com câmera falsa; backend com a webcam local e com vídeo |
 | 6b | [ ] | **Calibração na esteira** (primeiro passo da ida, antes de qualquer captura): escolher resolução, exposição, balanço de branco e foco com o `ajustar_camera.py` e fixá-los no `config.json` | quadros de amostra; valores lidos de volta iguais aos pedidos |
 | 7 | [ ] | **Na esteira**: medir a travessia (cronometrar um objeto cruzando o campo da câmera), ajustar Δ com folga, sessão-piloto dos três ramos da captura, sessão de captura e importação com `--janela` sem nenhuma imagem acusada. Variar os objetos e não repassar o mesmo de propósito (decisão 19 do `OBJETIVO.md`). Roteiro em [Etapa 7](#etapa-7-sessão-na-esteira) | sessão real |
 
-Commits: um para a etapa 1; um para 2 e 3; um para 4; a documentação vai junto de cada etapa.
+Commits: um para a etapa 1; um para 2 e 3; um para 4; um para 6a; a documentação vai junto de cada etapa.
 
 **Conferido (etapas 2 e 3, 2026-11-15)**: 16 testes em `backend/tests/test_captura.py`; o backend rodou com um vídeo de 8 fotos de `tcc-0CF` como câmera e o ESP32 simulado num pty, com `intervalo_s` 1 e `travessia_s` 0,5: com o motor ligado, gravou depois da travessia; com o motor desligado pela UI, só quando a foto do vídeo mudava (diferença de 22 a 82, contra o limiar 10); 6 quadros, nenhum descartado, EXIF e `captura.jsonl` certos; um `config.json` sem `class_to_angle` e sem `captura` rodou com os padrões. A resolução gravada é a que o Ultralytics entrega (a do vídeo, 960×720).
 
@@ -37,6 +37,16 @@ Commits: um para a etapa 1; um para 2 e 3; um para 4; a documentação vai junto
 | 60 s | 21 | 3 | 1 |
 
 Os grupos nos dois conjuntos aparecem quando um lote posterior liga imagens já importadas em conjuntos diferentes; o importar.py avisa, mas o conjunto gravado não muda. Na captura do backend (uma sessão contínua, importada como um lote) não deve ocorrer; as bases antigas, de celular, são conferidas à mão.
+
+**Conferido (etapa 6a, 2026-11-16)**, na máquina da esteira (Fedora 43, OpenCV 5.0 com V4L2), com a câmera da esteira (DV20 USB) conectada mas ainda não apontada para a esteira:
+
+- **A câmera**: `/dev/video2` (o `/dev/video3` é o nó de metadados; o `camera_index: 3` do `config.json` não abre). Sem configuração, abre em YUYV 640×480 a 10 fps. Aceita MJPG 640×480 e 1280×720 (30 fps anunciados) e YUYV 640×480 e 320×240. Controles: exposição automática ou manual (`exposure_time_absolute` de 80 a 100000), ganho 1–7, temperatura de cor 0–6500 só manual (sem balanço automático), sem foco. Contraste, saturação e nitidez são lidos como 0 (padrões 256, 256 e 128), mas a imagem sai em cores: leitura errada do driver.
+- **OpenCV 5 com V4L2**: passa os valores sem conversão (`AUTO_EXPOSURE` 1 = manual, 3 = automático; `CAP_PROP_EXPOSURE` = `exposure_time_absolute`); os valores ficam no driver depois de fechar (confirmado: daí os automáticos postos de forma explícita).
+- **fps**: 12 em qualquer formato e resolução, também pelo `v4l2-ctl --stream-mmap` direto, sem OpenCV: limite da câmera nesta luz, não do código. Com exposição manual longa cai mais (6 fps em 80000), então a unidade não é a de 100 µs da especificação V4L2. Medir de novo na esteira, com a iluminação dela (6b).
+- **Backend** em modo demo, cliente WebSocket contando quadros: o código anterior (Ultralytics) a 12–13 fps; o novo, sem o bloco `camera`, a 12 fps (YUYV 640×480, como antes); com MJPG 1280×720, 12 fps. A captura gravou em 1280×720, com o relatório da câmera na linha de sessão (pedido, lido, sem divergências). O segundo quadro, com a cena parada e o motor desligado, diferiu 14,6 do primeiro: a exposição automática assentando logo depois de abrir, o que a exposição manual da 6b evita.
+- **Vídeo como câmera** (8 fotos de `tcc-0CF`, 2 fps, captura com `intervalo_s` 1): lido no ritmo do vídeo, uma captura por foto, fim do vídeo e reabertura com a linha `camera` no `captura.jsonl`. Esse teste achou um erro (o `tipo` do relatório sobrescrevia o da linha), corrigido antes do commit.
+- **`ajustar_camera.py`**: `--listar` e `--varrer exposicao` rodaram na DV20; os valores que mudaram no driver foram devolvidos aos de antes.
+- 20 testes em `backend/tests/test_camera.py`. Não testado: Windows (DSHOW), stream por URL com o leitor novo.
 
 ## Etapa 6: câmera configurada
 
@@ -86,9 +96,9 @@ Com a esteira montada, a iluminação que será usada sempre e objetos dos quatr
 
 1. **Iluminação**: preferir luz artificial e fechar cortinas. Com exposição manual, a luz do dia variando muda o brilho entre sessões. Se não der para controlar, anotar a condição de cada sessão.
 2. **Resolução e formato**: a maior com MJPG que mantém o fps do Monitor perto do de hoje (o YOLO é o gargalo; decodificar 1080p custa CPU). Provável 1280×720.
-3. **Foco**: varrer `foco` e escolher o quadro mais nítido sobre a lona.
-4. **Exposição**: varrer e escolher a mais curta (menos borrão com a esteira andando) que não escurece os objetos escuros. Se escurecer, subir o `ganho` antes de alongar a exposição. Conferir com objetos brilhantes (lata, vidro): sem estourar.
-5. **Balanço de branco**: varrer `temperatura_cor` e escolher o que deixa a lona e um papel branco neutros.
+3. **Foco**: varrer `foco` e escolher o quadro mais nítido sobre a lona (a DV20 não tem foco ajustável: pular).
+4. **Exposição**: varrer (na DV20, a unidade não é a da especificação; começar por 500 a 20000) e escolher a mais curta (menos borrão com a esteira andando) que não escurece os objetos escuros. Se escurecer, subir o `ganho` antes de alongar a exposição. Conferir com objetos brilhantes (lata, vidro): sem estourar.
+5. **Balanço de branco**: a DV20 não tem o automático (fica sempre na `temperatura_cor` do driver, padrão 4500); varrer `temperatura_cor` e escolher o que deixa a lona e um papel branco neutros.
 6. Gravar os valores no `config.json` e rodar `ajustar_camera.py` uma última vez: os valores lidos de volta iguais aos pedidos.
 7. Rodar o backend sem captura e conferir as detecções do `best.pt` no Monitor. Se piorarem muito em relação ao automático, rever a exposição.
 
@@ -100,7 +110,7 @@ Roteiro de 2026-11-16. Começa depois da 6b, com a câmera já fixada.
 
 **Antes de ir**:
 - Recomendado: corrigir os itens 36 e 39 do `REFATORACAO.md`. "Testar Conexão Serial" sempre termina em `MOTOR OFF`, e um clique na sessão para a esteira sem aviso, com a captura passando ao ramo de motor desligado. Um cabo USB mexido deixa o backend em modo demo até reiniciar.
-- Na máquina da esteira: venv com `backend/requirements.txt`, `python -m pytest backend/tests` passando, `python backend/test_connection.py` achando a câmera e a porta, e `serial_port`/`camera_index` certos no `config.json`.
+- Na máquina da esteira: venv com `backend/requirements.txt`, `python -m pytest backend/tests` passando, `python backend/test_connection.py` achando a câmera e a porta, e `serial_port`/`camera_index` certos no `config.json` (a DV20 é o índice 2, não o 3).
 - Levar objetos dos quatro materiais, os mais variados possível (cada um passa uma vez, decisão 19), um cronômetro ou o celular para filmar, e onde anotar.
 
 **1. Sistema montado** (`./run.sh --debug=true`, sem captura): vídeo no Monitor; `serial_port` diferente de `null`; `MOTOR ON`/`MOTOR OFF` com o LED acompanhando; um ângulo move o servo. Anotar o fps.

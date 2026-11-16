@@ -13,6 +13,7 @@ As versões em `requirements.txt` são fixas (`==`), as testadas com Python 3.14
 
 - **`ecovision_local_modf.py`** é o backend oficial (é o que `run.sh` e `run.bat` sobem). Quando um objeto entra na ROI, envia o ângulo na hora e ignora novas detecções até passar `servo_actuation_seconds`. O intervalo mínimo entre disparos é fixo no código (`DETECTION_COOLDOWN = 1.5` s, em `deteccao.py`).
 - **`motor.py`** guarda o estado do motor (`EstadoMotor`), e **`captura.py`** a captura para a anotação (abaixo); ambos sem câmera nem serial, testáveis sem hardware.
+- **`camera.py`** abre a câmera, aplica o bloco `camera` do `config.json` e a lê numa thread própria, entregando ao YOLO só o quadro mais recente (abaixo, "Câmera"). **`ajustar_camera.py`** é a ferramenta de calibração.
 - **`deteccao.py`** guarda a lógica que não depende de câmera nem de serial: a tabela `taco_to_material`, o filtro das caixas pela confiança (`deteccoes_do_quadro`) e a decisão de disparar o servo (`angulo_a_disparar`).
 - A variante anterior, `ecovision_local.py`, enfileirava os materiais detectados e os enviava um a um, usando `detection_cooldown`. Foi removida; está na tag `tese-final` (`git show tese-final:backend/ecovision_local.py`).
 
@@ -20,7 +21,7 @@ O WebSocket escuta em `ws://localhost:8765`. Se a porta serial não abrir, o bac
 
 ### Logs
 
-O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo`, `serial` e, com a captura, `captura`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
+O backend registra com `logging` no terminal, no formato `hora nível [thread] mensagem` (threads `MainThread`, `yolo`, `camera`, `serial` e, com a captura, `captura`). Em INFO, o padrão, saem a inicialização, as conexões de clientes, cada disparo (`Disparando: classe → material → ângulo`), as linhas que o ESP32 envia e as mudanças de configuração. Falhas de serial e de câmera saem em WARNING/ERROR. Para ver também cada comando enviado ao ESP32 (`→ ESP32: ...`) e as detecções de cada quadro:
 
 ```bash
 python ecovision_local_modf.py --debug=true
@@ -45,9 +46,10 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 | `class_to_angle` | Ângulo do servo por material: chaves `plastic`, `metal`, `glass`, `paper` |
 | `servo_actuation_seconds` | Tempo em que o sistema fica ocupado após cada disparo |
 | `captura` | Captura de quadros para a anotação (abaixo): `ativa`, `pasta`, `intervalo_s`, `travessia_s`, `diferenca_minima`, `qualidade_jpeg` |
+| `camera` | O que pedir à câmera (abaixo, "Câmera"): `largura`, `altura`, `fourcc`, `fps`, `exposicao`, `temperatura_cor`, `foco`, `ganho`, `imgsz` |
 | `detection_cooldown` | Ignorado (era usado pela variante removida `ecovision_local.py`); o intervalo é `DETECTION_COOLDOWN` no código |
 
-`serial_port`, `baud_rate`, `camera_index` e `model_path` só passam a valer depois de reiniciar o backend. `confidence`, `class_to_angle` e a ROI valem na hora.
+`serial_port`, `baud_rate`, `camera_index`, `camera` e `model_path` só passam a valer depois de reiniciar o backend. `confidence`, `class_to_angle` e a ROI valem na hora.
 
 ## Captura para a anotação (T4)
 
@@ -68,10 +70,48 @@ O estado do motor é o do último comando que saiu pela serial. A captura indepe
 
 Cada execução que grava cria `<pasta>/<AAAAMMDDTHHMMSS>/` (padrão `backend/capturas/`, no `.gitignore`; caminho relativo é resolvido a partir de `backend/`), com:
 
-- um JPEG por quadro, na resolução em que a câmera entrega (hoje a padrão do driver; fixá-la é a etapa 6 do plano), qualidade `qualidade_jpeg` (95), sem as caixas, com nome `<AAAAMMDDTHHMMSS.mmm>Z.jpg` e o horário de captura em UTC no EXIF (`DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal`), que a importação usa para conferir que duas imagens não são próximas demais;
-- `captura.jsonl`: a primeira linha (`"tipo": "sessao"`) com o bloco `captura`, a câmera, o modelo e a confiança; depois uma linha por quadro (`"tipo": "quadro"`), com arquivo, horário, largura, altura, `motor_ligado`, a diferença para o anterior (motor desligado) e as detecções do YOLO.
+- um JPEG por quadro, na resolução em que a câmera entrega (a do bloco `camera`, abaixo; sem ele, a padrão do driver), qualidade `qualidade_jpeg` (95), sem as caixas, com nome `<AAAAMMDDTHHMMSS.mmm>Z.jpg` e o horário de captura em UTC no EXIF (`DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal`), que a importação usa para conferir que duas imagens não são próximas demais;
+- `captura.jsonl`: a primeira linha (`"tipo": "sessao"`) com o bloco `captura`, a câmera (o relatório da abertura: pedido, lido de volta, divergências, resolução, formato e fps efetivos, `imgsz`), o modelo e a confiança; uma linha `"tipo": "camera"` a cada reabertura da câmera durante a sessão; e uma linha por quadro (`"tipo": "quadro"`), com arquivo, horário, largura, altura, `motor_ligado`, a diferença para o anterior (motor desligado) e as detecções do YOLO.
 
 A gravação roda numa thread própria (`captura`), com fila de 4 quadros: o YOLO não espera o disco, e um quadro que não cabe na fila é descartado com um aviso. Ao encerrar com Ctrl+C, a fila é gravada antes de sair, e o log diz quantos quadros foram gravados.
+
+## Câmera
+
+O backend abre a câmera (`camera.py`) e aplica o bloco `camera` do `config.json`, para que os quadros da operação e os da captura saiam numa condição fixa e registrada. Antes, o Ultralytics abria a câmera só pelo índice, na resolução, no formato e na exposição padrão do driver; a exposição automática muda a imagem conforme o que passa na esteira.
+
+| Campo | Padrão | Uso |
+|---|---|---|
+| `largura`, `altura` | `null` | Resolução pedida (ex.: 1280×720) |
+| `fourcc` | `null` | Formato do stream, ex.: `"MJPG"`. Em YUYV, resolução alta cai para ~10 fps; sem `fourcc`, a câmera da esteira (DV20) abre em YUYV 640×480 a 10 fps |
+| `fps` | `null` | Taxa pedida |
+| `exposicao` | `null` | `null` = automática; número = manual, na unidade do driver (V4L2: `exposure_time_absolute`; a DV20 aceita 80 a 100000, e a unidade não é a de 100 µs da especificação: escolha pela varredura) |
+| `temperatura_cor` | `null` | `null` = balanço de branco automático; em kelvin = manual. A DV20 não tem o automático: só o valor manual se aplica |
+| `foco` | `null` | `null` = autofoco; número = foco manual fixo (a DV20 não tem foco) |
+| `ganho` | `null` | Ganho manual; `null` = não mexer |
+| `imgsz` | `640` | Tamanho de entrada passado ao YOLO (o `best.pt` treinou com 640) |
+
+- **Automáticos postos de forma explícita**: `null` em `exposicao`, `temperatura_cor` e `foco` religa o automático a cada abertura. No Linux, o driver guarda o último valor que qualquer programa pôs (o `ajustar_camera.py`, o `v4l2-ctl`) até a câmera ser desconectada. Uma câmera sem o controle automático só fica sem ele, sem aviso.
+- **Conferência**: depois de aplicar, o backend lê cada valor de volta. Uma divergência (a câmera ignora ou arredonda: pedir 1366×768 e receber 1280×720) sai em WARNING e vai ao `captura.jsonl`, sem derrubar o backend. O log de INFO da abertura diz a resolução, o formato e o fps efetivos.
+- **Leitura**: uma thread (`camera`) lê sem parar e guarda só o quadro mais recente, e o YOLO pega o último a cada volta. Sem quadro novo por 10 s (`ESPERA_QUADRO_S`), ou no fim de um vídeo, a câmera é reaberta depois de 5 s, com o bloco reaplicado.
+- **Vídeo e URL**: um arquivo de vídeo como `camera_index` é lido no ritmo do seu fps, como uma câmera, e termina no fim; a uma URL de stream nada se aplica (o backend avisa se o bloco estiver preenchido).
+- **Sistema**: testado no Linux (V4L2, Fedora 43, na máquina da esteira). No Windows, abre com DSHOW, e a tradução (`AUTO_EXPOSURE` 0,25/0,75, exposição em log2 de segundos) segue a documentação do OpenCV, **sem teste**.
+- **Índice no Linux**: cada câmera UVC cria dois nós, `/dev/videoN` (vídeo) e `/dev/videoN+1` (metadados, sem formatos). O `camera_index` é o do nó de vídeo: a DV20 hoje é o 2, não o 3. `v4l2-ctl --list-devices` mostra os nós.
+
+### Calibração (`ajustar_camera.py`)
+
+Com o backend parado (a câmera só abre num programa por vez):
+
+```bash
+python ajustar_camera.py                                 # aplica o bloco camera, mostra o lido de volta, mede o fps e grava amostra.jpg
+python ajustar_camera.py --listar                        # formatos e resoluções (v4l2-ctl, se houver), com o fps medido
+python ajustar_camera.py --varrer exposicao 500 2000 8000 20000   # um quadro por valor
+python ajustar_camera.py --varrer temperatura_cor 3500 4500 5500
+python ajustar_camera.py --camera 2 --listar             # outra câmera que a do config.json
+```
+
+`--varrer` aceita `exposicao`, `temperatura_cor`, `foco` e `ganho`, parte do bloco `camera` do `config.json` e muda só o campo varrido. Os quadros vão para `capturas/ajuste/<AAAAMMDDTHHMMSS>/`, com o valor no nome, e cada linha impressa diz o valor lido de volta e o brilho médio. O roteiro da calibração está na etapa 6b do [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md). Sem argumentos, o programa sai com código 1 se houver divergência.
+
+## Detecção
 
 Cada classe TACO detectada é convertida em material pela tabela `taco_to_material` de `deteccao.py` (por exemplo, `drink can` → `metal`, `corrugated carton` → `paper`). Classes fora dos quatro grupos viram `other` e não acionam o servo.
 
@@ -99,7 +139,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests               # de backend/; da raiz: python -m pytest backend/tests
 ```
 
-Cobrem `deteccao.py` e os requirements (`test_requirements.py`: toda dependência com `==`, e a versão instalada igual à fixada; pacote ausente é pulado). Em `deteccao.py`: o mapeamento TACO → material (inclusive se toda classe do `best.pt` tem entrada na tabela), o filtro por confiança e a decisão de disparo (ROI, ocupado, cooldown). Não precisam de câmera nem de ESP32. Câmera, serial, WebSocket e frontend continuam sendo testados à mão.
+Cobrem `deteccao.py`, `motor.py`, `captura.py`, `camera.py` (com uma câmera falsa: ordem das propriedades, tradução por sistema, divergências, URL, leitor) e os requirements (`test_requirements.py`: toda dependência com `==`, e a versão instalada igual à fixada; pacote ausente é pulado). Em `deteccao.py`: o mapeamento TACO → material (inclusive se toda classe do `best.pt` tem entrada na tabela), o filtro por confiança e a decisão de disparo (ROI, ocupado, cooldown). Não precisam de câmera nem de ESP32. Câmera, serial, WebSocket e frontend continuam sendo testados à mão.
 
 ## Scripts de teste
 

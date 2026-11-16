@@ -20,5 +20,16 @@
     "travessia_s": 5.0,
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95
+  },
+  "camera": {
+    "largura": null,
+    "altura": null,
+    "fourcc": null,
+    "fps": null,
+    "exposicao": null,
+    "temperatura_cor": null,
+    "foco": null,
+    "ganho": null,
+    "imgsz": 640
   }
 }
