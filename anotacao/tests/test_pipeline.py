@@ -197,6 +197,10 @@ def test_opcoes_de_importacao_so_com_entradas(ambiente):
     with pytest.raises(SystemExit):
         pipeline.main(e["base"] + ["--lote", "l1"])
     with pytest.raises(SystemExit):
+        pipeline.main(e["base"] + ["--janela", "5"])
+    with pytest.raises(SystemExit):
+        pipeline.main([str(e["fotos"])] + e["base"] + ["--lote", "l1", "--janela", "-1"])
+    with pytest.raises(SystemExit):
         pipeline.main([str(e["fotos"])] + e["base"])        # entradas sem --lote
     with pytest.raises(SystemExit):
         pipeline.main(e["base"])                            # saída sem importação

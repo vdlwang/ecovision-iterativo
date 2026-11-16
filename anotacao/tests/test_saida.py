@@ -91,7 +91,8 @@ def test_registrar_lote_estado_e_colisoes(tmp_path):
     formato.preparar(tmp_path, ["Garrafa"])
     lote = {"regiao": [0, 0.1, 1, 0.9], "importado_em": "ontem"}
     assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20, "teste"),
-                                        ("l1_b.png", 40, 20, "treino")],
+                                        ("l1_b.png", 40, 20, "treino",
+                                         "2026-11-15T23:29:03.146000+00:00")],
                              "l1", lote, agora="hoje") == ["l1_a.jpg", "l1_b.png"]
     # já registrada: pulada, com o status e o conjunto mantidos
     assert formato.registrar(tmp_path, [("l1_a.jpg", 40, 20, "treino")], "l1", lote) == []
@@ -99,9 +100,10 @@ def test_registrar_lote_estado_e_colisoes(tmp_path):
     estado = formato.ler_estado(tmp_path)
     assert list(estado) == ["l1_a.jpg", "l1_b.png"]
     assert estado["l1_a.jpg"] == {"nome": "l1_a.jpg", "status": "pendente", "lote": "l1",
-                                  "conjunto": "teste", "voto": None, "motivo": None, "auditoria": False,
-                                  "largura": 40, "altura": 20}
+                                  "conjunto": "teste", "capturada_em": None, "voto": None,
+                                  "motivo": None, "auditoria": False, "largura": 40, "altura": 20}
     assert estado["l1_b.png"]["conjunto"] == "treino"   # o conjunto é de cada imagem
+    assert estado["l1_b.png"]["capturada_em"] == "2026-11-15T23:29:03.146000+00:00"
     with pytest.raises(ValueError, match="colide"):
         formato.registrar(tmp_path, [("l1_a.png", 40, 20, "treino")], "l1")
     with pytest.raises(ValueError, match="conjunto"):

@@ -40,7 +40,7 @@ CONJUNTOS = ("treino", "teste")
 VOTOS = ("aprovada", "falhou", "uniao")
 ORIGENS = ("voto", "proposta", "candidata")  # de onde vem uma caixa da revisão
 BANCO = "anotacoes.sqlite"
-VERSAO_ESQUEMA = 6
+VERSAO_ESQUEMA = 7
 ESPERA_S = 10        # quanto uma conexão espera por outra que está gravando
 LOTE_SQL = 900       # parâmetros por consulta com IN (...)
 
@@ -68,6 +68,7 @@ CREATE TABLE imagens (
     altura INTEGER NOT NULL CHECK (altura > 0),
     lote TEXT NOT NULL REFERENCES lotes (nome),
     conjunto TEXT NOT NULL CHECK (conjunto IN {CONJUNTOS}),
+    capturada_em TEXT,
     status TEXT NOT NULL DEFAULT 'pendente' CHECK (status IN {STATUS}),
     voto TEXT CHECK (voto IN {VOTOS}),
     motivo TEXT,
@@ -385,14 +386,16 @@ def ler_lotes(saida):
 
 def ler_estado(saida):
     """
-    {nome: {nome, status, lote, conjunto, voto, motivo, auditoria, largura,
-    altura}}, na ordem de registro; {} sem banco. auditoria é bool.
+    {nome: {nome, status, lote, conjunto, capturada_em, voto, motivo, auditoria,
+    largura, altura}}, na ordem de registro; {} sem banco. auditoria é bool;
+    capturada_em, o horário de captura (ISO 8601 em UTC) ou None.
     """
     if not existe(saida):
         return {}
     with abrir(saida) as con:
         return {r["nome"]: dict(r, auditoria=bool(r["auditoria"])) for r in con.execute(
-            "SELECT nome, status, lote, conjunto, voto, motivo, auditoria, largura, altura "
+            "SELECT nome, status, lote, conjunto, capturada_em, voto, motivo, auditoria, "
+            "largura, altura "
             "FROM imagens ORDER BY id")}
 
 
@@ -414,7 +417,8 @@ def conferir_colisoes(existentes, novos):
 
 def registrar(saida, imagens, lote, dados_lote=None, agora=None):
     """
-    Registra as imagens [(nome, largura, altura, conjunto)] como pendentes,
+    Registra as imagens [(nome, largura, altura, conjunto[, capturada_em])]
+    como pendentes (capturada_em: horário de captura, ISO 8601 em UTC, ou None),
     no lote dado, numa transação; as já registradas são puladas (e o conjunto
     delas não muda). Toda imagem é de um lote, a importação que a trouxe (só
     entra pelo importar.py); o conjunto (treino ou teste) é de cada imagem.
@@ -437,14 +441,15 @@ def registrar(saida, imagens, lote, dados_lote=None, agora=None):
                              dados_lote.get("importado_em") or agora))
             existentes = {r[0] for r in con.execute("SELECT nome FROM imagens")}
             conferir_colisoes(existentes, [n for n, *_ in imagens])
-            fora = sorted({c for *_, c in imagens} - set(CONJUNTOS))
+            imagens = [(*i, None) if len(i) == 4 else tuple(i) for i in imagens]
+            fora = sorted({c for _, _, _, c, _ in imagens} - set(CONJUNTOS))
             if fora:
                 raise ValueError(f"conjunto deve ser um de {', '.join(CONJUNTOS)}: "
                                  f"{', '.join(map(str, fora))}")
-            novas = [(n, Path(n).stem, int(w), int(h), lote, c, agora)
-                     for n, w, h, c in imagens if n not in existentes]
+            novas = [(n, Path(n).stem, int(w), int(h), lote, c, t, agora)
+                     for n, w, h, c, t in imagens if n not in existentes]
             con.executemany("INSERT INTO imagens (nome, stem, largura, altura, lote, conjunto, "
-                            "criada_em) VALUES (?, ?, ?, ?, ?, ?, ?)", novas)
+                            "capturada_em, criada_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", novas)
     return [n for n, *_ in novas]
 
 

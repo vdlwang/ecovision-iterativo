@@ -170,14 +170,19 @@ def main(argv=None):
     grupo.add_argument("--lado-maximo", type=int,
                        help="reduz imagens com o lado maior acima disso")
     grupo.add_argument("--link", action="store_true", help="link em vez de cópia")
+    grupo.add_argument("--janela", type=float,
+                       help="Δ em segundos: imagens capturadas a menos disso uma da outra "
+                            f"vão ao mesmo conjunto; 0 desliga (padrão: {importar.JANELA_S})")
     args = parser.parse_args(argv)
-    importacao = [args.lote, args.conjunto, args.regiao, args.lado_maximo]
+    importacao = [args.lote, args.conjunto, args.regiao, args.lado_maximo, args.janela]
     if args.entradas and not args.lote:
         parser.error("entradas a importar precisam de --lote")
     if not args.entradas and (any(v is not None for v in importacao) or args.link):
         parser.error("as opções de importação só valem com entradas")
     if args.lado_maximo is not None and args.lado_maximo < 32:
         parser.error("--lado-maximo pequeno demais")
+    if args.janela is not None and args.janela < 0:
+        parser.error("--janela não pode ser negativa")
 
     # Tudo conferido antes de mexer na saída ou carregar modelo
     config = carregar_config(args.config)
@@ -192,10 +197,14 @@ def main(argv=None):
     if not args.entradas and not formato.existe(args.saida):
         parser.error(f"{args.saida} não tem imagens importadas: passe entradas e --lote")
 
+    janela = importar.JANELA_S if args.janela is None else args.janela
     if arquivos:
         r = importar.importar(args.saida, arquivos, args.lote, nomes_classes, args.conjunto,
-                              args.regiao, args.lado_maximo, args.link)
+                              args.regiao, args.lado_maximo, args.link,
+                              janela=janela)
         print(importar.resumo(args.lote, r))
+        for linha in importar.relatorio(r, janela):
+            print(linha)
 
     nomes = [a["nome"] for a in config["anotadores"]]
     for i, (nome, argv_a) in enumerate(zip(nomes, argvs), 1):
