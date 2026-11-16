@@ -17,6 +17,7 @@ from pathlib import Path
 from threading import Thread, Lock
 
 from deteccao import deteccoes_do_quadro, angulo_a_disparar
+from motor import EstadoMotor
 
 # ==== Logging ====
 # INFO por padrão; --debug=true mostra também cada comando enviado ao
@@ -76,7 +77,9 @@ config = load_config()
 # ==== Estado Global ====
 class SystemState:
     def __init__(self):
-        self.motor_running = True
+        # Último comando de motor que saiu pela serial; desligado no início e
+        # depois de um reset do ESP32 (motor.py)
+        self.motor = EstadoMotor()
         self.processing = False
         self.processing_started_at = 0.0
         # timestamp da última detecção enviada ao ESP32
@@ -133,14 +136,16 @@ def read_serial_loop(ser):
             return
         if line:
             log.info("ESP32: %s", line)
+            if state.motor.linha_recebida(line):
+                log.warning("ESP32 reiniciou: motor marcado como desligado")
 
 def motor_on(ser):
-    """Liga o motor da esteira"""
-    send_line(ser, "MOTOR ON")
+    """Liga o motor da esteira (o estado só muda se o comando foi enviado)"""
+    state.motor.comando(True, send_line(ser, "MOTOR ON"), time.monotonic())
 
 def motor_off(ser):
-    """Desliga o motor da esteira"""
-    send_line(ser, "MOTOR OFF")
+    """Desliga o motor da esteira (o estado só muda se o comando foi enviado)"""
+    state.motor.comando(False, send_line(ser, "MOTOR OFF"), time.monotonic())
 
 def send_angle(ser, angle):
     """Envia ângulo para o servo"""
@@ -161,10 +166,8 @@ async def websocket_handler(websocket):
                     cmd = data['command']
                     if cmd == 'MOTOR ON':
                         motor_on(state.serial_port)
-                        state.motor_running = True
                     elif cmd == 'MOTOR OFF':
                         motor_off(state.serial_port)
-                        state.motor_running = False
                     elif cmd.isdigit():
                         # Comando de ângulo direto
                         send_angle(state.serial_port, int(cmd))
@@ -227,7 +230,6 @@ def process_yolo_stream():
         
         # Liga motor inicial
         motor_on(ser)
-        state.motor_running = True
     except Exception as e:
         log.warning("Erro ao conectar serial (%s); continuando sem serial (modo demonstração)", e)
         state.serial_port = None
@@ -337,7 +339,7 @@ def run_yolo_stream(model):
             'frame': frame_b64,
             'detections': detections,
             'fps': state.fps,
-            'motor_running': state.motor_running,
+            'motor_running': state.motor.ligado,
             # None em modo demonstração (sem serial ou após falha de escrita)
             'serial_port': config['serial_port'] if state.serial_port else None
         }
