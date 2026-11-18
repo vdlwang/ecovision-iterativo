@@ -135,7 +135,8 @@ def test_grava_quadro_com_exif_e_registro(tmp_path):
     assert cabecalho["captura"]["intervalo_s"] == 10.0
     assert linha == {"tipo": "quadro", "arquivo": "20261115T232903.146Z.jpg",
                      "horario": "2026-11-15T23:29:03.146000+00:00", "largura": 640,
-                     "altura": 480, "motor_ligado": True, "diferenca": None, "fps": 12}
+                     "altura": 480, "origem": "automatica", "motor_ligado": True,
+                     "diferenca": None, "fps": 12}
 
 
 def test_esteira_ligada_grava_a_cada_intervalo(tmp_path):
@@ -180,3 +181,48 @@ def test_fila_cheia_descarta(tmp_path, monkeypatch):
     assert sessao.descartados == 1
     # o descartado não conta como captura
     assert cap.ultima_captura == 106.0
+
+
+# ==== automática ligada/desligada e captura manual (Monitor) ====
+
+def test_automatica_desligada_nao_grava_nem_cria_pasta(tmp_path):
+    cap = Capturador(tmp_path / "capturas", CFG, automatica=False)
+    assert not cap.quadro(quadro(0), 105.0, HORARIO, ligado_desde=100.0)
+    cap.fechar()
+    assert not (tmp_path / "capturas").exists()
+    assert cap.gravados == 0
+
+
+def test_manual_grava_sem_esperar_intervalo_nem_travessia(tmp_path):
+    cap = Capturador(tmp_path, CFG, automatica=False)
+    assert cap.manual(quadro(0), 100.5, HORARIO, ligado_desde=100.0) == "20261115T232903.146Z.jpg"
+    assert cap.manual(quadro(0), 101.0, HORARIO + timedelta(seconds=0.5), ligado_desde=100.0)
+    cap.fechar()
+    [sessao] = list(tmp_path.iterdir())
+    cabecalho, *linhas = ler_jsonl(sessao)
+    assert cabecalho["captura"]["automatica"] is False
+    assert [l["origem"] for l in linhas] == ["manual", "manual"]
+    assert cap.gravados == 2
+
+
+def test_manual_conta_para_o_intervalo_da_automatica(tmp_path):
+    cap = Capturador(tmp_path, CFG)
+    assert cap.manual(quadro(0), 110.0, HORARIO, ligado_desde=100.0)
+    assert not cap.quadro(quadro(0), 115.0, HORARIO, ligado_desde=100.0)
+    assert cap.quadro(quadro(0), 120.0, HORARIO + timedelta(seconds=10), ligado_desde=100.0)
+    cap.fechar()
+
+
+def test_ligar_e_desligar_a_automatica_vai_ao_registro(tmp_path):
+    cap = Capturador(tmp_path, CFG)
+    assert cap.quadro(quadro(0), 105.0, HORARIO, ligado_desde=100.0)
+    cap.definir_automatica(False, HORARIO + timedelta(seconds=1))
+    assert not cap.quadro(quadro(0), 120.0, HORARIO + timedelta(seconds=15), ligado_desde=100.0)
+    cap.definir_automatica(True, HORARIO + timedelta(seconds=20))
+    cap.definir_automatica(True)  # sem mudança: nada registrado
+    assert cap.quadro(quadro(0), 130.0, HORARIO + timedelta(seconds=25), ligado_desde=100.0)
+    cap.fechar()
+    [sessao] = list(tmp_path.iterdir())
+    tipos = [(l["tipo"], l.get("ativa")) for l in ler_jsonl(sessao)]
+    assert tipos == [("sessao", None), ("quadro", None), ("automatica", False),
+                     ("automatica", True), ("quadro", None)]

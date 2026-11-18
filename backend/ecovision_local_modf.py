@@ -110,10 +110,14 @@ class SystemState:
         self.fps = 0
         self.serial_port = None
         self.websocket_clients = set()
+        # Último quadro da câmera e as detecções dele, para a captura manual
+        # (o handler do WebSocket roda noutra thread; a tupla é trocada inteira)
+        self.ultimo_quadro = None
 
 state = SystemState()
 SERVER_LOOP: asyncio.AbstractEventLoop | None = None
-# Captura de quadros para a anotação (T4); None se desativada
+# Captura de quadros para a anotação (T4): sempre existe, para a captura
+# manual; a automática começa como --capturar/captura.ativa e muda pelo Monitor
 capturador: Capturador | None = None
 
 # ==== Serial (ESP32) ====
@@ -196,6 +200,13 @@ async def websocket_handler(websocket):
                         # Comando de ângulo direto
                         send_angle(state.serial_port, int(cmd))
                 
+                # Captura (T4): automática ligada/desligada, ou um quadro agora
+                elif data.get('type') == 'captura_automatica':
+                    if capturador is not None:
+                        capturador.definir_automatica(bool(data.get('ativa')))
+                elif data.get('type') == 'capturar':
+                    await websocket.send(json.dumps(capturar_manual()))
+
                 # Atualização de configuração
                 elif data.get('type') == 'config':
                     if 'confidence' in data:
@@ -223,6 +234,27 @@ async def websocket_handler(websocket):
         state.websocket_clients.discard(websocket)
         envios_pendentes.pop(websocket, None)
         log.info("Cliente WebSocket desconectado. Total: %d", len(state.websocket_clients))
+
+# Captura manual: o último quadro só vale se a câmera o entregou há pouco
+QUADRO_MANUAL_MAX_S = 2.0
+
+def capturar_manual():
+    """Grava o último quadro da câmera; resposta ao cliente que pediu."""
+    resposta = {'type': 'captura_manual', 'ok': False, 'arquivo': None, 'erro': None}
+    ultimo = state.ultimo_quadro
+    agora = time.monotonic()
+    if capturador is None or ultimo is None or agora - ultimo[2] > QUADRO_MANUAL_MAX_S:
+        resposta['erro'] = 'sem quadro recente da câmera'
+        return resposta
+    quadro, detections, _ = ultimo
+    nome = capturador.manual(quadro, agora, datetime.now(timezone.utc),
+                             state.motor.ligado_desde, {"detections": detections, "fps": state.fps})
+    if nome is None:
+        resposta['erro'] = 'fila de gravação cheia'
+    else:
+        resposta.update(ok=True, arquivo=nome)
+        log.info("Captura manual: %s", nome)
+    return resposta
 
 # Envio em andamento por cliente. Um cliente lento perde quadros em vez de
 # acumular envios no loop, e não atrasa os outros.
@@ -393,6 +425,7 @@ def laco_yolo(model, leitor):
                         disparos.perdidas_ocupado.pop(0))
 
         state.current_detections = detections
+        state.ultimo_quadro = (frame, detections, time.monotonic())
 
         # Captura para a anotação (T4): roda com ou sem cliente conectado
         if capturador is not None:
@@ -425,7 +458,10 @@ def laco_yolo(model, leitor):
             'fps': state.fps,
             'motor_running': state.motor.ligado,
             # None em modo demonstração (sem serial ou após falha de escrita)
-            'serial_port': config['serial_port'] if state.serial_port else None
+            'serial_port': config['serial_port'] if state.serial_port else None,
+            # Captura (T4): automática ligada? e quadros gravados nesta execução
+            'captura_automatica': capturador.automatica if capturador else False,
+            'capturas_gravadas': capturador.gravados if capturador else 0,
         }
         
         # Envia para WebSocket (asyncio)
@@ -483,18 +519,24 @@ async def main():
         await asyncio.Future()  # Roda forever
 
 def iniciar_captura(ativa):
-    """Cria o capturador se a captura está ativa (--capturar ou captura.ativa)."""
+    """
+    Cria o capturador. A automática começa ligada com --capturar=true ou
+    captura.ativa; o Monitor a liga e desliga, e grava quadros à mão. A pasta
+    da sessão só é criada na primeira captura.
+    """
     cfg = config['captura']
-    if not (cfg['ativa'] if ativa is None else ativa):
-        return None
+    automatica = cfg['ativa'] if ativa is None else ativa
     pasta = Path(cfg['pasta'])
     if not pasta.is_absolute():
         pasta = BACKEND_DIR / pasta
-    log.info("Captura ativa: a cada %.1f s no mínimo (travessia %.1f s), em %s",
-             cfg['intervalo_s'], cfg['travessia_s'], pasta)
-    return Capturador(pasta, {**cfg, 'ativa': True}, {"camera_index": config['camera_index'],
+    if automatica:
+        log.info("Captura automática ligada: a cada %.1f s no mínimo (travessia %.1f s), em %s",
+                 cfg['intervalo_s'], cfg['travessia_s'], pasta)
+    else:
+        log.info("Captura automática desligada (liga pelo Monitor); manual em %s", pasta)
+    return Capturador(pasta, cfg, {"camera_index": config['camera_index'],
                                    "model_path": config['model_path'],
-                                   "confidence": config['confidence']})
+                                   "confidence": config['confidence']}, automatica=automatica)
 
 
 if __name__ == "__main__":

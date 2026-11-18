@@ -189,13 +189,42 @@ class Sessao:
 class Capturador:
     """Decide e grava as capturas de uma execução do backend (a sessão nasce na primeira)."""
 
-    def __init__(self, pasta_base, cfg, cabecalho=None):
+    def __init__(self, pasta_base, cfg, cabecalho=None, automatica=True):
         self.pasta_base = Path(pasta_base)
         self.cfg = completar_config(cfg)
         self.cabecalho = cabecalho or {}
         self.sessao = None
         self.ultima_captura = None
         self.ultima_miniatura = None
+        # Captura automática (deve_capturar); ligada e desligada pelo Monitor.
+        # Desligada, só a manual grava.
+        self.automatica = automatica
+        self._trava = Lock()  # quadro() roda na thread do YOLO; manual(), na do WebSocket
+
+    @property
+    def gravados(self):
+        return self.sessao.gravados if self.sessao is not None else 0
+
+    def definir_automatica(self, ativa, horario=None):
+        """Liga ou desliga a captura automática; a mudança vai ao captura.jsonl."""
+        with self._trava:
+            if ativa == self.automatica:
+                return
+            self.automatica = ativa
+            log.info("Captura automática %s", "ligada" if ativa else "desligada")
+            if self.sessao is not None:
+                horario = horario or datetime.now(timezone.utc)
+                self.sessao._escrever_linha({"tipo": "automatica", "ativa": ativa,
+                                             "horario": horario.astimezone(timezone.utc).isoformat()})
+
+    def _abrir_sessao(self, horario):
+        if self.sessao is None:
+            pasta = self.pasta_base / carimbo(horario).split(".")[0]
+            self.sessao = Sessao(pasta, {"inicio": horario.astimezone(timezone.utc).isoformat(),
+                                         "captura": {**self.cfg, "automatica": self.automatica},
+                                         **self.cabecalho},
+                                 self.cfg["qualidade_jpeg"])
+            log.info("Captura: gravando em %s", pasta)
 
     def camera_aberta(self, relatorio, horario=None):
         """
@@ -216,22 +245,40 @@ class Capturador:
         Avalia um quadro do laço do YOLO; grava se deve_capturar. Devolve True se
         o quadro foi para a fila. agora: time.monotonic(); horario: datetime com fuso.
         """
+        if not self.automatica:
+            return False
         mini = None
         diferenca = None
         if ligado_desde is None:
             # Esteira parada: a decisão depende do conteúdo
             mini = miniatura(quadro_bgr)
-            diferenca = diferenca_quadros(mini, self.ultima_miniatura)
-        if not deve_capturar(agora, self.ultima_captura, ligado_desde, diferenca, self.cfg):
-            return False
-        if self.sessao is None:
-            pasta = self.pasta_base / carimbo(horario).split(".")[0]
-            self.sessao = Sessao(pasta, {"inicio": horario.astimezone(timezone.utc).isoformat(),
-                                         "captura": self.cfg, **self.cabecalho},
-                                 self.cfg["qualidade_jpeg"])
-            log.info("Captura: gravando em %s", pasta)
-        dados = {"motor_ligado": ligado_desde is not None,
-                 "diferenca": diferenca, **(info or {})}
+        with self._trava:
+            if mini is not None:
+                diferenca = diferenca_quadros(mini, self.ultima_miniatura)
+            if not self.automatica or not deve_capturar(agora, self.ultima_captura, ligado_desde,
+                                                        diferenca, self.cfg):
+                return False
+            return self._gravar(quadro_bgr, agora, horario, mini, {
+                "origem": "automatica", "motor_ligado": ligado_desde is not None,
+                "diferenca": diferenca, **(info or {})})
+
+    def manual(self, quadro_bgr, agora, horario, ligado_desde, info=None):
+        """
+        Grava o quadro já, sem deve_capturar (botão do Monitor). Conta como
+        captura para o espaçamento: a automática espera Δ depois dela. Uma manual
+        a menos de Δ de outra captura é acusada pelo importar.py --janela, que
+        põe as duas no mesmo conjunto. Devolve o nome do arquivo, ou None se a
+        fila estava cheia.
+        """
+        with self._trava:
+            nome = carimbo(horario) + ".jpg"
+            ok = self._gravar(quadro_bgr, agora, horario, None, {
+                "origem": "manual", "motor_ligado": ligado_desde is not None,
+                "diferenca": None, **(info or {})})
+            return nome if ok else None
+
+    def _gravar(self, quadro_bgr, agora, horario, mini, dados):
+        self._abrir_sessao(horario)
         if not self.sessao.enviar(quadro_bgr.copy(), horario, dados):
             return False
         self.ultima_captura = agora

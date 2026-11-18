@@ -53,7 +53,7 @@ Lido na inicialização a partir de `backend/config.json`. Se o arquivo não exi
 
 ## Captura para a anotação (T4)
 
-Grava quadros da esteira para o ciclo de anotação (`anotacao/`, tarefa T4 do [`OBJETIVO.md`](../OBJETIVO.md); plano em [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md)). Desligada por padrão; liga com `captura.ativa` no `config.json` ou na linha de comando, que tem prioridade:
+Grava quadros da esteira para o ciclo de anotação (`anotacao/`, tarefa T4 do [`OBJETIVO.md`](../OBJETIVO.md); plano em [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md)). A captura **automática** (as regras abaixo) começa desligada; começa ligada com `captura.ativa` no `config.json` ou na linha de comando, que tem prioridade, e o Monitor a liga e desliga com o backend rodando (sem gravar no `config.json`; cada mudança vai ao `captura.jsonl` como linha `"tipo": "automatica"`). O botão **Capturar agora** do Monitor grava o quadro mais recente da câmera na hora, com a automática ligada ou não, sem as regras de intervalo e travessia (recusa se a câmera não entregou quadro nos últimos 2 s); conta como captura para o espaçamento da automática, e uma manual a menos de Δ de outra captura é acusada pelo `importar.py --janela`, que põe as duas no mesmo conjunto. Cada linha de quadro do `captura.jsonl` diz a `origem` (`automatica` ou `manual`). A pasta da sessão só é criada na primeira captura:
 
 ```bash
 python ecovision_local_modf.py --capturar=true     # --capturar sozinho equivale a true
@@ -154,11 +154,14 @@ Do frontend para o backend:
 | `{"type": "config", "confidence": <n>}` | Atualiza a confiança em memória |
 | `{"type": "get_config"}` | Pede a configuração atual (os painéis enviam ao conectar) |
 | `{"type": "save_config", ...}` | Mescla os campos no `config.json` e salva (a chave `type` não é gravada) |
+| `{"type": "captura_automatica", "ativa": true\|false}` | Liga ou desliga a captura automática (em memória) |
+| `{"type": "capturar"}` | Grava o quadro mais recente (captura manual) |
 
 Do backend para o frontend:
 
-- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox", "id"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas).
+- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox", "id"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas). Também `captura_automatica` (se a captura automática está ligada) e `capturas_gravadas` (quadros gravados nesta execução, automáticos e manuais).
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
+- Resposta a `capturar`, só para quem pediu: `{"type": "captura_manual", "ok", "arquivo", "erro"}` (`erro`: sem quadro recente da câmera, ou fila de gravação cheia).
 
 ## Testes automatizados
 

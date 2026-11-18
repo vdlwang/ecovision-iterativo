@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, Camera } from 'lucide-react';
+import { toast } from 'sonner@2.0.3';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
 import { BadgeBackend } from './BadgeBackend';
 import { BACKEND_WS_URL } from '../config';
@@ -22,6 +23,17 @@ interface FrameData {
   fps: number;
   motor_running: boolean;
   serial_port: string | null;
+  // Captura para a anotação (T4)
+  captura_automatica?: boolean;
+  capturas_gravadas?: number;
+}
+
+// Resposta do backend ao botão "Capturar agora"
+interface CapturaManual {
+  type: 'captura_manual';
+  ok: boolean;
+  arquivo: string | null;
+  erro: string | null;
 }
 
 export function MonitorPanel() {
@@ -29,6 +41,8 @@ export function MonitorPanel() {
   const [fps, setFps] = useState(0);
   const [motorRunning, setMotorRunning] = useState(true);
   const [serialPort, setSerialPort] = useState<string | null>(null);
+  const [capturaAutomatica, setCapturaAutomatica] = useState(false);
+  const [capturasGravadas, setCapturasGravadas] = useState(0);
   // Câmera e YOLO contam como ativos se chegou frame nos últimos 3 s
   const [ultimoFrame, setUltimoFrame] = useState(0);
   const [agora, setAgora] = useState(Date.now());
@@ -40,7 +54,16 @@ export function MonitorPanel() {
   const { connected, send } = useStableWebSocket(BACKEND_WS_URL, {
     onMessage: (event) => {
       try {
-        const data: FrameData = JSON.parse(event.data);
+        const mensagem = JSON.parse(event.data);
+        if (mensagem.type === 'captura_manual') {
+          const r = mensagem as CapturaManual;
+          if (r.ok) toast.success(`Quadro capturado: ${r.arquivo}`);
+          else toast.error(`Captura não feita: ${r.erro}`);
+          return;
+        }
+        // Outras respostas (ex.: config) não são quadros
+        if (mensagem.type) return;
+        const data: FrameData = mensagem;
 
         // Atualizar canvas com frame
         const canvas = canvasRef.current;
@@ -79,6 +102,8 @@ export function MonitorPanel() {
         setFps(data.fps || 0);
         setMotorRunning(data.motor_running ?? true);
         setSerialPort(data.serial_port ?? null);
+        setCapturaAutomatica(data.captura_automatica ?? false);
+        setCapturasGravadas(data.capturas_gravadas ?? 0);
         if (data.frame) setUltimoFrame(Date.now());
       } catch (error) {
         // Silencioso
@@ -211,6 +236,59 @@ export function MonitorPanel() {
                   Parar
                 </Button>
               </div>
+            </div>
+          </Card>
+
+          <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
+            <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Captura (anotação)</h3>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 md:p-4 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-300 text-sm md:text-base">Automática</span>
+                <Badge className={capturaAutomatica ? 'bg-green-600' : 'bg-neutral-600'}>
+                  {capturaAutomatica ? 'Ligada' : 'Desligada'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:gap-3">
+                <Button
+                  onClick={() => {
+                    setCapturaAutomatica(true);
+                    send({ type: 'captura_automatica', ativa: true });
+                  }}
+                  disabled={!connected || capturaAutomatica}
+                  className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
+                >
+                  <Play className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Ligar
+                </Button>
+                <Button
+                  onClick={() => {
+                    setCapturaAutomatica(false);
+                    send({ type: 'captura_automatica', ativa: false });
+                  }}
+                  disabled={!connected || !capturaAutomatica}
+                  variant="outline"
+                  className="bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
+                >
+                  <Pause className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Desligar
+                </Button>
+              </div>
+
+              <Button
+                onClick={() => send({ type: 'capturar' })}
+                disabled={!recebendoFrames}
+                variant="outline"
+                className="w-full bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
+              >
+                <Camera className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                Capturar agora
+              </Button>
+
+              <p className="text-neutral-500 text-xs">
+                {capturasGravadas} {capturasGravadas === 1 ? 'quadro gravado' : 'quadros gravados'} nesta execução do backend
+              </p>
             </div>
           </Card>
 
