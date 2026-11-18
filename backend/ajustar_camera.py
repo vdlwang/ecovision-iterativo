@@ -131,7 +131,12 @@ def varrer(indice, cfg, campo, valores):
                 continue
             arquivo = pasta / f"{campo}_{valor}.jpg"
             cv2.imwrite(str(arquivo), quadro)
-            print(f"{campo}={valor}: lido {lido}, brilho médio {quadro.mean():.0f}, {arquivo.name}")
+            aviso = ""
+            if lido is None or abs(float(lido) - float(valor)) > camera.TOLERANCIA:
+                # ex.: a C920 só aceita alguns valores de exposição e fica no anterior
+                aviso = "  IGNORADO pelo driver: o quadro é do valor lido, não do pedido"
+            print(f"{campo}={valor}: lido {lido}, brilho médio {quadro.mean():.0f}, "
+                  f"{arquivo.name}{aviso}")
     finally:
         cap.release()
     print(f"Quadros em {pasta}")

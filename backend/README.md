@@ -64,7 +64,7 @@ Quando grava:
 
 - nunca a menos de `intervalo_s` (Δ, padrão 10 s) da captura anterior;
 - **motor ligado**: a cada Δ, depois de `travessia_s` (padrão 5 s) desde que o motor ligou. Com a esteira em velocidade constante, o tempo dá o deslocamento: com Δ acima do tempo de um objeto cruzar o campo da câmera, o mesmo objeto não aparece em duas capturas, e a espera depois de ligar evita gravar de novo o que estava parado no campo. Meça a travessia na esteira e ajuste os dois valores;
-- **motor desligado ou modo demonstração**: só quando o quadro difere do último gravado (diferença média em cinza, numa miniatura, de pelo menos `diferenca_minima`, padrão 10 em 0–255): objetos postos à mão, esteira parada.
+- **motor desligado ou modo demonstração**: só quando o quadro difere do último gravado (diferença média em cinza, numa miniatura, de pelo menos `diferenca_minima`, padrão 10 em 0–255): objetos postos à mão, esteira parada. As duas miniaturas são escaladas para o mesmo brilho médio antes de comparar: com a exposição no automático, a câmera clarear ou escurecer o quadro inteiro não conta como cena nova (num quadro da C920, 30% mais escuro dava 26 sem isso, e dá 0); um objeto posto ou tirado continua contando (~20 para a faca da amostra).
 
 O estado do motor é o do último comando que saiu pela serial. A captura independe de haver cliente no WebSocket e não muda a detecção nem o acionamento.
 
@@ -96,6 +96,8 @@ O backend abre a câmera (`camera.py`) e aplica o bloco `camera` do `config.json
 - **Leitura**: uma thread (`camera`) lê sem parar e guarda só o quadro mais recente, e o YOLO pega o último a cada volta. Sem quadro novo por 10 s (`ESPERA_QUADRO_S`), ou no fim de um vídeo, a câmera é reaberta depois de 5 s, com o bloco reaplicado.
 - **Vídeo e URL**: um arquivo de vídeo como `camera_index` é lido no ritmo do seu fps, como uma câmera, e termina no fim; a uma URL de stream nada se aplica (o backend avisa se o bloco estiver preenchido).
 - **Sistema**: testado no Linux (V4L2, Fedora 43, na máquina da esteira). No Windows, abre com DSHOW, e a tradução (`AUTO_EXPOSURE` 0,25/0,75, exposição em log2 de segundos) segue a documentação do OpenCV, **sem teste**.
+- **Sem controle de luz (decidido em 2026-11-18)**: a iluminação da esteira não é garantida, então exposição, ganho e balanço de branco ficam no automático (`null`), e só formato, resolução, fps e os controles de imagem são fixados. Fixar a exposição fica como melhoria futura, junto com a luz (`PLANO-CAPTURA.md`, 6b).
+- **C920 (Logitech, câmera da esteira desde 2026-11-18)**: `camera_index` 3 (`/dev/video3`; pode mudar com outras câmeras ligadas: confira com `v4l2-ctl --list-devices`), MJPG 1280×720 a 30 fps (29–30 medidos com luz), controles de imagem no padrão 128 e `gama` `null` (a C920 não tem gama; o contraste e a saturação da DV20, 256 e 384, passam do máximo dela, 255). Com pouca luz, a exposição automática chega a 125 ms e o fps cai para 15. A exposição manual só aceita alguns valores (78, 156, 312, 625, 1250…, em 100 µs); um valor fora da lista é ignorado em silêncio, e a conferência o acusa como divergência.
 - **Índice no Linux**: cada câmera UVC cria dois nós, `/dev/videoN` (vídeo) e `/dev/videoN+1` (metadados, sem formatos). O `camera_index` é o do nó de vídeo: a DV20 hoje é o 2, não o 3. `v4l2-ctl --list-devices` mostra os nós.
 
 ### Celular como câmera IP (medida temporária, 2026-11-16)
@@ -122,7 +124,7 @@ python ajustar_camera.py --varrer temperatura_cor 3500 4500 5500
 python ajustar_camera.py --camera 2 --listar             # outra câmera que a do config.json
 ```
 
-`--varrer` aceita `exposicao`, `temperatura_cor`, `foco`, `ganho`, `brilho`, `contraste`, `saturacao`, `nitidez` e `gama`, parte do bloco `camera` do `config.json` e muda só o campo varrido. Os quadros vão para `capturas/ajuste/<AAAAMMDDTHHMMSS>/`, com o valor no nome, e cada linha impressa diz o valor lido de volta e o brilho médio. O roteiro da calibração está na etapa 6b do [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md). Sem argumentos, o programa sai com código 1 se houver divergência.
+`--varrer` aceita `exposicao`, `temperatura_cor`, `foco`, `ganho`, `brilho`, `contraste`, `saturacao`, `nitidez` e `gama`, parte do bloco `camera` do `config.json` e muda só o campo varrido. Os quadros vão para `capturas/ajuste/<AAAAMMDDTHHMMSS>/`, com o valor no nome, e cada linha impressa diz o valor lido de volta e o brilho médio, com `IGNORADO pelo driver` quando o lido difere do pedido (o quadro é então do valor lido). O roteiro da calibração está na etapa 6b do [`PLANO-CAPTURA.md`](PLANO-CAPTURA.md). Sem argumentos, o programa sai com código 1 se houver divergência.
 
 ## Rastreamento (T15)
 

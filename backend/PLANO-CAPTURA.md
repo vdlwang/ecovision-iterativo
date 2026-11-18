@@ -21,7 +21,7 @@ Plano da tarefa T4 do [`OBJETIVO.md`](../OBJETIVO.md): o backend grava quadros d
 | 4 | [x] `40e76d5` | **`importar.py`: conferência de Δ.** Lê o horário do EXIF antes de regravar (a regravação o descarta); sem fuso, hora local. Coluna `imagens.capturada_em` (pode ser nula; esquema v7, sem migração). `--janela` (Δ em segundos, padrão 10; também no `anotadores.yaml`): em ordem de horário, cada imagem nova com outra a menos de Δ (no banco ou no próprio lote) herda o conjunto dela e é listada no relatório; vizinhas em conjuntos diferentes geram aviso; sem horário, sorteio por imagem como hoje | pytest com EXIF sintético; importar os 4 cenários de `legado/database` (mesmas cenas, segundos de diferença) e conferir que cada cena cai num conjunto só |
 | 5 | [x] | **Documentação**: `backend/README.md` (bloco `captura`, `--capturar`), `anotacao/README.md` (`--janela`, `capturada_em`), `OBJETIVO.md` (T4), `REFATORACAO.md` (37, 38, 40), `CHANGELOG.md`, `CLAUDE.md` | — |
 | 6a | [x] `6316da1` | **Câmera aberta pelo backend** (antes da ida à esteira, decisão 3 revista): o backend abre a `cv2.VideoCapture`, aplica o bloco `camera` do `config.json` (resolução, formato, exposição, balanço de branco, foco), confere o que a câmera aceitou e passa os quadros ao YOLO com `imgsz` explícito; tudo registrado no `captura.jsonl`. Sem o bloco, comporta-se como hoje. `ajustar_camera.py` para a calibração. Detalhes em [Etapa 6](#etapa-6-câmera-configurada) | pytest de `camera.py` com câmera falsa; backend com a webcam local e com vídeo |
-| 6b | [~] | **Calibração na esteira** (primeiro passo da ida, antes de qualquer captura): escolher resolução, exposição, balanço de branco e foco com o `ajustar_camera.py` e fixá-los no `config.json` | quadros de amostra; valores lidos de volta iguais aos pedidos |
+| 6b | [~] | **Calibração na esteira** (primeiro passo da ida, antes de qualquer captura): escolher resolução, exposição, balanço de branco e foco com o `ajustar_camera.py` e fixá-los no `config.json`. **Revista em 2026-11-18**: sem controle de luz por ora, só formato, resolução, fps e controles de imagem fixados; exposição, ganho, balanço de branco e foco no automático, e a captura com o motor desligado compara quadros com o brilho igualado. Fixar a exposição é [melhoria futura](#melhoria-futura-luz-controlada-e-exposição-fixa) | quadros de amostra; valores lidos de volta iguais aos pedidos |
 | 7 | [ ] | **Na esteira**: medir a travessia (cronometrar um objeto cruzando o campo da câmera), ajustar Δ com folga, sessão-piloto dos três ramos da captura, sessão de captura e importação com `--janela` sem nenhuma imagem acusada. Variar os objetos e não repassar o mesmo de propósito (decisão 19 do `OBJETIVO.md`). Roteiro em [Etapa 7](#etapa-7-sessão-na-esteira) | sessão real |
 
 Commits: um para a etapa 1; um para 2 e 3; um para 4; um para 6a; a documentação vai junto de cada etapa.
@@ -79,6 +79,16 @@ Medidos na DV20 o que falta; a nova deve ter, conferido com o `ajustar_camera.py
 
 Obturador global não é preciso na velocidade desta esteira, se a exposição for curta. Com a câmera nova, refazer a 6b inteira (o bloco `camera` é de cada câmera).
 
+**Logitech C920, conferida em 2026-11-18** (`/dev/video3`, apontada para a esteira, as duas bordas da lona no quadro): UVC ✅; MJPG 1280×720 a 29–30 fps com luz ✅ (YUYV: 10 fps em 720p); exposição manual ✅, mas só em valores discretos (78, 156, 312, 625, 1250…, em 100 µs; pedidos fora da lista ficam no anterior, e o `ajustar_camera.py` agora avisa); ganho manual ✅ (0–255, muda a imagem); balanço de branco e foco manuais existem (2800–7500 K, 0–250), efeito não medido; 0,5% do quadro a 250+ no automático com luz ✅. No automático e com pouca luz, chega a 125 ms de exposição e o fps cai para 15. A varredura de exposição não fechou: a luz da sala caiu no meio dela (brilho médio de 88 para 3). Adotado no `config.json` da máquina: `camera_index` 3, MJPG 1280×720 a 30, controles de imagem 128, `gama` `null`, o resto automático.
+
+### Melhoria futura: luz controlada e exposição fixa
+
+Decidido em 2026-11-18: por ora não há como garantir a iluminação da esteira, então o código não depende dela (exposição, ganho e balanço de branco automáticos; a captura com o motor desligado ignora mudanças globais de brilho). Custo aceito: a imagem muda com o que passa na esteira (um objeto escuro clareia o fundo, a lona escura pode estourar objetos claros), e com pouca luz o fps cai para 15. Quando a luz for controlada (luminária fixa dos dois lados da esteira, luz do dia bloqueada):
+
+1. Refazer a 6b na C920: exposição entre 78, 156 e 312 (≤10 ms é a meta), ganho, temperatura de cor e foco; conferir cintilação da lâmpada (rede de 60 Hz) gravando ~30 quadros seguidos.
+2. No início de cada sessão, comparar o brilho da lona vazia com o da calibração e avisar no log acima de ~15% de diferença (não implementado).
+3. A partir daí, as sessões saem na mesma condição; as gravadas no automático ficam identificáveis pelo `captura.jsonl` (`exposicao` `null`).
+
 ## Etapa 6: câmera configurada
 
 Planejada em 2026-11-16. Objetivo: os quadros da operação e os da captura saem da câmera numa condição fixa e registrada, a mesma em todas as sessões, desde a primeira. A exposição e o balanço de branco automáticos mudam a imagem conforme o que está na esteira (um objeto escuro clareia o fundo), o que muda a entrada do YOLO quadro a quadro e faz a captura com o motor desligado disparar sem nada ter mudado na cena.
@@ -125,7 +135,7 @@ Planejada em 2026-11-16. Objetivo: os quadros da operação e os da captura saem
 
 Com a esteira montada, a iluminação que será usada sempre e objetos dos quatro materiais no campo:
 
-1. **Iluminação**: preferir luz artificial e fechar cortinas. Com exposição manual, a luz do dia variando muda o brilho entre sessões. Se não der para controlar, anotar a condição de cada sessão.
+1. **Iluminação** (adiada em 2026-11-18: ver [melhoria futura](#melhoria-futura-luz-controlada-e-exposição-fixa)): preferir luz artificial e fechar cortinas. Com exposição manual, a luz do dia variando muda o brilho entre sessões. Se não der para controlar, anotar a condição de cada sessão.
 2. **Resolução e formato**: a maior com MJPG que mantém o fps do Monitor perto do de hoje (o YOLO é o gargalo; decodificar 1080p custa CPU). Provável 1280×720.
 3. **Foco**: varrer `foco` e escolher o quadro mais nítido sobre a lona (a DV20 não tem foco ajustável: pular).
 4. **Exposição**: varrer (na DV20, a unidade é de ~2 µs; na luz da sala, só ~60000 iguala o automático) e escolher a mais curta (menos borrão com a esteira andando) que não escurece os objetos escuros. Se escurecer, subir o `ganho` antes de alongar a exposição. Conferir com objetos brilhantes (lata, vidro): sem estourar.

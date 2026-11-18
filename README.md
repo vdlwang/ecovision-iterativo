@@ -81,6 +81,7 @@ Para testar só a comunicação com o ESP32: `python backend/testes_serial.py`.
 ## Limitações conhecidas
 
 - **O acionamento não acompanha a posição do objeto:** a esteira não para, e o servo fica 5 s em posição. Cada objeto é rastreado e dispara uma vez ao cruzar a faixa, mas os que cruzam nesse intervalo não são separados (o log avisa).
+- **Iluminação não controlada:** a câmera fica com exposição e balanço de branco automáticos, então a imagem muda com o que passa na esteira, e com pouca luz o fps cai (15 na C920). Luz fixa com exposição manual é melhoria futura (`backend/PLANO-CAPTURA.md`, 6b).
 - **O login é simulado:** não há autenticação real.
 
 ## Licença

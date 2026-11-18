@@ -59,12 +59,40 @@ def test_miniatura_reduz_e_converte_para_cinza():
     assert m.mean() == pytest.approx(90)
 
 
+def cena(fundo=40, objeto=None, altura=480, largura=640):
+    """Lona uniforme, com um objeto claro opcional (valor) no quarto de cima à esquerda."""
+    q = np.full((altura, largura, 3), fundo, dtype=np.float32)
+    if objeto is not None:
+        q[: altura // 2, : largura // 2] = objeto
+    return q
+
+
 def test_diferenca():
-    a, b = miniatura(quadro(0)), miniatura(quadro(30))
+    a, b = miniatura(cena(40)), miniatura(cena(40, objeto=200))
     assert diferenca_quadros(a, a) == 0
-    assert diferenca_quadros(a, b) == pytest.approx(30)
+    assert diferenca_quadros(a, b) > 50
     assert diferenca_quadros(a, None) is None
-    assert diferenca_quadros(a, miniatura(quadro(0, 720, 1280))) is None
+    assert diferenca_quadros(a, miniatura(cena(40, altura=720, largura=1280))) is None
+
+
+def test_diferenca_ignora_mudanca_global_de_brilho():
+    # exposição automática: o mesmo quadro 1,5 vez mais claro não é cena nova
+    a = miniatura(cena(40, objeto=120))
+    b = miniatura(cena(60, objeto=180))
+    assert diferenca_quadros(a, b) == pytest.approx(0, abs=1e-3)
+
+
+def test_diferenca_objeto_novo_com_exposicao_mudada():
+    # objeto posto e a câmera escurecendo o quadro em resposta: ainda é cena nova
+    a = miniatura(cena(60))
+    b = miniatura(cena(40, objeto=220))
+    assert diferenca_quadros(a, b) > 10
+
+
+def test_diferenca_quadro_preto_nao_escala():
+    # quase preto (luz apagada): compara sem escalar, sem amplificar ruído
+    a, b = miniatura(cena(0)), miniatura(cena(1))
+    assert diferenca_quadros(a, b) == pytest.approx(1)
 
 
 def test_completar_config():
@@ -121,10 +149,12 @@ def test_esteira_ligada_grava_a_cada_intervalo(tmp_path):
 
 def test_esteira_parada_grava_so_quando_muda(tmp_path):
     cap = Capturador(tmp_path, CFG)
-    valores = [0, 0, 5, 5, 60, 60, 60]  # cena muda no quadro 4
-    gravados = [i for i, v in enumerate(valores)
-                if cap.quadro(quadro(v), 100.0 + 20 * i, HORARIO + timedelta(seconds=20 * i),
-                              ligado_desde=None)]
+    # lona vazia; a mesma, mais clara (exposição automática); objeto posto no quadro 4
+    quadros = [cena(40), cena(40), cena(42), cena(60), cena(40, objeto=200),
+               cena(40, objeto=200), cena(42, objeto=210)]
+    gravados = [i for i, q in enumerate(quadros)
+                if cap.quadro(q.astype(np.uint8), 100.0 + 20 * i,
+                              HORARIO + timedelta(seconds=20 * i), ligado_desde=None)]
     cap.fechar()
     assert gravados == [0, 4]
 

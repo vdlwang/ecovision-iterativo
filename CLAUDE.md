@@ -55,6 +55,7 @@ These are also listed for users in `README.md` ("Limitações conhecidas") and `
 
 
 - The queue and fixed 5 s hold are not tied to object position on a moving belt, so actuation drifts.
+- Lighting is not controlled (decided 2026-11-18): the camera (Logitech C920, index 3) runs with auto exposure/gain/white balance, so the image changes with what's on the belt and fps drops to 15 in low light; `captura.diferenca_quadros` equalizes mean brightness so auto exposure doesn't trigger motor-off captures. Fixed lighting + manual exposure is a future improvement (`backend/PLANO-CAPTURA.md`, 6b).
 
 ## Documentation layout
 

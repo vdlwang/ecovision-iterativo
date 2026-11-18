@@ -47,6 +47,9 @@ PADROES_CAPTURA = {
 
 LADO_MINIATURA = 64
 TAMANHO_FILA = 4
+# diferenca_quadros compara as miniaturas com o mesmo brilho médio
+BRILHO_NORMALIZADO = 128.0
+BRILHO_MINIMO_NORMALIZAR = 2.0
 
 # Tags EXIF
 TAG_DATETIME = 0x0132
@@ -72,11 +75,25 @@ def miniatura(quadro, lado=LADO_MINIATURA):
     return q.reshape(h // bloco, bloco, w // bloco, bloco).mean(axis=(1, 3))
 
 
+def normalizar_brilho(m, alvo=BRILHO_NORMALIZADO):
+    """
+    Miniatura escalada para brilho médio `alvo`. Sem iluminação controlada, a
+    exposição e o ganho ficam no automático (PLANO-CAPTURA, 6b), e a câmera
+    clareia ou escurece o quadro inteiro sozinha; escalar pela média tira essa
+    mudança global e deixa a de conteúdo. Quadro quase preto fica como está.
+    """
+    media = float(m.mean())
+    return m if media < BRILHO_MINIMO_NORMALIZAR else m * (alvo / media)
+
+
 def diferenca_quadros(a, b):
-    """Diferença absoluta média entre duas miniaturas; None se não há como comparar."""
+    """
+    Diferença absoluta média entre duas miniaturas, com o brilho médio de cada
+    uma igualado antes (normalizar_brilho); None se não há como comparar.
+    """
     if a is None or b is None or a.shape != b.shape:
         return None
-    return float(np.abs(a - b).mean())
+    return float(np.abs(normalizar_brilho(a) - normalizar_brilho(b)).mean())
 
 
 def deve_capturar(agora, ultima_captura, ligado_desde, diferenca, cfg):
