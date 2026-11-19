@@ -4,12 +4,14 @@ em backend/PLANO-CAPTURA.md). Sem câmera, serial nem YOLO: testável sem
 hardware.
 
 Quando gravar (deve_capturar): nunca a menos de intervalo_s (Δ) da captura
-anterior. Com o motor ligado, a esteira anda a velocidade quase constante, e
-o tempo dá o deslocamento: com Δ acima do tempo de travessia do campo da
-câmera, um objeto não aparece em duas capturas. Depois de o motor ligar,
-espera-se uma travessia, para não gravar de novo o objeto que estava parado
-no campo. Com o motor desligado (ou em modo demonstração), só se o quadro
-difere do último gravado (objetos postos à mão, esteira parada).
+anterior. Com o motor ligado, por objeto novo (OcupacaoLona): quando um
+objeto entra na lona vazia, a captura sai atraso_s depois, com ele mais
+perto do centro do quadro; sem objeto, nada é gravado. O objeto novo vem da
+diferença para a lona vazia, não do YOLO, para a base não ficar só com o que
+o modelo já detecta (OBJETIVO.md, "Captura sem duplicatas e vazamento").
+Com Δ acima do tempo de travessia do campo da câmera, um objeto não aparece
+em duas capturas. Com o motor desligado (ou em modo demonstração), só se o
+quadro difere do último gravado (objetos postos à mão, esteira parada).
 
 Cada quadro é gravado em <pasta>/<sessão>/<horário>.jpg (JPEG por Pillow,
 com o horário de captura em UTC no EXIF: DateTimeOriginal, SubSecTimeOriginal
@@ -40,6 +42,14 @@ PADROES_CAPTURA = {
     "intervalo_s": 10.0,
     # tempo de um objeto cruzar o campo da câmera com o motor ligado (medir na esteira)
     "travessia_s": 5.0,
+    # motor ligado: a captura sai este tempo depois de um objeto entrar na lona
+    # (do bordo ao centro do quadro: ~metade de travessia_s)
+    "atraso_s": 1.0,
+    # fração da miniatura diferente da lona vazia para haver objeto (lona vazia
+    # deu 0-1,8%, com objeto 5,3-96%, na sessão de 2026-11-18)
+    "ocupacao_minima": 0.03,
+    # diferença de um bloco da miniatura (0-255, brilho igualado) para contar como ocupado
+    "limiar_bloco": 40.0,
     # diferença média (0-255, em cinza, na miniatura) para gravar com o motor desligado
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95,
@@ -66,10 +76,14 @@ def completar_config(cfg):
 
 def miniatura(quadro, lado=LADO_MINIATURA):
     """Quadro (H×W×3 ou H×W) em cinza, reduzido pela média de blocos a ~lado no maior lado."""
-    q = np.asarray(quadro, dtype=np.float32)
+    # Roda em todo quadro com o motor ligado: subamostrar antes de converter
+    # (1280×720: 26 ms → ~2 ms), mantendo ~4×4 pixels por bloco
+    q = np.asarray(quadro)
+    passo = max(1, max(q.shape[:2]) // (lado * 4))
+    q = q[::passo, ::passo].astype(np.float32)
     if q.ndim == 3:
         q = q.mean(axis=2)
-    bloco = max(1, max(q.shape) // lado)
+    bloco = max(1, -(-max(q.shape) // lado))  # arredondado para cima: no máximo `lado` blocos
     h, w = (q.shape[0] // bloco) * bloco, (q.shape[1] // bloco) * bloco
     q = q[:h, :w]
     return q.reshape(h // bloco, bloco, w // bloco, bloco).mean(axis=(1, 3))
@@ -96,7 +110,79 @@ def diferenca_quadros(a, b):
     return float(np.abs(normalizar_brilho(a) - normalizar_brilho(b)).mean())
 
 
-def deve_capturar(agora, ultima_captura, ligado_desde, diferenca, cfg):
+def fracao_ocupada(mini, referencia, limiar_bloco):
+    """Fração dos blocos da miniatura que diferem da lona vazia (brilho igualado)."""
+    if referencia is None or mini.shape != referencia.shape:
+        return 0.0
+    d = np.abs(normalizar_brilho(mini) - normalizar_brilho(referencia))
+    return float((d > limiar_bloco).mean())
+
+
+# Lona vazia: a referência acompanha mudanças lentas (luz) pela média móvel
+ALFA_REFERENCIA = 0.05
+# Ocupada por mais que isto × travessia_s com o motor ligado: nenhum objeto
+# fica tanto no campo andando; a referência é que ficou errada (câmera mexida,
+# primeiro quadro com objeto) e é refeita pelo quadro atual
+TRAVESSIAS_REFERENCIA_PRESA = 3
+
+
+class OcupacaoLona:
+    """
+    Objeto novo na esteira pela diferença para a lona vazia, sem o YOLO.
+    A referência é o primeiro quadro e depois a média dos quadros vazios. Ela
+    começa provisória (o primeiro quadro pode ter um objeto parado no campo):
+    só dispara depois de o quadro ficar igual a ela por travessia_s com o motor
+    ligado, o que um objeto andando na esteira não faz.
+    """
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.referencia = None
+        self.ocupada = False
+        self.ocupada_desde = None  # só conta com o motor ligado
+        self.vazia_desde = None  # idem
+        self.confirmada = False
+        self.ocupacao = 0.0
+
+    def _refazer(self, mini):
+        self.referencia = mini.copy()
+        self.ocupada, self.ocupada_desde, self.vazia_desde = False, None, None
+        self.confirmada, self.ocupacao = False, 0.0
+
+    def quadro(self, mini, agora, motor_ligado):
+        """Atualiza com a miniatura do quadro; True se um objeto acabou de entrar."""
+        if self.referencia is None or self.referencia.shape != mini.shape:
+            self._refazer(mini)
+            return False
+        self.ocupacao = fracao_ocupada(mini, self.referencia, self.cfg["limiar_bloco"])
+        ocupada = self.ocupacao >= self.cfg["ocupacao_minima"]
+        entrou = ocupada and not self.ocupada and self.confirmada
+        if not ocupada:
+            self.ocupada_desde = None
+            self.referencia = (1 - ALFA_REFERENCIA) * self.referencia + ALFA_REFERENCIA * mini
+            if not motor_ligado:
+                self.vazia_desde = None
+            elif self.vazia_desde is None:
+                self.vazia_desde = agora
+            elif not self.confirmada and agora - self.vazia_desde >= self.cfg["travessia_s"]:
+                self.confirmada = True
+                log.debug("Captura: referência da lona vazia confirmada")
+        else:
+            self.vazia_desde = None
+            if not motor_ligado:
+                self.ocupada_desde = None
+            elif self.ocupada_desde is None:
+                self.ocupada_desde = agora
+            elif agora - self.ocupada_desde > TRAVESSIAS_REFERENCIA_PRESA * self.cfg["travessia_s"]:
+                log.info("Captura: lona ocupada há %.0f s com a esteira andando; referência refeita",
+                         agora - self.ocupada_desde)
+                self._refazer(mini)
+                return False
+        self.ocupada = ocupada
+        return entrou
+
+
+def deve_capturar(agora, ultima_captura, ligado_desde, diferenca, cfg, objeto_pronto=False):
     """
     Decide se o quadro atual é gravado. Tempos em segundos de time.monotonic().
 
@@ -104,11 +190,13 @@ def deve_capturar(agora, ultima_captura, ligado_desde, diferenca, cfg):
     ligado_desde: instante em que o motor ligou (None se desligado ou demo).
     diferenca: diferenca_quadros entre o quadro e o último gravado (None se
     não há último ou não dá para comparar); só pesa com o motor desligado.
+    objeto_pronto: motor ligado, passou atraso_s desde que um objeto entrou
+    na lona e ele ainda está nela; só pesa com o motor ligado.
     """
     if ultima_captura is not None and agora - ultima_captura < cfg["intervalo_s"]:
         return False
     if ligado_desde is not None:
-        return agora - ligado_desde >= cfg["travessia_s"]
+        return objeto_pronto
     return diferenca is None or diferenca >= cfg["diferenca_minima"]
 
 
@@ -162,11 +250,21 @@ class Sessao:
             log.warning("Captura: fila cheia, quadro descartado (%d até agora)", self.descartados)
             return False
 
+    def registrar(self, dados):
+        """
+        Linha do captura.jsonl que não é quadro (câmera reaberta, automática):
+        pela fila, para sair na ordem certa entre os quadros. Espera vaga.
+        """
+        self.fila.put(("linha", dados))
+
     def _laco(self):
         while True:
             item = self.fila.get()
             if item is None:
                 return
+            if isinstance(item[0], str):  # ("linha", dados); quadro é array
+                self._escrever_linha(item[1])
+                continue
             quadro, horario, info = item
             nome = carimbo(horario) + ".jpg"
             try:
@@ -199,6 +297,8 @@ class Capturador:
         # Captura automática (deve_capturar); ligada e desligada pelo Monitor.
         # Desligada, só a manual grava.
         self.automatica = automatica
+        self.lona = OcupacaoLona(self.cfg)
+        self.pendente_em = None  # motor ligado: instante da captura de um objeto que entrou
         self._trava = Lock()  # quadro() roda na thread do YOLO; manual(), na do WebSocket
 
     @property
@@ -214,7 +314,7 @@ class Capturador:
             log.info("Captura automática %s", "ligada" if ativa else "desligada")
             if self.sessao is not None:
                 horario = horario or datetime.now(timezone.utc)
-                self.sessao._escrever_linha({"tipo": "automatica", "ativa": ativa,
+                self.sessao.registrar({"tipo": "automatica", "ativa": ativa,
                                              "horario": horario.astimezone(timezone.utc).isoformat()})
 
     def _abrir_sessao(self, horario):
@@ -236,7 +336,7 @@ class Capturador:
             self.cabecalho["camera"] = relatorio
             return
         horario = horario or datetime.now(timezone.utc)
-        self.sessao._escrever_linha({"tipo": "camera",
+        self.sessao.registrar({"tipo": "camera",
                                      "horario": horario.astimezone(timezone.utc).isoformat(),
                                      "camera": relatorio})
 
@@ -246,21 +346,32 @@ class Capturador:
         o quadro foi para a fila. agora: time.monotonic(); horario: datetime com fuso.
         """
         if not self.automatica:
+            self.pendente_em = None
             return False
-        mini = None
-        diferenca = None
-        if ligado_desde is None:
-            # Esteira parada: a decisão depende do conteúdo
-            mini = miniatura(quadro_bgr)
+        mini = miniatura(quadro_bgr)
+        motor_ligado = ligado_desde is not None
         with self._trava:
-            if mini is not None:
-                diferenca = diferenca_quadros(mini, self.ultima_miniatura)
+            diferenca = None if motor_ligado else diferenca_quadros(mini, self.ultima_miniatura)
+            # A lona é acompanhada com o motor desligado também (referência vazia
+            # atualizada; objeto parado no campo não conta como novo ao ligar)
+            if self.lona.quadro(mini, agora, motor_ligado) and motor_ligado \
+                    and self.pendente_em is None:
+                self.pendente_em = agora + self.cfg["atraso_s"]
+                log.debug("Captura: objeto entrou na lona (%.1f%%)", 100 * self.lona.ocupacao)
+            if not motor_ligado:
+                self.pendente_em = None
+            objeto_pronto = False
+            if self.pendente_em is not None and agora >= self.pendente_em:
+                self.pendente_em = None
+                objeto_pronto = self.lona.ocupada
             if not self.automatica or not deve_capturar(agora, self.ultima_captura, ligado_desde,
-                                                        diferenca, self.cfg):
+                                                        diferenca, self.cfg, objeto_pronto):
                 return False
             return self._gravar(quadro_bgr, agora, horario, mini, {
-                "origem": "automatica", "motor_ligado": ligado_desde is not None,
-                "diferenca": diferenca, **(info or {})})
+                "origem": "automatica", "motor_ligado": motor_ligado,
+                "diferenca": diferenca,
+                "ocupacao": round(self.lona.ocupacao, 4) if motor_ligado else None,
+                **(info or {})})
 
     def manual(self, quadro_bgr, agora, horario, ligado_desde, info=None):
         """

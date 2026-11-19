@@ -18,6 +18,9 @@
     "pasta": "capturas",
     "intervalo_s": 10.0,
     "travessia_s": 5.0,
+    "atraso_s": 1.0,
+    "ocupacao_minima": 0.03,
+    "limiar_bloco": 40.0,
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95
   },

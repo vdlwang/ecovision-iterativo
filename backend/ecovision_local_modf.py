@@ -530,8 +530,8 @@ def iniciar_captura(ativa):
     if not pasta.is_absolute():
         pasta = BACKEND_DIR / pasta
     if automatica:
-        log.info("Captura automática ligada: a cada %.1f s no mínimo (travessia %.1f s), em %s",
-                 cfg['intervalo_s'], cfg['travessia_s'], pasta)
+        log.info("Captura automática ligada: por objeto novo, %.1f s depois de entrar, a cada %.1f s no mínimo, em %s",
+                 cfg["atraso_s"], cfg["intervalo_s"], pasta)
     else:
         log.info("Captura automática desligada (liga pelo Monitor); manual em %s", pasta)
     return Capturador(pasta, cfg, {"camera_index": config['camera_index'],

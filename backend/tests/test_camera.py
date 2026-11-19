@@ -276,7 +276,7 @@ def test_camera_no_captura_jsonl(tmp_path):
     cap.camera_aberta({"fonte": 2, "tipo": "dispositivo", "efetivo": {"largura": 1280}})
     quadro = np.zeros((8, 8, 3), dtype=np.uint8)
     h = datetime(2026, 11, 16, 12, 0, 0, tzinfo=timezone.utc)
-    assert cap.quadro(quadro, 0.0, h, 0.0)
+    assert cap.quadro(quadro, 0.0, h, None)  # motor desligado: o primeiro quadro grava
     cap.camera_aberta({"fonte": 2, "tipo": "dispositivo", "efetivo": {"largura": 640}},
                       horario=h)
     cap.fechar()
