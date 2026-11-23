@@ -1,0 +1,183 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="backend-arquitetura" name="Backend após a refatoração">
+    <mxGraphModel dx="1500" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Arquitetura do backend após a refatoração" style="text;html=1;align=left;verticalAlign=middle;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="520" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Processo -->
+        <mxCell id="proc" value="" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#666666;arcSize=2;" vertex="1" parent="1">
+          <mxGeometry x="300" y="60" width="1000" height="830" as="geometry"/>
+        </mxCell>
+        <mxCell id="procLbl" value="Processo Python: backend/ecovision_local_modf.py" style="text;html=1;align=left;verticalAlign=middle;fontSize=14;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="315" y="65" width="450" height="25" as="geometry"/>
+        </mxCell>
+
+        <!-- Externos, esquerda -->
+        <mxCell id="cam" value="&lt;b&gt;Câmera&lt;/b&gt;&lt;br&gt;Logitech C920 (USB, V4L2)&lt;br&gt;ou URL de stream" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="130" width="190" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="modelo" value="&lt;b&gt;Pesos YOLO&lt;/b&gt;&lt;br&gt;yolo_models/taco/best.pt" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="esp" value="&lt;b&gt;ESP32&lt;/b&gt; (firmware/)&lt;br&gt;servo MG996R + L298N&lt;br&gt;fila de ângulos, 5 s cada" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="470" width="190" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Externos, direita -->
+        <mxCell id="front" value="&lt;b&gt;Frontend React&lt;/b&gt;&lt;br&gt;MonitorPanel, ConfigGatesPanel,&lt;br&gt;ConfigModelPanel&lt;br&gt;(useStableWebSocket)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="130" width="220" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="cfgjson" value="backend/config.json" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="410" width="160" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="disco" value="backend/capturas/&amp;lt;sessão&amp;gt;/&lt;br&gt;JPEG + captura.jsonl" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="580" width="180" height="90" as="geometry"/>
+        </mxCell>
+
+        <!-- Threads -->
+        <mxCell id="tcam" value="&lt;b&gt;Thread camera&lt;/b&gt; (camera.LeitorCamera)&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;• abre o VideoCapture e aplica o bloco camera&lt;br&gt;• lê de volta e registra divergências&lt;br&gt;• guarda só o quadro mais recente&lt;br&gt;• sem quadro por 10 s: reabre&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=6;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="110" width="270" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="tyolo" value="&lt;b&gt;Thread yolo&lt;/b&gt; (laco_yolo)&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;1. model.track(quadro, ByteTrack, conf ≥ 0,1)&lt;br&gt;2. deteccoes_do_quadro: filtro por confidence, material, id da trilha&lt;br&gt;3. DisparosPorTrilha: 1 disparo por objeto que cruza a faixa (roi_y), material votado na trilha&lt;br&gt;4. send_angle(ângulo)&lt;br&gt;5. capturador.quadro(...)&lt;br&gt;6. com cliente: JPEG base64 + detecções → broadcast&lt;br&gt;fps em janelas de 1 s; falha: reabre a câmera a cada 5 s&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=4;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="660" y="110" width="310" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="tmain" value="&lt;b&gt;Thread principal (asyncio)&lt;/b&gt;&lt;br&gt;servidor WebSocket&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;• websocket_handler: comandos de motor e ângulo, config, get_config, save_config, captura_automatica, capturar&lt;br&gt;• broadcast_frame: pula o cliente com envio pendente (envios_pendentes)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=5;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="110" width="240" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="sendline" value="&lt;b&gt;send_line&lt;/b&gt; + serial_lock&lt;br&gt;escrita serial com trava;&lt;br&gt;ninguém espera resposta" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="400" width="270" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="tserial" value="&lt;b&gt;Thread serial&lt;/b&gt; (manter_serial)&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;• abre a porta; ausente ou caída: tenta a cada 5 s (modo demo enquanto isso)&lt;br&gt;• MOTOR ON só na conexão da partida&lt;br&gt;• read_serial_loop: registra toda linha do ESP32&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=6;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="330" y="530" width="270" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="state" value="&lt;b&gt;SystemState&lt;/b&gt; (estado compartilhado)&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;• motor: EstadoMotor (último comando enviado)&lt;br&gt;• serial_port (None = modo demo)&lt;br&gt;• fps, current_detections, ultimo_quadro&lt;br&gt;• processing (servo ocupado), websocket_clients&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=6;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="660" y="410" width="310" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="cfg" value="&lt;b&gt;config&lt;/b&gt;&lt;br&gt;load_config() completa com CONFIG_PADRAO" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="410" width="160" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="tcap" value="&lt;b&gt;Thread captura&lt;/b&gt; (Capturador)&lt;br&gt;&lt;div style=&quot;text-align:left&quot;&gt;• automática: deve_capturar + OcupacaoLona&lt;br&gt;• manual: pedida pelo Monitor&lt;br&gt;• fila de 4 quadros; JPEG 95 com horário UTC no EXIF&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=6;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="560" width="240" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Módulos puros -->
+        <mxCell id="mods" value="" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#82b366;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="330" y="720" width="940" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="modsLbl" value="Módulos sem câmera, serial nem YOLO (testados com pytest em backend/tests)" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#3b6d11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="723" width="560" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="mdet" value="&lt;b&gt;deteccao.py&lt;/b&gt;&lt;br&gt;taco_to_material&lt;br&gt;deteccoes_do_quadro&lt;br&gt;DisparosPorTrilha" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="345" y="755" width="210" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="mmotor" value="&lt;b&gt;motor.py&lt;/b&gt;&lt;br&gt;EstadoMotor&lt;br&gt;(reset do ESP32 → desligado)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="575" y="755" width="210" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcap" value="&lt;b&gt;captura.py&lt;/b&gt;&lt;br&gt;deve_capturar, OcupacaoLona,&lt;br&gt;diferenca_quadros, Sessao" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="805" y="755" width="210" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcamera" value="&lt;b&gt;camera.py&lt;/b&gt;&lt;br&gt;propriedades, conferir,&lt;br&gt;abrir (V4L2 / DSHOW / FFmpeg)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1035" y="755" width="220" height="95" as="geometry"/>
+        </mxCell>
+
+        <!-- Arestas -->
+        <mxCell id="e_cam" value="quadros" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="cam" target="tcam">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_cam_yolo" value="proximo():&lt;br&gt;quadro mais recente" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="tcam" target="tyolo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_modelo" value="YOLO(model_path)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.75;" edge="1" parent="1" source="modelo" target="tyolo">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="630" y="305"/>
+              <mxPoint x="630" y="290"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_yolo_send" value="send_angle&lt;br&gt;(ângulo do material)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0.25;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="1" source="tyolo" target="sendline">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="738" y="375"/>
+              <mxPoint x="533" y="375"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_main_send" value="MOTOR ON/OFF, teste de ângulo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0.125;exitY=1;entryX=0.25;entryY=0;" edge="1" parent="1" source="tmain" target="sendline">
+          <mxGeometry x="0.55" y="-8" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="385"/>
+              <mxPoint x="398" y="385"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_send_esp" value="USB serial 115200&lt;br&gt;MOTOR ON | MOTOR OFF | &amp;lt;ângulo&amp;gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="1" source="sendline" target="esp">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_esp_serial" value="linhas: ESP32 pronto.,&lt;br&gt;ângulo executado, ERR" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=1;exitY=0.8;entryX=0;entryY=0.6;" edge="1" parent="1" source="esp" target="tserial">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_serial_state" value="serial_port;&lt;br&gt;reset → motor desligado" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.8;" edge="1" parent="1" source="tserial" target="state">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_yolo_state" value="fps, detecções,&lt;br&gt;último quadro" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0.6;exitY=1;entryX=0.6;entryY=0;" edge="1" parent="1" source="tyolo" target="state">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_yolo_main" value="call_soon_threadsafe&lt;br&gt;(broadcast_frame)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=1;exitY=0.3;entryX=0;entryY=0.313;" edge="1" parent="1" source="tyolo" target="tmain">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_main_front" value="WebSocket ws://localhost:8765&lt;br&gt;→ quadro + detecções + estado&lt;br&gt;← comandos, configuração, captura" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;startArrow=block;endArrow=block;fontSize=10;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="tmain" target="front">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_main_cfg" value="confidence,&lt;br&gt;save_config" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0.67;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="tmain" target="cfg">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_cfg_json" value="lê / grava" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;startArrow=block;endArrow=block;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="cfg" target="cfgjson">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_yolo_cap" value="capturador.quadro()" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=1;exitY=0.9;entryX=0;entryY=0.6;" edge="1" parent="1" source="tyolo" target="tcap">
+          <mxGeometry x="0.3" y="-30" relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1000" y="326"/>
+              <mxPoint x="1000" y="632"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_main_cap" value="manual /&lt;br&gt;liga-desliga" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=0.125;exitY=1;entryX=0.125;entryY=0;" edge="1" parent="1" source="tmain" target="tcap">
+          <mxGeometry x="0.6" y="-30" relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_cap_disco" value="grava" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;exitX=1;exitY=0.6;entryX=0;entryY=0.5;" edge="1" parent="1" source="tcap" target="disco">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Legenda -->
+        <mxCell id="legLbl" value="Legenda" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="700" width="100" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg1" value="thread" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="725" width="110" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg2" value="laço asyncio" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="725" width="110" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg3" value="estado compartilhado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="755" width="110" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg4" value="captura (T4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="755" width="110" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg5" value="módulo puro" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="785" width="110" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="leg6" value="externo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="785" width="110" height="24" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
