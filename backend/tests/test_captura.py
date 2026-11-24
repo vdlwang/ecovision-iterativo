@@ -11,7 +11,8 @@ from captura import (
     diferenca_quadros, miniatura,
 )
 
-CFG = {**PADROES_CAPTURA, "intervalo_s": 10.0, "travessia_s": 5.0, "diferenca_minima": 10.0}
+CFG = {**PADROES_CAPTURA, "intervalo_s": 10.0, "travessia_s": 5.0, "atraso_s": 1.0,
+       "diferenca_minima": 10.0}
 HORARIO = datetime(2026, 11, 15, 23, 29, 3, 146000, tzinfo=timezone.utc)
 
 

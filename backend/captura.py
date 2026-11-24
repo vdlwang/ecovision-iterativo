@@ -38,13 +38,14 @@ PADROES_CAPTURA = {
     "ativa": False,
     # relativa a backend/, como o model_path
     "pasta": "capturas",
-    # Δ: espaço mínimo entre duas capturas; acima de travessia_s
-    "intervalo_s": 10.0,
-    # tempo de um objeto cruzar o campo da câmera com o motor ligado (medir na esteira)
-    "travessia_s": 5.0,
+    # Δ: espaço mínimo entre duas capturas; acima de travessia_s, com folga
+    "intervalo_s": 4.0,
+    # tempo de um objeto cruzar o campo da câmera com o motor ligado (~3 s
+    # medidos na esteira em 2026-11-24, ~610 px/s num quadro de 1280 px)
+    "travessia_s": 3.0,
     # motor ligado: a captura sai este tempo depois de um objeto entrar na lona
     # (do bordo ao centro do quadro: ~metade de travessia_s)
-    "atraso_s": 1.0,
+    "atraso_s": 1.5,
     # fração da miniatura diferente da lona vazia para haver objeto (lona vazia
     # deu 0-1,8%, com objeto 5,3-96%, na sessão de 2026-11-18)
     "ocupacao_minima": 0.03,
