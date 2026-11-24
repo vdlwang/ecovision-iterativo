@@ -58,7 +58,7 @@ CONJUNTOS = formato.CONJUNTOS
 FRACAO_TESTE = 10  # 1 imagem em cada 10 vai para o teste (decisão 7, revista em 2026-11-15)
 LOTE_VALIDO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*$")
 QUALIDADE_JPEG = 95
-JANELA_S = 10  # Δ: imagens mais próximas que isso vão ao mesmo conjunto (PLANO-CAPTURA.md)
+JANELA_S = 4  # Δ (o intervalo_s padrão da captura): imagens mais próximas que isso vão ao mesmo conjunto (PLANO-CAPTURA.md)
 
 # Tags EXIF do horário (as que o backend grava, backend/captura.py)
 TAG_DATETIME = 0x0132

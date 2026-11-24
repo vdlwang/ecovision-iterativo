@@ -227,14 +227,17 @@ def test_grupo_herda_o_conjunto_das_ja_importadas():
 
 
 def test_importar_confere_a_janela_entre_lotes(tmp_path, capsys):
-    """Os 4 cenários de legado/database: as mesmas cenas, segundos de diferença, em lotes."""
+    """
+    Os 4 cenários de legado/database: as mesmas cenas, 6-7 s de diferença, em
+    lotes; com --janela 10, porque o padrão (4 s, o da captura) não os liga.
+    """
     cenarios = {"0SF": "140322", "0CF": "140329", "45CF": "140335", "45SF": "140342"}
     saida = tmp_path / "saida"
     for i, (lote, hora) in enumerate(cenarios.items()):
         pasta = tmp_path / lote
         foto(pasta, f"20250503_{hora}.jpg")
         foto(pasta, f"20250503_15{i}000.jpg")  # outra cena, longe das demais
-        importar.main([str(pasta), "-o", str(saida), "--lote", lote])
+        importar.main([str(pasta), "-o", str(saida), "--lote", lote, "--janela", "10"])
     estado = formato.ler_estado(saida)
     mesma_cena = {estado[f"{lote}_20250503_{hora}.jpg"]["conjunto"]
                   for lote, hora in cenarios.items()}

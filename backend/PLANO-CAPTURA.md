@@ -187,7 +187,7 @@ Critério: **nenhuma imagem acusada**, com `--janela` igual ao `intervalo_s`. O 
 | # | Questão | Decisão |
 |---|---|---|
 | 1 | Reset do ESP32: reenviar o último estado do motor ou marcá-lo desligado? | **Marcar desligado.** O ESP32 volta com o motor parado; a esteira não religa sozinha, e o operador a liga pela UI. |
-| 2 | Δ antes de medir a travessia? | **10 s**, no `config.json` e no `--janela`; ajustado na esteira (etapa 7). |
+| 2 | Δ antes de medir a travessia? | **10 s**, no `config.json` e no `--janela`; ajustado na esteira (etapa 7). Medida a travessia (~3 s, 2026-11-24), Δ passou a 4 s nos dois. |
 | 3 | ~~Resolução e exposição agora?~~ | ~~**Depois** da primeira ida à esteira (etapa 6).~~ **Revista (2026-11-16)**: o código antes da ida (6a), a escolha dos valores no começo dela (6b), antes de qualquer captura. Assim todas as sessões saem na mesma condição de câmera, e não sobra um lote com a exposição automática para decidir se entra na base. |
 
 ## Verificação geral
