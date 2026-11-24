@@ -90,8 +90,14 @@ export function MonitorPanel() {
           if (ctx) {
             const img = new Image();
             img.onload = () => {
-              canvas.width = img.width;
-              canvas.height = img.height;
+              // Redimensionar só quando o tamanho muda: atribuir width/height
+              // recria o buffer do canvas; feito a cada quadro, é suspeito de
+              // esgotar a memória (shmem do i915) em sessões longas. O JPEG
+              // cobre o canvas todo, então não é preciso limpá-lo antes
+              if (canvas.width !== img.width || canvas.height !== img.height) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+              }
               ctx.drawImage(img, 0, 0);
 
               // Desenhar bounding boxes (o backend envia o quadro sem elas)

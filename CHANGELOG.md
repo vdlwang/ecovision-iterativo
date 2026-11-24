@@ -36,6 +36,7 @@ O que mudou em relação à versão final do TCC, marcada pela tag `tese-final` 
 - **Backend offline:** "Salvar" desabilitado (`026269d`); as páginas de configuração ficam bloqueadas, e os botões da esteira exigem serial (`5b24934`).
 - **"Testar Conexão Serial"** devolve o motor ao estado em que estava (antes, sempre terminava em `MOTOR OFF`, parando a esteira que estava andando) e exige a serial ativa (`9e83f65`).
 - **Badge de conexão ao trocar de painel:** um painel aberto com o socket já conectado mostrava "Backend Offline" (e bloqueava "Salvar") até o backend reconectar; o estado agora vem do socket compartilhado ao montar, e os listeners do socket não ficam mais órfãos ao sair do painel (`4052b4e`).
+- **Canvas do Monitor** só é redimensionado quando o tamanho do quadro muda; antes, `width`/`height` eram reatribuídos a cada quadro, recriando o buffer do canvas umas 15 vezes por segundo. Suspeito (não confirmado) de dois travamentos do computador por falta de memória em 2026-11-24, com 8,2 GB de shmem sem dono no relatório do OOM, possivelmente buffers do i915 do Firefox.
 
 ### Firmware
 
