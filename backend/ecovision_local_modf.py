@@ -98,6 +98,14 @@ def load_config():
 
 config = load_config()
 
+# O handler do WebSocket (Salvar) e a thread da câmera (foco) gravam o arquivo
+config_lock = Lock()
+
+def salvar_config():
+    """Grava a configuração em memória no config.json."""
+    with config_lock, open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
+
 # ==== Estado Global ====
 class SystemState:
     def __init__(self):
@@ -113,6 +121,8 @@ class SystemState:
         # Último quadro da câmera e as detecções dele, para a captura manual
         # (o handler do WebSocket roda noutra thread; a tupla é trocada inteira)
         self.ultimo_quadro = None
+        # Câmera aberta agora (LeitorCamera), para o ajuste de foco pelo Monitor
+        self.leitor = None
 
 state = SystemState()
 SERVER_LOOP: asyncio.AbstractEventLoop | None = None
@@ -207,6 +217,10 @@ async def websocket_handler(websocket):
                 elif data.get('type') == 'capturar':
                     await websocket.send(json.dumps(capturar_manual()))
 
+                # Foco da câmera: automático, travado onde está ou manual
+                elif data.get('type') == 'foco':
+                    pedir_foco(data.get('modo'), data.get('valor'))
+
                 # Atualização de configuração
                 elif data.get('type') == 'config':
                     if 'confidence' in data:
@@ -221,8 +235,7 @@ async def websocket_handler(websocket):
                 elif data.get('type') == 'save_config':
                     config.update({k: v for k, v in data.items() if k != 'type'})
                     config.pop('type', None)  # chave gravada por versões anteriores
-                    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, indent=2)
+                    salvar_config()
                     log.info("Configuração salva em config.json")
                 
             except Exception as e:
@@ -234,6 +247,30 @@ async def websocket_handler(websocket):
         state.websocket_clients.discard(websocket)
         envios_pendentes.pop(websocket, None)
         log.info("Cliente WebSocket desconectado. Total: %d", len(state.websocket_clients))
+
+def pedir_foco(modo, valor):
+    """Repassa o ajuste de foco do Monitor à câmera aberta (aplicado na thread dela)."""
+    leitor = state.leitor
+    if leitor is None:
+        log.warning("Foco: nenhuma câmera aberta")
+        return
+    try:
+        valor = None if valor is None else float(valor)
+        if not leitor.pedir_foco(modo, valor):
+            log.warning("Foco: a fonte %s não tem controle de foco", config['camera_index'])
+    except (TypeError, ValueError) as e:
+        log.warning("Foco: pedido inválido (%s)", e)
+
+def foco_mudou(estado):
+    """
+    Foco aplicado (thread da câmera): vai ao config.json, para valer na
+    próxima abertura da câmera e na próxima execução. Travado, grava a
+    posição em que o autofoco deixou a lente.
+    """
+    if 'erro' in estado:
+        return
+    config['camera']['foco'] = None if estado['auto'] else estado['valor']
+    salvar_config()
 
 # Captura manual: o último quadro só vale se a câmera o entregou há pouco
 QUADRO_MANUAL_MAX_S = 2.0
@@ -351,13 +388,15 @@ def process_yolo_stream():
 def run_yolo_stream(model):
     """Roda o YOLO sobre a câmera até a leitura terminar ou falhar"""
     log.info("Abrindo câmera: %s", config['camera_index'])
-    leitor = LeitorCamera(config['camera_index'], config['camera'])
+    leitor = LeitorCamera(config['camera_index'], config['camera'], ao_mudar_foco=foco_mudou)
     log.info(descrever(leitor.relatorio))
     if capturador is not None:
         capturador.camera_aberta(leitor.relatorio)
+    state.leitor = leitor
     try:
         laco_yolo(model, leitor)
     finally:
+        state.leitor = None
         leitor.fechar()
 
 def laco_yolo(model, leitor):
@@ -462,6 +501,8 @@ def laco_yolo(model, leitor):
             # Captura (T4): automática ligada? e quadros gravados nesta execução
             'captura_automatica': capturador.automatica if capturador else False,
             'capturas_gravadas': capturador.gravados if capturador else 0,
+            # Foco da câmera {auto, valor}; None se a fonte não tem (vídeo, URL)
+            'foco': leitor.foco,
         }
         
         # Envia para WebSocket (asyncio)

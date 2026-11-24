@@ -86,13 +86,14 @@ O backend abre a câmera (`camera.py`) e aplica o bloco `camera` do `config.json
 | `fps` | `null` | Taxa pedida |
 | `exposicao` | `null` | `null` = automática; número = manual, na unidade do driver (V4L2: `exposure_time_absolute`; a DV20 aceita 80 a 100000, em ~2 µs e não nos 100 µs da especificação: 60000 ≈ 120 ms já derruba o fps para 8; escolha pela varredura) |
 | `temperatura_cor` | `null` | `null` = balanço de branco automático; em kelvin = manual. A DV20 não tem o automático, e o manual é aceito e lido de volta mas não muda a imagem (3500 a 6500 dão o mesmo quadro) |
-| `foco` | `null` | `null` = autofoco; número = foco manual fixo (a DV20 não tem foco) |
+| `foco` | `null` | `null` = autofoco; número = foco manual fixo (a DV20 não tem foco; na C920, 0 a 250). Também ajustável ao vivo pelo Monitor (abaixo, "Foco pelo Monitor") |
 | `ganho` | `null` | Ganho manual; `null` = não mexer. Na DV20, aceito e lido de volta, mas sem efeito na imagem |
 | `brilho`, `contraste`, `saturacao`, `nitidez`, `gama` | `null` | Controles de imagem, na unidade do driver; `null` = não mexer. Na DV20, use-os: ela liga com valores internos que dão uma imagem azulada, enquanto o driver informa 0 (e 0 posto de verdade deixa a imagem preta). Escolhidos em 2026-11-16: 0, 256, 384, 128, 20 |
 | `imgsz` | `640` | Tamanho de entrada passado ao YOLO (o `best.pt` treinou com 640) |
 
 - **Automáticos postos de forma explícita**: `null` em `exposicao`, `temperatura_cor` e `foco` religa o automático a cada abertura. No Linux, o driver guarda o último valor que qualquer programa pôs (o `ajustar_camera.py`, o `v4l2-ctl`) até a câmera ser desconectada. Uma câmera sem o controle automático só fica sem ele, sem aviso.
 - **Conferência**: depois de aplicar, o backend lê cada valor de volta. Uma divergência (a câmera ignora ou arredonda: pedir 1366×768 e receber 1280×720) sai em WARNING e vai ao `captura.jsonl`, sem derrubar o backend. O log de INFO da abertura diz a resolução, o formato e o fps efetivos.
+- **Foco pelo Monitor**: o card "Foco da Câmera" liga o autofoco, trava o foco onde o autofoco deixou a lente ou o põe à mão (slider). O pedido é aplicado pela thread `camera` entre duas leituras (só ela mexe na captura), e o resultado vai ao `config.json` (`camera.foco`: a posição, ou `null` com o autofoco), para valer na próxima abertura da câmera. Na C920, desligar o autofoco deixa a lente parada, e o valor lido de volta passa a ser a posição dela (com o autofoco ligado, o driver diz 0). Só para câmera local; vídeo e URL não têm foco.
 - **Leitura**: uma thread (`camera`) lê sem parar e guarda só o quadro mais recente, e o YOLO pega o último a cada volta. Sem quadro novo por 10 s (`ESPERA_QUADRO_S`), ou no fim de um vídeo, a câmera é reaberta depois de 5 s, com o bloco reaplicado.
 - **Vídeo e URL**: um arquivo de vídeo como `camera_index` é lido no ritmo do seu fps, como uma câmera, e termina no fim; a uma URL de stream nada se aplica (o backend avisa se o bloco estiver preenchido).
 - **Sistema**: testado no Linux (V4L2, Fedora 43, na máquina da esteira). No Windows, abre com DSHOW, e a tradução (`AUTO_EXPOSURE` 0,25/0,75, exposição em log2 de segundos) segue a documentação do OpenCV, **sem teste**.
@@ -156,10 +157,11 @@ Do frontend para o backend:
 | `{"type": "save_config", ...}` | Mescla os campos no `config.json` e salva (a chave `type` não é gravada) |
 | `{"type": "captura_automatica", "ativa": true\|false}` | Liga ou desliga a captura automática (em memória) |
 | `{"type": "capturar"}` | Grava o quadro mais recente (captura manual) |
+| `{"type": "foco", "modo": "auto"\|"travar"\|"manual", "valor": <n>}` | Foco da câmera: autofoco, travado na posição atual, ou manual em `valor`; gravado em `camera.foco` no `config.json` |
 
 Do backend para o frontend:
 
-- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox", "id"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas). Também `captura_automatica` (se a captura automática está ligada) e `capturas_gravadas` (quadros gravados nesta execução, automáticos e manuais).
+- Um por quadro: `{"frame": <jpeg base64, sem as caixas>, "detections": [{"class", "material", "confidence", "bbox", "id"}], "fps", "motor_running", "serial_port"}`. `serial_port` é `null` em modo demonstração. `motor_running` é o último comando de motor que de fato saiu pela serial: começa `false`, não muda em modo demonstração e volta a `false` quando o ESP32 reinicia (o backend lê `ESP32 pronto.`). Quem quiser as caixas desenha a partir de `detections` (o Monitor faz isso no canvas). Também `captura_automatica` (se a captura automática está ligada) e `capturas_gravadas` (quadros gravados nesta execução, automáticos e manuais), e `foco`: `{"auto", "valor"}` lido da câmera (`valor` `null` com o autofoco), ou `null` se a fonte não tem foco (vídeo, URL).
 - Resposta a `get_config`, só para quem pediu: `{"type": "config", ...campos do config.json}`.
 - Resposta a `capturar`, só para quem pediu: `{"type": "captura_manual", "ok", "arquivo", "erro"}` (`erro`: sem quadro recente da câmera, ou fila de gravação cheia).
 

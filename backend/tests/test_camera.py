@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 import camera
-from camera import (LeitorCamera, abrir, conferir, fourcc_texto, propriedades,
-                    tipo_fonte)
+from camera import (LeitorCamera, abrir, aplicar_foco, conferir, fourcc_texto,
+                    ler_foco, propriedades, tipo_fonte)
 from captura import Capturador
 
 
@@ -267,6 +267,68 @@ def test_leitor_reaplica_ao_reabrir():
     for _ in range(2):
         LeitorCamera(0, {"largura": 1280}, ab, plataforma="linux").fechar()
     assert all((cv2.CAP_PROP_FRAME_WIDTH, 1280) in c.sets for c in ab.criadas)
+
+
+# ---- foco ao vivo ----
+
+def test_ler_foco_com_autofoco_nao_da_valor():
+    cap = CameraFalsa()
+    cap.valores[cv2.CAP_PROP_AUTOFOCUS] = 1
+    assert ler_foco(cap) == {"auto": True, "valor": None}
+
+
+def test_travar_desliga_o_autofoco_sem_mexer_na_lente():
+    cap = CameraFalsa()
+    cap.valores[cv2.CAP_PROP_AUTOFOCUS] = 1
+    cap.valores[cv2.CAP_PROP_FOCUS] = 34  # onde o autofoco deixou
+    assert aplicar_foco(cap, "travar") == {"auto": False, "valor": 34}
+    assert cap.sets == [(cv2.CAP_PROP_AUTOFOCUS, 0)]
+
+
+def test_manual_desliga_o_autofoco_antes_do_valor():
+    cap = CameraFalsa()
+    assert aplicar_foco(cap, "manual", 120) == {"auto": False, "valor": 120}
+    assert cap.sets == [(cv2.CAP_PROP_AUTOFOCUS, 0), (cv2.CAP_PROP_FOCUS, 120)]
+
+
+def test_auto_e_recusa():
+    cap = CameraFalsa()
+    assert aplicar_foco(cap, "auto") == {"auto": True, "valor": None}
+    sem = CameraFalsa(sem=[cv2.CAP_PROP_AUTOFOCUS, cv2.CAP_PROP_FOCUS])
+    assert "erro" in aplicar_foco(sem, "manual", 50)
+
+
+def test_leitor_aplica_o_foco_na_thread_da_camera():
+    import threading
+    mudou = threading.Event()
+    recebidos = []
+
+    class Lenta(CameraFalsa):
+        def read(self):
+            time.sleep(0.01)
+            return True, np.zeros((4, 4, 3), dtype=np.uint8)
+
+    def ao_mudar(estado):
+        recebidos.append((estado, threading.current_thread().name))
+        mudou.set()
+
+    leitor = LeitorCamera(0, {}, lambda f, b: Lenta(f, b), plataforma="linux",
+                          ao_mudar_foco=ao_mudar)
+    assert leitor.foco == {"auto": True, "valor": None}  # padrão: autofoco
+    assert leitor.pedir_foco("manual", 80.0)
+    assert mudou.wait(2)
+    leitor.fechar()
+    assert recebidos == [({"auto": False, "valor": 80.0}, "camera")]
+    assert leitor.foco == {"auto": False, "valor": 80.0}
+
+
+def test_leitor_de_url_nao_tem_foco():
+    leitor = LeitorCamera("http://x/video", {}, abridor(quadros=1), plataforma="linux")
+    assert leitor.foco is None
+    assert leitor.pedir_foco("auto") is False
+    with pytest.raises(ValueError):
+        leitor.pedir_foco("manual")
+    leitor.fechar()
 
 
 # ---- registro na captura ----

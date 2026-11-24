@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Play, Pause, Camera } from 'lucide-react';
+import { Slider } from './ui/slider';
+import { Play, Pause, Camera, Lock, ScanEye } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
 import { BadgeBackend } from './BadgeBackend';
@@ -26,7 +27,21 @@ interface FrameData {
   // Captura para a anotação (T4)
   captura_automatica?: boolean;
   capturas_gravadas?: number;
+  // Foco da câmera; null se a fonte não tem (vídeo, URL)
+  foco?: Foco | null;
 }
+
+// valor: posição da lente com o foco manual; null com o autofoco
+interface Foco {
+  auto: boolean;
+  valor: number | null;
+}
+
+// Faixa do focus_absolute da C920 (v4l2-ctl --list-ctrls); outra câmera pode ter outra
+const FOCO_MIN = 0;
+const FOCO_MAX = 250;
+// Arrastando o slider, no máximo um pedido a cada tanto (cada um grava o config.json)
+const FOCO_INTERVALO_MS = 150;
 
 // Resposta do backend ao botão "Capturar agora"
 interface CapturaManual {
@@ -43,6 +58,11 @@ export function MonitorPanel() {
   const [serialPort, setSerialPort] = useState<string | null>(null);
   const [capturaAutomatica, setCapturaAutomatica] = useState(false);
   const [capturasGravadas, setCapturasGravadas] = useState(0);
+  const [foco, setFoco] = useState<Foco | null>(null);
+  // Posição do slider; segue o backend, menos enquanto é arrastado
+  const [focoSlider, setFocoSlider] = useState(FOCO_MIN);
+  const arrastandoFoco = useRef(false);
+  const ultimoEnvioFoco = useRef(0);
   // Câmera e YOLO contam como ativos se chegou frame nos últimos 3 s
   const [ultimoFrame, setUltimoFrame] = useState(0);
   const [agora, setAgora] = useState(Date.now());
@@ -104,6 +124,8 @@ export function MonitorPanel() {
         setSerialPort(data.serial_port ?? null);
         setCapturaAutomatica(data.captura_automatica ?? false);
         setCapturasGravadas(data.capturas_gravadas ?? 0);
+        setFoco(data.foco ?? null);
+        if (data.foco?.valor != null && !arrastandoFoco.current) setFocoSlider(data.foco.valor);
         if (data.frame) setUltimoFrame(Date.now());
       } catch (error) {
         // Silencioso
@@ -117,6 +139,11 @@ export function MonitorPanel() {
 
   const sendCommand = (command: string) => {
     send({ command });
+  };
+
+  const semFoco = !recebendoFrames || !foco;
+  const pedirFoco = (modo: 'auto' | 'travar' | 'manual', valor?: number) => {
+    send({ type: 'foco', modo, ...(valor !== undefined ? { valor } : {}) });
   };
 
   // Ícone pelo material que o backend já mapeou (taco_to_material)
@@ -289,6 +316,69 @@ export function MonitorPanel() {
               <p className="text-neutral-500 text-xs">
                 {capturasGravadas} {capturasGravadas === 1 ? 'quadro gravado' : 'quadros gravados'} nesta execução do backend
               </p>
+            </div>
+          </Card>
+
+          <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
+            <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Foco da Câmera</h3>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 md:p-4 bg-neutral-800 rounded-lg">
+                <span className="text-neutral-300 text-sm md:text-base">Foco</span>
+                <Badge className={!foco ? 'bg-neutral-600' : foco.auto ? 'bg-blue-600' : 'bg-green-600'}>
+                  {!foco ? 'N/A' : foco.auto ? 'Automático' : `Fixo em ${Math.round(foco.valor ?? 0)}`}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:gap-3">
+                <Button
+                  onClick={() => pedirFoco('travar')}
+                  disabled={semFoco || !foco?.auto}
+                  className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
+                >
+                  <Lock className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Travar
+                </Button>
+                <Button
+                  onClick={() => pedirFoco('auto')}
+                  disabled={semFoco || foco?.auto}
+                  variant="outline"
+                  className="bg-neutral-800 border-neutral-700 text-white hover:bg-neutral-700 text-sm md:text-base"
+                >
+                  <ScanEye className="w-3 h-3 md:w-4 md:h-4 mr-2" />
+                  Automático
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-neutral-400">
+                  <span>Ajuste manual</span>
+                  <span>{Math.round(focoSlider)}</span>
+                </div>
+                <Slider
+                  min={FOCO_MIN}
+                  max={FOCO_MAX}
+                  step={1}
+                  value={[focoSlider]}
+                  disabled={semFoco}
+                  onValueChange={([v]) => {
+                    arrastandoFoco.current = true;
+                    setFocoSlider(v);
+                    const agoraMs = Date.now();
+                    if (agoraMs - ultimoEnvioFoco.current >= FOCO_INTERVALO_MS) {
+                      ultimoEnvioFoco.current = agoraMs;
+                      pedirFoco('manual', v);
+                    }
+                  }}
+                  onValueCommit={([v]) => {
+                    arrastandoFoco.current = false;
+                    pedirFoco('manual', v);
+                  }}
+                />
+                <p className="text-neutral-500 text-xs">
+                  Travar fixa a lente onde o autofoco a deixou; mexer no slider passa para o manual. Fica gravado no config.json.
+                </p>
+              </div>
             </div>
           </Card>
 

@@ -75,6 +75,9 @@ TOLERANCIA = 0.5
 # Sem quadro novo por este tempo, a leitura é dada como falha (reabre)
 ESPERA_QUADRO_S = 10.0
 
+# Foco ajustado ao vivo pelo Monitor (aplicar_foco)
+MODOS_FOCO = ("auto", "travar", "manual")
+
 
 def completar_config(cfg):
     """Bloco camera com as chaves que faltam preenchidas pelos padrões."""
@@ -270,6 +273,38 @@ def abrir(fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None):
     return cap, relatorio
 
 
+def ler_foco(cap):
+    """
+    {"auto", "valor"} lidos da câmera; valor None com o autofoco ligado (o
+    driver V4L2 da C920 dá 0, e não a posição da lente, enquanto ele age).
+    """
+    auto = cap.get(cv2.CAP_PROP_AUTOFOCUS) >= 0.5
+    valor = None if auto else cap.get(cv2.CAP_PROP_FOCUS)
+    return {"auto": auto, "valor": valor}
+
+
+def aplicar_foco(cap, modo, valor=None):
+    """
+    Muda o foco de uma câmera aberta e devolve o lido de volta (ler_foco),
+    com "erro" se a câmera recusou. "auto" liga o autofoco; "travar" o
+    desliga e deixa a lente onde ele a pôs (na C920 o valor lido passa a ser
+    essa posição); "manual" o desliga e põe `valor`.
+    """
+    desliga, liga = AUTO_LIGA_DESLIGA
+    if modo == "auto":
+        ok = cap.set(cv2.CAP_PROP_AUTOFOCUS, liga)
+    elif modo == "travar":
+        ok = cap.set(cv2.CAP_PROP_AUTOFOCUS, desliga)
+    elif modo == "manual":
+        ok = cap.set(cv2.CAP_PROP_AUTOFOCUS, desliga) and cap.set(cv2.CAP_PROP_FOCUS, valor)
+    else:
+        raise ValueError(f"modo de foco desconhecido: {modo!r}")
+    estado = ler_foco(cap)
+    if not ok:
+        estado["erro"] = "a câmera recusou o ajuste de foco"
+    return estado
+
+
 def descrever(relatorio):
     """Linha de log da abertura: resolução, formato e fps efetivos."""
     e = relatorio["efetivo"]
@@ -286,8 +321,15 @@ class LeitorCamera:
     lido no ritmo do seu fps, como se fosse uma câmera, e termina no fim.
     """
 
-    def __init__(self, fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None):
+    def __init__(self, fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None,
+                 ao_mudar_foco=None):
         self.cap, self.relatorio = abrir(fonte, cfg, abrir_captura, plataforma)
+        # Foco: só em dispositivo local (vídeo e URL não têm controles). O
+        # pedido do Monitor é aplicado pela thread da câmera entre dois read(),
+        # porque só ela mexe na captura; ao_mudar_foco recebe o lido de volta
+        self.foco = ler_foco(self.cap) if self.relatorio["tipo"] == "dispositivo" else None
+        self._pedido_foco = None
+        self._ao_mudar_foco = ao_mudar_foco
         self._cond = Condition()
         self._quadro = None
         self._numero = 0
@@ -304,6 +346,7 @@ class LeitorCamera:
         proximo = time.monotonic()
         try:
             while self._ativo:
+                self._aplicar_pedido_foco()
                 ok, quadro = self.cap.read()
                 if not ok:
                     break
@@ -324,6 +367,44 @@ class LeitorCamera:
             with self._cond:
                 self._ativo = False
                 self._cond.notify_all()
+
+    def pedir_foco(self, modo, valor=None):
+        """
+        Pede um ajuste de foco (aplicar_foco), feito antes do próximo read().
+        Um pedido ainda não aplicado é trocado pelo novo (slider arrastado).
+        False se a fonte não tem foco (vídeo, URL).
+        """
+        if modo not in MODOS_FOCO:
+            raise ValueError(f"modo de foco desconhecido: {modo!r}")
+        if modo == "manual" and valor is None:
+            raise ValueError("foco manual sem valor")
+        if self.foco is None:
+            return False
+        with self._cond:
+            self._pedido_foco = (modo, valor)
+        return True
+
+    def _aplicar_pedido_foco(self):
+        with self._cond:
+            pedido, self._pedido_foco = self._pedido_foco, None
+        if pedido is None:
+            return
+        try:
+            estado = aplicar_foco(self.cap, *pedido)
+        except Exception:
+            log.exception("Câmera: falha ao ajustar o foco")
+            return
+        self.foco = {k: v for k, v in estado.items() if k != "erro"}
+        if "erro" in estado:
+            log.warning("Câmera: foco %s recusado; lido %s", pedido, self.foco)
+        else:
+            log.info("Câmera: foco %s", "automático" if self.foco["auto"]
+                     else f"manual em {self.foco['valor']:.0f}")
+        if self._ao_mudar_foco is not None:
+            try:
+                self._ao_mudar_foco(estado)
+            except Exception:
+                log.exception("Câmera: falha ao registrar o foco")
 
     def proximo(self, espera=ESPERA_QUADRO_S):
         """
