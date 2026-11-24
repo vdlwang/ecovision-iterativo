@@ -75,8 +75,8 @@ TOLERANCIA = 0.5
 # Sem quadro novo por este tempo, a leitura é dada como falha (reabre)
 ESPERA_QUADRO_S = 10.0
 
-# Foco ajustado ao vivo pelo Monitor (aplicar_foco)
-MODOS_FOCO = ("auto", "travar", "manual")
+# Foco e exposição ajustados ao vivo pelo Monitor (aplicar_foco, aplicar_exposicao)
+MODOS_AJUSTE = ("auto", "travar", "manual")
 
 
 def completar_config(cfg):
@@ -305,6 +305,54 @@ def aplicar_foco(cap, modo, valor=None):
     return estado
 
 
+def exposicao_automatica(lido, backend):
+    """O valor lido de CAP_PROP_AUTO_EXPOSURE é o do automático? (o mais próximo)"""
+    manual, automatico = AUTO_EXPOSICAO[backend]
+    return abs(lido - automatico) < abs(lido - manual)
+
+
+def ler_exposicao(cap, backend):
+    """
+    {"auto", "valor", "ganho"} lidos da câmera; valor None com a exposição
+    automática. O ganho vem sempre: com a exposição automática, a câmera
+    mexe nele também (a C920 o sobe com pouca luz).
+    """
+    auto = exposicao_automatica(cap.get(cv2.CAP_PROP_AUTO_EXPOSURE), backend)
+    valor = None if auto else cap.get(cv2.CAP_PROP_EXPOSURE)
+    return {"auto": auto, "valor": valor, "ganho": cap.get(cv2.CAP_PROP_GAIN)}
+
+
+def aplicar_exposicao(cap, backend, modo, valor=None):
+    """
+    Muda a exposição de uma câmera aberta e devolve o lido de volta
+    (ler_exposicao), com "erro" se a câmera recusou. "auto" liga a exposição
+    automática; "travar" a desliga com a exposição e o ganho em que ela
+    estava; "manual" a desliga e põe `valor`, mantendo o ganho.
+
+    O ganho é lido antes e reposto depois de desligar o automático: a C920,
+    no manual, volta sozinha ao último ganho posto à mão (0, se nunca), e a
+    imagem escurecia (medido: brilho médio 108 com o automático, 39 travada
+    sem repor o ganho, 108 com ele reposto).
+    """
+    manual, automatico = AUTO_EXPOSICAO[backend]
+    if modo == "auto":
+        ok = cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, automatico)
+    elif modo in ("travar", "manual"):
+        if modo == "travar":
+            valor = cap.get(cv2.CAP_PROP_EXPOSURE)
+        ganho = cap.get(cv2.CAP_PROP_GAIN)
+        ok = cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, manual)
+        ok = ok and cap.set(cv2.CAP_PROP_EXPOSURE, valor)
+        # Câmera sem ganho (set recusado) não é erro de exposição
+        cap.set(cv2.CAP_PROP_GAIN, ganho)
+    else:
+        raise ValueError(f"modo de exposição desconhecido: {modo!r}")
+    estado = ler_exposicao(cap, backend)
+    if not ok:
+        estado["erro"] = "a câmera recusou o ajuste de exposição"
+    return estado
+
+
 def descrever(relatorio):
     """Linha de log da abertura: resolução, formato e fps efetivos."""
     e = relatorio["efetivo"]
@@ -322,14 +370,22 @@ class LeitorCamera:
     """
 
     def __init__(self, fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None,
-                 ao_mudar_foco=None):
+                 ao_mudar=None):
         self.cap, self.relatorio = abrir(fonte, cfg, abrir_captura, plataforma)
-        # Foco: só em dispositivo local (vídeo e URL não têm controles). O
-        # pedido do Monitor é aplicado pela thread da câmera entre dois read(),
-        # porque só ela mexe na captura; ao_mudar_foco recebe o lido de volta
-        self.foco = ler_foco(self.cap) if self.relatorio["tipo"] == "dispositivo" else None
-        self._pedido_foco = None
-        self._ao_mudar_foco = ao_mudar_foco
+        # Foco e exposição: só em dispositivo local (vídeo e URL não têm
+        # controles). O pedido do Monitor é aplicado pela thread da câmera
+        # entre dois read(), porque só ela mexe na captura; ao_mudar recebe
+        # (controle, lido de volta)
+        backend = self.relatorio["backend"]
+        local = self.relatorio["tipo"] == "dispositivo"
+        self.foco = ler_foco(self.cap) if local else None
+        self.exposicao = ler_exposicao(self.cap, backend) if local and backend else None
+        self._ajustes = {
+            "foco": aplicar_foco,
+            "exposicao": lambda cap, modo, valor=None: aplicar_exposicao(cap, backend, modo, valor),
+        }
+        self._pedidos = {}
+        self._ao_mudar = ao_mudar
         self._cond = Condition()
         self._quadro = None
         self._numero = 0
@@ -346,7 +402,7 @@ class LeitorCamera:
         proximo = time.monotonic()
         try:
             while self._ativo:
-                self._aplicar_pedido_foco()
+                self._aplicar_pedidos()
                 ok, quadro = self.cap.read()
                 if not ok:
                     break
@@ -368,43 +424,52 @@ class LeitorCamera:
                 self._ativo = False
                 self._cond.notify_all()
 
-    def pedir_foco(self, modo, valor=None):
+    def pedir(self, controle, modo, valor=None):
         """
-        Pede um ajuste de foco (aplicar_foco), feito antes do próximo read().
-        Um pedido ainda não aplicado é trocado pelo novo (slider arrastado).
-        False se a fonte não tem foco (vídeo, URL).
+        Pede um ajuste de `controle` ("foco" ou "exposicao"; aplicar_foco,
+        aplicar_exposicao), feito antes do próximo read(). Um pedido ainda
+        não aplicado do mesmo controle é trocado pelo novo (slider
+        arrastado). False se a fonte não tem o controle (vídeo, URL).
         """
-        if modo not in MODOS_FOCO:
-            raise ValueError(f"modo de foco desconhecido: {modo!r}")
+        if controle not in self._ajustes:
+            raise ValueError(f"controle desconhecido: {controle!r}")
+        if modo not in MODOS_AJUSTE:
+            raise ValueError(f"modo desconhecido: {modo!r}")
         if modo == "manual" and valor is None:
-            raise ValueError("foco manual sem valor")
-        if self.foco is None:
+            raise ValueError(f"{controle} manual sem valor")
+        if getattr(self, controle) is None:
             return False
         with self._cond:
-            self._pedido_foco = (modo, valor)
+            self._pedidos[controle] = (modo, valor)
         return True
 
-    def _aplicar_pedido_foco(self):
+    def pedir_foco(self, modo, valor=None):
+        return self.pedir("foco", modo, valor)
+
+    def pedir_exposicao(self, modo, valor=None):
+        return self.pedir("exposicao", modo, valor)
+
+    def _aplicar_pedidos(self):
         with self._cond:
-            pedido, self._pedido_foco = self._pedido_foco, None
-        if pedido is None:
-            return
-        try:
-            estado = aplicar_foco(self.cap, *pedido)
-        except Exception:
-            log.exception("Câmera: falha ao ajustar o foco")
-            return
-        self.foco = {k: v for k, v in estado.items() if k != "erro"}
-        if "erro" in estado:
-            log.warning("Câmera: foco %s recusado; lido %s", pedido, self.foco)
-        else:
-            log.info("Câmera: foco %s", "automático" if self.foco["auto"]
-                     else f"manual em {self.foco['valor']:.0f}")
-        if self._ao_mudar_foco is not None:
+            pedidos, self._pedidos = self._pedidos, {}
+        for controle, pedido in pedidos.items():
             try:
-                self._ao_mudar_foco(estado)
+                estado = self._ajustes[controle](self.cap, *pedido)
             except Exception:
-                log.exception("Câmera: falha ao registrar o foco")
+                log.exception("Câmera: falha ao ajustar %s", controle)
+                continue
+            lido = {k: v for k, v in estado.items() if k != "erro"}
+            setattr(self, controle, lido)
+            if "erro" in estado:
+                log.warning("Câmera: %s %s recusado; lido %s", controle, pedido, lido)
+            else:
+                log.info("Câmera: %s %s", controle, "automático" if lido["auto"]
+                         else f"manual em {lido['valor']:.0f}")
+            if self._ao_mudar is not None:
+                try:
+                    self._ao_mudar(controle, estado)
+                except Exception:
+                    log.exception("Câmera: falha ao registrar %s", controle)
 
     def proximo(self, espera=ESPERA_QUADRO_S):
         """

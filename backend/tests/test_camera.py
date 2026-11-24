@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 import camera
-from camera import (LeitorCamera, abrir, aplicar_foco, conferir, fourcc_texto,
-                    ler_foco, propriedades, tipo_fonte)
+from camera import (LeitorCamera, abrir, aplicar_exposicao, aplicar_foco, conferir,
+                    fourcc_texto, ler_exposicao, ler_foco, propriedades, tipo_fonte)
 from captura import Capturador
 
 
@@ -308,27 +308,97 @@ def test_leitor_aplica_o_foco_na_thread_da_camera():
             time.sleep(0.01)
             return True, np.zeros((4, 4, 3), dtype=np.uint8)
 
-    def ao_mudar(estado):
-        recebidos.append((estado, threading.current_thread().name))
+    def ao_mudar(controle, estado):
+        recebidos.append((controle, estado, threading.current_thread().name))
         mudou.set()
 
     leitor = LeitorCamera(0, {}, lambda f, b: Lenta(f, b), plataforma="linux",
-                          ao_mudar_foco=ao_mudar)
+                          ao_mudar=ao_mudar)
     assert leitor.foco == {"auto": True, "valor": None}  # padrão: autofoco
     assert leitor.pedir_foco("manual", 80.0)
     assert mudou.wait(2)
     leitor.fechar()
-    assert recebidos == [({"auto": False, "valor": 80.0}, "camera")]
+    assert recebidos == [("foco", {"auto": False, "valor": 80.0}, "camera")]
     assert leitor.foco == {"auto": False, "valor": 80.0}
 
 
 def test_leitor_de_url_nao_tem_foco():
     leitor = LeitorCamera("http://x/video", {}, abridor(quadros=1), plataforma="linux")
     assert leitor.foco is None
+    assert leitor.exposicao is None
     assert leitor.pedir_foco("auto") is False
+    assert leitor.pedir_exposicao("travar") is False
     with pytest.raises(ValueError):
         leitor.pedir_foco("manual")
     leitor.fechar()
+
+
+# ---- exposição ao vivo ----
+
+def camera_com_exposicao_automatica():
+    cap = CameraFalsa()
+    cap.valores[cv2.CAP_PROP_AUTO_EXPOSURE] = 3  # V4L2: automática
+    cap.valores[cv2.CAP_PROP_EXPOSURE] = 156     # onde o automático está
+    cap.valores[cv2.CAP_PROP_GAIN] = 135
+    return cap
+
+
+def test_ler_exposicao_automatica_nao_da_valor_mas_da_ganho():
+    cap = camera_com_exposicao_automatica()
+    assert ler_exposicao(cap, "V4L2") == {"auto": True, "valor": None, "ganho": 135}
+    cap.valores[cv2.CAP_PROP_AUTO_EXPOSURE] = 0.75
+    assert ler_exposicao(cap, "DSHOW")["auto"] is True
+
+
+def test_travar_exposicao_repoe_o_ganho_depois_do_manual():
+    cap = camera_com_exposicao_automatica()
+    estado = aplicar_exposicao(cap, "V4L2", "travar")
+    assert estado == {"auto": False, "valor": 156, "ganho": 135}
+    # a C920 volta ao último ganho posto à mão ao sair do automático
+    assert cap.sets == [(cv2.CAP_PROP_AUTO_EXPOSURE, 1), (cv2.CAP_PROP_EXPOSURE, 156),
+                        (cv2.CAP_PROP_GAIN, 135)]
+
+
+def test_exposicao_manual_e_auto():
+    cap = camera_com_exposicao_automatica()
+    assert aplicar_exposicao(cap, "V4L2", "manual", 312) == {
+        "auto": False, "valor": 312, "ganho": 135}
+    assert aplicar_exposicao(cap, "V4L2", "auto") == {"auto": True, "valor": None, "ganho": 135}
+    assert cap.sets[-1] == (cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+
+
+def test_exposicao_recusada_e_camera_sem_ganho():
+    sem_ganho = camera_com_exposicao_automatica()
+    sem_ganho.sem = {cv2.CAP_PROP_GAIN}
+    assert "erro" not in aplicar_exposicao(sem_ganho, "V4L2", "travar")
+    recusa = CameraFalsa(sem=[cv2.CAP_PROP_EXPOSURE])
+    assert "erro" in aplicar_exposicao(recusa, "V4L2", "manual", 100)
+
+
+def test_leitor_aplica_a_exposicao_na_thread_da_camera():
+    import threading
+    mudou = threading.Event()
+    recebidos = []
+
+    class Lenta(CameraFalsa):
+        def read(self):
+            time.sleep(0.01)
+            return True, np.zeros((4, 4, 3), dtype=np.uint8)
+
+    def ao_mudar(controle, estado):
+        recebidos.append((controle, estado))
+        mudou.set()
+
+    leitor = LeitorCamera(0, {}, lambda f, b: Lenta(f, b), plataforma="linux",
+                          ao_mudar=ao_mudar)
+    assert leitor.exposicao["auto"] is True  # padrão: automática
+    assert leitor.pedir_exposicao("manual", 625.0)
+    with pytest.raises(ValueError):
+        leitor.pedir("brilho", "auto")
+    assert mudou.wait(2)
+    leitor.fechar()
+    assert recebidos == [("exposicao", {"auto": False, "valor": 625.0, "ganho": 0})]
+    assert leitor.exposicao == {"auto": False, "valor": 625.0, "ganho": 0}
 
 
 # ---- registro na captura ----

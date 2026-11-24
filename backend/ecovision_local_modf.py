@@ -98,7 +98,7 @@ def load_config():
 
 config = load_config()
 
-# O handler do WebSocket (Salvar) e a thread da câmera (foco) gravam o arquivo
+# O handler do WebSocket (Salvar) e a thread da câmera (foco, exposição) gravam o arquivo
 config_lock = Lock()
 
 def salvar_config():
@@ -121,7 +121,7 @@ class SystemState:
         # Último quadro da câmera e as detecções dele, para a captura manual
         # (o handler do WebSocket roda noutra thread; a tupla é trocada inteira)
         self.ultimo_quadro = None
-        # Câmera aberta agora (LeitorCamera), para o ajuste de foco pelo Monitor
+        # Câmera aberta agora (LeitorCamera), para o ajuste de foco e exposição pelo Monitor
         self.leitor = None
 
 state = SystemState()
@@ -217,9 +217,9 @@ async def websocket_handler(websocket):
                 elif data.get('type') == 'capturar':
                     await websocket.send(json.dumps(capturar_manual()))
 
-                # Foco da câmera: automático, travado onde está ou manual
-                elif data.get('type') == 'foco':
-                    pedir_foco(data.get('modo'), data.get('valor'))
+                # Foco e exposição da câmera: automático, travado onde está ou manual
+                elif data.get('type') in ('foco', 'exposicao'):
+                    pedir_ajuste(data['type'], data.get('modo'), data.get('valor'))
 
                 # Atualização de configuração
                 elif data.get('type') == 'config':
@@ -248,28 +248,37 @@ async def websocket_handler(websocket):
         envios_pendentes.pop(websocket, None)
         log.info("Cliente WebSocket desconectado. Total: %d", len(state.websocket_clients))
 
-def pedir_foco(modo, valor):
-    """Repassa o ajuste de foco do Monitor à câmera aberta (aplicado na thread dela)."""
+def pedir_ajuste(controle, modo, valor):
+    """
+    Repassa o ajuste de foco ou exposição do Monitor à câmera aberta
+    (aplicado na thread dela).
+    """
     leitor = state.leitor
     if leitor is None:
-        log.warning("Foco: nenhuma câmera aberta")
+        log.warning("Ajuste de %s: nenhuma câmera aberta", controle)
         return
     try:
         valor = None if valor is None else float(valor)
-        if not leitor.pedir_foco(modo, valor):
-            log.warning("Foco: a fonte %s não tem controle de foco", config['camera_index'])
+        if not leitor.pedir(controle, modo, valor):
+            log.warning("Ajuste de %s: a fonte %s não tem esse controle",
+                        controle, config['camera_index'])
     except (TypeError, ValueError) as e:
-        log.warning("Foco: pedido inválido (%s)", e)
+        log.warning("Ajuste de %s: pedido inválido (%s)", controle, e)
 
-def foco_mudou(estado):
+def ajuste_mudou(controle, estado):
     """
-    Foco aplicado (thread da câmera): vai ao config.json, para valer na
-    próxima abertura da câmera e na próxima execução. Travado, grava a
-    posição em que o autofoco deixou a lente.
+    Foco ou exposição aplicados (thread da câmera): vão ao config.json, para
+    valer na próxima abertura da câmera e na próxima execução. Travado,
+    grava o valor em que o automático estava. A exposição leva o ganho junto
+    (o automático mexe nos dois); de volta ao automático, o ganho fica sem
+    valor, para não brigar com ele.
     """
     if 'erro' in estado:
         return
-    config['camera']['foco'] = None if estado['auto'] else estado['valor']
+    camera = config['camera']
+    camera[controle] = None if estado['auto'] else estado['valor']
+    if controle == 'exposicao':
+        camera['ganho'] = None if estado['auto'] else estado['ganho']
     salvar_config()
 
 # Captura manual: o último quadro só vale se a câmera o entregou há pouco
@@ -388,7 +397,7 @@ def process_yolo_stream():
 def run_yolo_stream(model):
     """Roda o YOLO sobre a câmera até a leitura terminar ou falhar"""
     log.info("Abrindo câmera: %s", config['camera_index'])
-    leitor = LeitorCamera(config['camera_index'], config['camera'], ao_mudar_foco=foco_mudou)
+    leitor = LeitorCamera(config['camera_index'], config['camera'], ao_mudar=ajuste_mudou)
     log.info(descrever(leitor.relatorio))
     if capturador is not None:
         capturador.camera_aberta(leitor.relatorio)
@@ -501,8 +510,10 @@ def laco_yolo(model, leitor):
             # Captura (T4): automática ligada? e quadros gravados nesta execução
             'captura_automatica': capturador.automatica if capturador else False,
             'capturas_gravadas': capturador.gravados if capturador else 0,
-            # Foco da câmera {auto, valor}; None se a fonte não tem (vídeo, URL)
+            # Foco {auto, valor} e exposição {auto, valor, ganho} da câmera;
+            # None se a fonte não tem (vídeo, URL)
             'foco': leitor.foco,
+            'exposicao': leitor.exposicao,
         }
         
         # Envia para WebSocket (asyncio)
