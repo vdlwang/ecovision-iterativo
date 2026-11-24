@@ -18,6 +18,7 @@ a função que abre a VideoCapture, para os testes passarem uma câmera falsa.
 """
 
 import logging
+import math
 import os
 import sys
 import time
@@ -38,6 +39,12 @@ PADROES_CAMERA = {
     # None = automática; número = manual, na unidade do backend
     # (V4L2: exposure_time_absolute, em 100 µs; DSHOW: log2 de segundos)
     "exposicao": None,
+    # Valores de exposição que a câmera aceita; um pedido (do config.json,
+    # do Monitor, ou travado onde o automático estava) vai ao mais próximo.
+    # A C920 (a da esteira) só aceita estes: qualquer outro a leva a 156, e
+    # a leitura logo depois ainda mostra o pedido (medido em 2026-11-24 pelo
+    # v4l2-ctl). None = qualquer valor (outra câmera; DSHOW usa outra unidade)
+    "exposicoes_aceitas": [5, 10, 20, 39, 78, 156, 312, 625, 1250, 2047],
     # None = balanço de branco automático; em kelvin = manual
     "temperatura_cor": None,
     # None = autofoco; número = foco manual fixo
@@ -169,7 +176,8 @@ def propriedades(cfg, backend):
         pares.append(("exposicao_auto", cv2.CAP_PROP_AUTO_EXPOSURE, automatico))
     else:
         pares.append(("exposicao_auto", cv2.CAP_PROP_AUTO_EXPOSURE, manual))
-        pares.append(("exposicao", cv2.CAP_PROP_EXPOSURE, cfg["exposicao"]))
+        pares.append(("exposicao", cv2.CAP_PROP_EXPOSURE,
+                      exposicao_aceita(cfg["exposicao"], cfg["exposicoes_aceitas"])))
     if cfg["ganho"] is not None:
         pares.append(("ganho", cv2.CAP_PROP_GAIN, cfg["ganho"]))
     for nome, prop in CONTROLES_IMAGEM:
@@ -323,12 +331,20 @@ def ler_exposicao(cap, backend):
     return {"auto": auto, "valor": valor, "ganho": cap.get(cv2.CAP_PROP_GAIN)}
 
 
-def aplicar_exposicao(cap, backend, modo, valor=None):
+def exposicao_aceita(valor, aceitas):
+    """O valor de `aceitas` mais perto de `valor`, em razão (eles dobram a cada passo)."""
+    if not aceitas or valor is None or valor <= 0:
+        return valor
+    return min(aceitas, key=lambda a: abs(math.log(a / valor)))
+
+
+def aplicar_exposicao(cap, backend, modo, valor=None, aceitas=None):
     """
     Muda a exposição de uma câmera aberta e devolve o lido de volta
     (ler_exposicao), com "erro" se a câmera recusou. "auto" liga a exposição
     automática; "travar" a desliga com a exposição e o ganho em que ela
-    estava; "manual" a desliga e põe `valor`, mantendo o ganho.
+    estava; "manual" a desliga e põe `valor`, mantendo o ganho. Nos dois, o
+    valor vai antes ao mais próximo de `aceitas` (exposicao_aceita).
 
     O ganho é lido antes e reposto depois de desligar o automático: a C920,
     no manual, volta sozinha ao último ganho posto à mão (0, se nunca), e a
@@ -341,6 +357,7 @@ def aplicar_exposicao(cap, backend, modo, valor=None):
     elif modo in ("travar", "manual"):
         if modo == "travar":
             valor = cap.get(cv2.CAP_PROP_EXPOSURE)
+        valor = exposicao_aceita(valor, aceitas)
         ganho = cap.get(cv2.CAP_PROP_GAIN)
         ok = cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, manual)
         ok = ok and cap.set(cv2.CAP_PROP_EXPOSURE, valor)
@@ -391,6 +408,7 @@ class LeitorCamera:
     def __init__(self, fonte, cfg, abrir_captura=_abrir_videocapture, plataforma=None,
                  ao_mudar=None):
         self.cap, self.relatorio = abrir(fonte, cfg, abrir_captura, plataforma)
+        aceitas = completar_config(cfg)["exposicoes_aceitas"]
         # Foco e exposição: só em dispositivo local (vídeo e URL não têm
         # controles). O pedido do Monitor é aplicado pela thread da câmera
         # entre dois read(), porque só ela mexe na captura; ao_mudar recebe
@@ -403,7 +421,7 @@ class LeitorCamera:
         self._ajustes = {
             "foco": ("foco", aplicar_foco),
             "exposicao": ("exposicao", lambda cap, modo, valor=None:
-                          aplicar_exposicao(cap, backend, modo, valor)),
+                          aplicar_exposicao(cap, backend, modo, valor, aceitas)),
             "ganho": ("exposicao", lambda cap, modo, valor=None:
                       aplicar_ganho(cap, backend, modo, valor)),
         }

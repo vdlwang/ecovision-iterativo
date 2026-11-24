@@ -41,8 +41,10 @@ interface Exposicao extends EstadoAjuste {
 // focus_absolute; exposure_time_absolute, em 100 µs; gain
 const FOCO_MIN = 0;
 const FOCO_MAX = 250;
-const EXPOSICAO_MIN = 3;
-const EXPOSICAO_MAX = 2047;
+// A exposição da C920 só aceita estes valores (medido em 2026-11-24 pelo
+// v4l2-ctl); qualquer outro a leva a 156, embora a leitura logo depois ainda
+// mostre o pedido
+const EXPOSICAO_VALORES = [5, 10, 20, 39, 78, 156, 312, 625, 1250, 2047];
 const GANHO_MIN = 0;
 const GANHO_MAX = 255;
 
@@ -340,11 +342,11 @@ export function MonitorPanel() {
             rotulo="Exposição"
             estado={exposicao}
             desabilitado={!recebendoFrames || !exposicao}
-            min={EXPOSICAO_MIN}
-            max={EXPOSICAO_MAX}
-            log
+            min={EXPOSICAO_VALORES[0]}
+            max={EXPOSICAO_VALORES[EXPOSICAO_VALORES.length - 1]}
+            valores={EXPOSICAO_VALORES}
             detalheFixo={exposicao ? `ganho ${Math.round(exposicao.ganho)}` : undefined}
-            ajuda="Travar fixa a exposição e o ganho em que o automático estava; o slider (em 100 µs) passa para o manual com o mesmo ganho. Exposição curta evita o borrão do objeto andando. A C920 só aceita alguns valores e fica no anterior com os outros. Fica gravado no config.json."
+            ajuda="Travar fixa a exposição e o ganho em que o automático estava; o slider (em 100 µs) passa para o manual com o mesmo ganho. Exposição curta evita o borrão do objeto andando. O slider só para nos valores que a C920 aceita (cada um ~o dobro do anterior). Fica gravado no config.json."
             onPedir={pedirAjuste('exposicao')}
           >
             <SliderAjuste

@@ -8,6 +8,7 @@ import pytest
 
 import camera
 from camera import (LeitorCamera, abrir, aplicar_exposicao, aplicar_foco, aplicar_ganho, conferir,
+                    exposicao_aceita,
                     fourcc_texto, ler_exposicao, ler_foco, propriedades, tipo_fonte)
 from captura import Capturador
 
@@ -399,6 +400,25 @@ def test_leitor_aplica_a_exposicao_na_thread_da_camera():
     leitor.fechar()
     assert recebidos == [("exposicao", {"auto": False, "valor": 625.0, "ganho": 0})]
     assert leitor.exposicao == {"auto": False, "valor": 625.0, "ganho": 0}
+
+
+def test_exposicao_vai_ao_valor_aceito_mais_proximo():
+    aceitas = camera.PADROES_CAMERA["exposicoes_aceitas"]
+    assert exposicao_aceita(209, aceitas) == 156  # o automático da C920 parou em 209
+    assert exposicao_aceita(250, aceitas) == 312
+    assert exposicao_aceita(39, aceitas) == 39
+    assert exposicao_aceita(3, aceitas) == 5
+    assert exposicao_aceita(209, None) == 209
+    assert exposicao_aceita(-6, aceitas) == -6  # DSHOW: log2 de segundos
+    cap = camera_com_exposicao_automatica()
+    cap.valores[cv2.CAP_PROP_EXPOSURE] = 209
+    assert aplicar_exposicao(cap, "V4L2", "travar", aceitas=aceitas)["valor"] == 156
+    assert aplicar_exposicao(cap, "V4L2", "manual", 500, aceitas=aceitas)["valor"] == 625
+
+
+def test_abrir_aplica_a_exposicao_aceita():
+    pares = dict((n, v) for n, _, v in propriedades({"exposicao": 209}, "V4L2"))
+    assert pares["exposicao"] == 156
 
 
 def test_ganho_so_com_a_exposicao_manual():

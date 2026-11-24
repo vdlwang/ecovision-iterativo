@@ -15,8 +15,6 @@ export type ModoAjuste = 'auto' | 'travar' | 'manual';
 
 // Arrastando o slider, no máximo um pedido a cada tanto (cada um grava o config.json)
 const INTERVALO_MS = 150;
-// Passos do slider em escala logarítmica
-const PASSOS_LOG = 1000;
 
 interface Props {
   titulo: string;
@@ -25,8 +23,9 @@ interface Props {
   desabilitado: boolean;
   min: number;
   max: number;
-  // Escala logarítmica no slider (exposição: os valores úteis ficam embaixo)
-  log?: boolean;
+  // Só estes valores, um por passo do slider (a exposição da C920 só aceita
+  // alguns); sem eles, todo inteiro de min a max
+  valores?: number[];
   // Complemento do badge com o valor fixo (ex.: o ganho)
   detalheFixo?: string;
   ajuda: string;
@@ -39,7 +38,7 @@ interface Props {
  * Card de um controle da câmera (foco, exposição): Travar desliga o automático
  * no valor em que ele está, Automático o religa, e o slider põe o valor à mão.
  */
-export function AjusteCamera({ titulo, rotulo, estado, desabilitado, min, max, log = false,
+export function AjusteCamera({ titulo, rotulo, estado, desabilitado, min, max, valores,
                                detalheFixo, ajuda, onPedir, children }: Props) {
   return (
     <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
@@ -80,7 +79,7 @@ export function AjusteCamera({ titulo, rotulo, estado, desabilitado, min, max, l
           desabilitado={desabilitado}
           min={min}
           max={max}
-          log={log}
+          valores={valores}
           ajuda={ajuda}
           onMudar={(v) => onPedir('manual', v)}
         />
@@ -97,7 +96,7 @@ interface PropsSlider {
   desabilitado: boolean;
   min: number;
   max: number;
-  log?: boolean;
+  valores?: number[];
   ajuda: string;
   onMudar: (valor: number) => void;
 }
@@ -107,17 +106,19 @@ interface PropsSlider {
  * se a câmera arredondou ou recusou), menos enquanto é arrastado; arrastando,
  * pede no máximo um ajuste a cada INTERVALO_MS, e o valor final ao soltar.
  */
-export function SliderAjuste({ rotulo, atual, desabilitado, min, max, log = false, ajuda,
+export function SliderAjuste({ rotulo, atual, desabilitado, min, max, valores, ajuda,
                                onMudar }: PropsSlider) {
-  // Posição 0..PASSOS_LOG (log) ou o próprio valor (linear)
-  const paraSlider = (v: number) => log
-    ? Math.round(PASSOS_LOG * Math.log(Math.min(Math.max(v, min), max) / min) / Math.log(max / min))
+  // Posição: o índice do valor da lista mais perto (em razão, já que eles
+  // dobram a cada passo), ou o próprio valor
+  const paraSlider = (v: number) => valores
+    ? valores.reduce((melhor, x, i) =>
+        Math.abs(Math.log(x / v)) < Math.abs(Math.log(valores[melhor] / v)) ? i : melhor, 0)
     : v;
-  const doSlider = (p: number) => log
-    ? Math.round(min * Math.pow(max / min, p / PASSOS_LOG))
+  const doSlider = (p: number) => valores
+    ? valores[p]
     : p;
 
-  const [valor, setValor] = useState(min);
+  const [valor, setValor] = useState(valores ? valores[0] : min);
   const arrastando = useRef(false);
   const ultimoEnvio = useRef(0);
   useEffect(() => {
@@ -131,8 +132,8 @@ export function SliderAjuste({ rotulo, atual, desabilitado, min, max, log = fals
         <span>{Math.round(valor)}</span>
       </div>
       <Slider
-        min={log ? 0 : min}
-        max={log ? PASSOS_LOG : max}
+        min={valores ? 0 : min}
+        max={valores ? valores.length - 1 : max}
         step={1}
         value={[paraSlider(valor)]}
         disabled={desabilitado}
