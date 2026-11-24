@@ -75,7 +75,8 @@ TOLERANCIA = 0.5
 # Sem quadro novo por este tempo, a leitura é dada como falha (reabre)
 ESPERA_QUADRO_S = 10.0
 
-# Foco e exposição ajustados ao vivo pelo Monitor (aplicar_foco, aplicar_exposicao)
+# Foco, exposição e ganho ajustados ao vivo pelo Monitor (aplicar_foco,
+# aplicar_exposicao, aplicar_ganho; o ganho só tem "manual")
 MODOS_AJUSTE = ("auto", "travar", "manual")
 
 
@@ -353,6 +354,24 @@ def aplicar_exposicao(cap, backend, modo, valor=None):
     return estado
 
 
+def aplicar_ganho(cap, backend, modo, valor=None):
+    """
+    Põe o ganho à mão (só modo "manual") e devolve a exposição lida de volta
+    (ler_exposicao, que traz o ganho), com "erro" se não foi aplicado. Só com
+    a exposição manual: na automática, a câmera mexe no ganho sozinha.
+    """
+    if modo != "manual":
+        raise ValueError(f"o ganho só tem modo manual, não {modo!r}")
+    if ler_exposicao(cap, backend)["auto"]:
+        ok, erro = False, "o ganho só se ajusta com a exposição manual"
+    else:
+        ok, erro = cap.set(cv2.CAP_PROP_GAIN, valor), "a câmera recusou o ajuste de ganho"
+    estado = ler_exposicao(cap, backend)
+    if not ok:
+        estado["erro"] = erro
+    return estado
+
+
 def descrever(relatorio):
     """Linha de log da abertura: resolução, formato e fps efetivos."""
     e = relatorio["efetivo"]
@@ -375,14 +394,18 @@ class LeitorCamera:
         # Foco e exposição: só em dispositivo local (vídeo e URL não têm
         # controles). O pedido do Monitor é aplicado pela thread da câmera
         # entre dois read(), porque só ela mexe na captura; ao_mudar recebe
-        # (controle, lido de volta)
+        # (controle, lido de volta). Cada controle é (atributo com o estado,
+        # função); o ganho guarda o seu no da exposição, que já o traz
         backend = self.relatorio["backend"]
         local = self.relatorio["tipo"] == "dispositivo"
         self.foco = ler_foco(self.cap) if local else None
         self.exposicao = ler_exposicao(self.cap, backend) if local and backend else None
         self._ajustes = {
-            "foco": aplicar_foco,
-            "exposicao": lambda cap, modo, valor=None: aplicar_exposicao(cap, backend, modo, valor),
+            "foco": ("foco", aplicar_foco),
+            "exposicao": ("exposicao", lambda cap, modo, valor=None:
+                          aplicar_exposicao(cap, backend, modo, valor)),
+            "ganho": ("exposicao", lambda cap, modo, valor=None:
+                      aplicar_ganho(cap, backend, modo, valor)),
         }
         self._pedidos = {}
         self._ao_mudar = ao_mudar
@@ -426,18 +449,19 @@ class LeitorCamera:
 
     def pedir(self, controle, modo, valor=None):
         """
-        Pede um ajuste de `controle` ("foco" ou "exposicao"; aplicar_foco,
-        aplicar_exposicao), feito antes do próximo read(). Um pedido ainda
+        Pede um ajuste de `controle` ("foco", "exposicao" ou "ganho";
+        aplicar_foco, aplicar_exposicao, aplicar_ganho), feito antes do
+        próximo read(). Um pedido ainda
         não aplicado do mesmo controle é trocado pelo novo (slider
         arrastado). False se a fonte não tem o controle (vídeo, URL).
         """
         if controle not in self._ajustes:
             raise ValueError(f"controle desconhecido: {controle!r}")
-        if modo not in MODOS_AJUSTE:
+        if modo not in MODOS_AJUSTE or (controle == "ganho" and modo != "manual"):
             raise ValueError(f"modo desconhecido: {modo!r}")
         if modo == "manual" and valor is None:
             raise ValueError(f"{controle} manual sem valor")
-        if getattr(self, controle) is None:
+        if getattr(self, self._ajustes[controle][0]) is None:
             return False
         with self._cond:
             self._pedidos[controle] = (modo, valor)
@@ -449,19 +473,25 @@ class LeitorCamera:
     def pedir_exposicao(self, modo, valor=None):
         return self.pedir("exposicao", modo, valor)
 
+    def pedir_ganho(self, valor):
+        return self.pedir("ganho", "manual", valor)
+
     def _aplicar_pedidos(self):
         with self._cond:
             pedidos, self._pedidos = self._pedidos, {}
         for controle, pedido in pedidos.items():
             try:
-                estado = self._ajustes[controle](self.cap, *pedido)
+                atributo, aplicar = self._ajustes[controle]
+                estado = aplicar(self.cap, *pedido)
             except Exception:
                 log.exception("Câmera: falha ao ajustar %s", controle)
                 continue
             lido = {k: v for k, v in estado.items() if k != "erro"}
-            setattr(self, controle, lido)
+            setattr(self, atributo, lido)
             if "erro" in estado:
                 log.warning("Câmera: %s %s recusado; lido %s", controle, pedido, lido)
+            elif controle == "ganho":
+                log.info("Câmera: ganho em %.0f", lido["ganho"])
             else:
                 log.info("Câmera: %s %s", controle, "automático" if lido["auto"]
                          else f"manual em {lido['valor']:.0f}")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -31,6 +31,8 @@ interface Props {
   detalheFixo?: string;
   ajuda: string;
   onPedir: (modo: ModoAjuste, valor?: number) => void;
+  // Controles a mais no card, abaixo do slider (ex.: o ganho na exposição)
+  children?: ReactNode;
 }
 
 /**
@@ -38,24 +40,7 @@ interface Props {
  * no valor em que ele está, Automático o religa, e o slider põe o valor à mão.
  */
 export function AjusteCamera({ titulo, rotulo, estado, desabilitado, min, max, log = false,
-                               detalheFixo, ajuda, onPedir }: Props) {
-  // Posição 0..PASSOS_LOG (log) ou o próprio valor (linear)
-  const paraSlider = (v: number) => log
-    ? Math.round(PASSOS_LOG * Math.log(Math.min(Math.max(v, min), max) / min) / Math.log(max / min))
-    : v;
-  const doSlider = (p: number) => log
-    ? Math.round(min * Math.pow(max / min, p / PASSOS_LOG))
-    : p;
-
-  // Valor do slider; segue o backend a cada quadro (volta ao lido se a
-  // câmera arredondou ou recusou), menos enquanto é arrastado
-  const [valor, setValor] = useState(min);
-  const arrastando = useRef(false);
-  const ultimoEnvio = useRef(0);
-  useEffect(() => {
-    if (estado?.valor != null && !arrastando.current) setValor(estado.valor);
-  }, [estado]);
-
+                               detalheFixo, ajuda, onPedir, children }: Props) {
   return (
     <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
       <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">{titulo}</h3>
@@ -89,35 +74,84 @@ export function AjusteCamera({ titulo, rotulo, estado, desabilitado, min, max, l
           </Button>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs text-neutral-400">
-            <span>Ajuste manual</span>
-            <span>{Math.round(valor)}</span>
-          </div>
-          <Slider
-            min={log ? 0 : min}
-            max={log ? PASSOS_LOG : max}
-            step={1}
-            value={[paraSlider(valor)]}
-            disabled={desabilitado}
-            onValueChange={([p]) => {
-              const v = doSlider(p);
-              arrastando.current = true;
-              setValor(v);
-              const agora = Date.now();
-              if (agora - ultimoEnvio.current >= INTERVALO_MS) {
-                ultimoEnvio.current = agora;
-                onPedir('manual', v);
-              }
-            }}
-            onValueCommit={([p]) => {
-              arrastando.current = false;
-              onPedir('manual', doSlider(p));
-            }}
-          />
-          <p className="text-neutral-500 text-xs">{ajuda}</p>
-        </div>
+        <SliderAjuste
+          rotulo="Ajuste manual"
+          atual={estado?.valor ?? null}
+          desabilitado={desabilitado}
+          min={min}
+          max={max}
+          log={log}
+          ajuda={ajuda}
+          onMudar={(v) => onPedir('manual', v)}
+        />
+        {children}
       </div>
     </Card>
+  );
+}
+
+interface PropsSlider {
+  rotulo: string;
+  // Valor lido do backend; null mantém o slider onde está
+  atual: number | null;
+  desabilitado: boolean;
+  min: number;
+  max: number;
+  log?: boolean;
+  ajuda: string;
+  onMudar: (valor: number) => void;
+}
+
+/**
+ * Slider de um valor da câmera: segue o backend a cada quadro (volta ao lido
+ * se a câmera arredondou ou recusou), menos enquanto é arrastado; arrastando,
+ * pede no máximo um ajuste a cada INTERVALO_MS, e o valor final ao soltar.
+ */
+export function SliderAjuste({ rotulo, atual, desabilitado, min, max, log = false, ajuda,
+                               onMudar }: PropsSlider) {
+  // Posição 0..PASSOS_LOG (log) ou o próprio valor (linear)
+  const paraSlider = (v: number) => log
+    ? Math.round(PASSOS_LOG * Math.log(Math.min(Math.max(v, min), max) / min) / Math.log(max / min))
+    : v;
+  const doSlider = (p: number) => log
+    ? Math.round(min * Math.pow(max / min, p / PASSOS_LOG))
+    : p;
+
+  const [valor, setValor] = useState(min);
+  const arrastando = useRef(false);
+  const ultimoEnvio = useRef(0);
+  useEffect(() => {
+    if (atual != null && !arrastando.current) setValor(atual);
+  }, [atual]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs text-neutral-400">
+        <span>{rotulo}</span>
+        <span>{Math.round(valor)}</span>
+      </div>
+      <Slider
+        min={log ? 0 : min}
+        max={log ? PASSOS_LOG : max}
+        step={1}
+        value={[paraSlider(valor)]}
+        disabled={desabilitado}
+        onValueChange={([p]) => {
+          const v = doSlider(p);
+          arrastando.current = true;
+          setValor(v);
+          const agora = Date.now();
+          if (agora - ultimoEnvio.current >= INTERVALO_MS) {
+            ultimoEnvio.current = agora;
+            onMudar(v);
+          }
+        }}
+        onValueCommit={([p]) => {
+          arrastando.current = false;
+          onMudar(doSlider(p));
+        }}
+      />
+      <p className="text-neutral-500 text-xs">{ajuda}</p>
+    </div>
   );
 }

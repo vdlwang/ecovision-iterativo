@@ -6,7 +6,7 @@ import { Play, Pause, Camera } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { useStableWebSocket } from '../hooks/useStableWebSocket';
 import { BadgeBackend } from './BadgeBackend';
-import { AjusteCamera, EstadoAjuste, ModoAjuste } from './AjusteCamera';
+import { AjusteCamera, EstadoAjuste, ModoAjuste, SliderAjuste } from './AjusteCamera';
 import { BACKEND_WS_URL } from '../config';
 
 interface Detection {
@@ -38,11 +38,13 @@ interface Exposicao extends EstadoAjuste {
 }
 
 // Faixas da C920 (v4l2-ctl --list-ctrls); outra câmera pode ter outras.
-// focus_absolute; exposure_time_absolute, em 100 µs
+// focus_absolute; exposure_time_absolute, em 100 µs; gain
 const FOCO_MIN = 0;
 const FOCO_MAX = 250;
 const EXPOSICAO_MIN = 3;
 const EXPOSICAO_MAX = 2047;
+const GANHO_MIN = 0;
+const GANHO_MAX = 255;
 
 // Resposta do backend ao botão "Capturar agora"
 interface CapturaManual {
@@ -342,9 +344,19 @@ export function MonitorPanel() {
             max={EXPOSICAO_MAX}
             log
             detalheFixo={exposicao ? `ganho ${Math.round(exposicao.ganho)}` : undefined}
-            ajuda="Travar fixa a exposição e o ganho em que o automático estava; o slider (em 100 µs) passa para o manual com o mesmo ganho. A C920 só aceita alguns valores e fica no anterior com os outros. Fica gravado no config.json."
+            ajuda="Travar fixa a exposição e o ganho em que o automático estava; o slider (em 100 µs) passa para o manual com o mesmo ganho. Exposição curta evita o borrão do objeto andando. A C920 só aceita alguns valores e fica no anterior com os outros. Fica gravado no config.json."
             onPedir={pedirAjuste('exposicao')}
-          />
+          >
+            <SliderAjuste
+              rotulo="Ganho"
+              atual={exposicao?.ganho ?? null}
+              desabilitado={!recebendoFrames || !exposicao || exposicao.auto}
+              min={GANHO_MIN}
+              max={GANHO_MAX}
+              ajuda="Clareia a imagem com a exposição curta, mas com mais ruído. Só com a exposição manual (no automático, a câmera mexe nele). Fica gravado no config.json."
+              onMudar={(valor) => send({ type: 'ganho', valor })}
+            />
+          </AjusteCamera>
 
           <Card className="bg-neutral-900 border-neutral-800 p-4 md:p-6">
             <h3 className="text-white mb-3 md:mb-4 text-base md:text-lg">Status do Sistema</h3>

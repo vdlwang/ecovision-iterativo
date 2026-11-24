@@ -220,6 +220,9 @@ async def websocket_handler(websocket):
                 # Foco e exposição da câmera: automático, travado onde está ou manual
                 elif data.get('type') in ('foco', 'exposicao'):
                     pedir_ajuste(data['type'], data.get('modo'), data.get('valor'))
+                # Ganho: só à mão, com a exposição manual
+                elif data.get('type') == 'ganho':
+                    pedir_ajuste('ganho', 'manual', data.get('valor'))
 
                 # Atualização de configuração
                 elif data.get('type') == 'config':
@@ -250,7 +253,7 @@ async def websocket_handler(websocket):
 
 def pedir_ajuste(controle, modo, valor):
     """
-    Repassa o ajuste de foco ou exposição do Monitor à câmera aberta
+    Repassa o ajuste de foco, exposição ou ganho do Monitor à câmera aberta
     (aplicado na thread dela).
     """
     leitor = state.leitor
@@ -267,15 +270,20 @@ def pedir_ajuste(controle, modo, valor):
 
 def ajuste_mudou(controle, estado):
     """
-    Foco ou exposição aplicados (thread da câmera): vão ao config.json, para
+    Foco, exposição ou ganho aplicados (thread da câmera): vão ao config.json, para
     valer na próxima abertura da câmera e na próxima execução. Travado,
     grava o valor em que o automático estava. A exposição leva o ganho junto
     (o automático mexe nos dois); de volta ao automático, o ganho fica sem
-    valor, para não brigar com ele.
+    valor, para não brigar com ele. O ganho posto à mão (só com a exposição
+    manual) vai ao camera.ganho.
     """
     if 'erro' in estado:
         return
     camera = config['camera']
+    if controle == 'ganho':
+        camera['ganho'] = estado['ganho']
+        salvar_config()
+        return
     camera[controle] = None if estado['auto'] else estado['valor']
     if controle == 'exposicao':
         camera['ganho'] = None if estado['auto'] else estado['ganho']

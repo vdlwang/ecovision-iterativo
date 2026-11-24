@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import camera
-from camera import (LeitorCamera, abrir, aplicar_exposicao, aplicar_foco, conferir,
+from camera import (LeitorCamera, abrir, aplicar_exposicao, aplicar_foco, aplicar_ganho, conferir,
                     fourcc_texto, ler_exposicao, ler_foco, propriedades, tipo_fonte)
 from captura import Capturador
 
@@ -399,6 +399,54 @@ def test_leitor_aplica_a_exposicao_na_thread_da_camera():
     leitor.fechar()
     assert recebidos == [("exposicao", {"auto": False, "valor": 625.0, "ganho": 0})]
     assert leitor.exposicao == {"auto": False, "valor": 625.0, "ganho": 0}
+
+
+def test_ganho_so_com_a_exposicao_manual():
+    cap = camera_com_exposicao_automatica()
+    estado = aplicar_ganho(cap, "V4L2", "manual", 60)
+    assert estado["ganho"] == 135 and "manual" in estado["erro"]
+    assert (cv2.CAP_PROP_GAIN, 60) not in cap.sets
+    aplicar_exposicao(cap, "V4L2", "manual", 39)
+    assert aplicar_ganho(cap, "V4L2", "manual", 60) == {"auto": False, "valor": 39, "ganho": 60}
+    with pytest.raises(ValueError):
+        aplicar_ganho(cap, "V4L2", "auto")
+    recusa = camera_com_exposicao_automatica()
+    aplicar_exposicao(recusa, "V4L2", "manual", 39)
+    recusa.sem = {cv2.CAP_PROP_GAIN}
+    assert "recusou" in aplicar_ganho(recusa, "V4L2", "manual", 60)["erro"]
+
+
+def test_leitor_aplica_o_ganho_no_estado_da_exposicao():
+    import threading
+    mudou = threading.Event()
+    recebidos = []
+
+    class Lenta(CameraFalsa):
+        def read(self):
+            time.sleep(0.01)
+            return True, np.zeros((4, 4, 3), dtype=np.uint8)
+
+    def ao_mudar(controle, estado):
+        recebidos.append((controle, estado))
+        if controle == "ganho":
+            mudou.set()
+
+    leitor = LeitorCamera(0, {}, lambda f, b: Lenta(f, b), plataforma="linux",
+                          ao_mudar=ao_mudar)
+    with pytest.raises(ValueError):
+        leitor.pedir("ganho", "travar")
+    assert leitor.pedir_exposicao("manual", 39.0)
+    assert leitor.pedir_ganho(80.0)
+    assert mudou.wait(2)
+    leitor.fechar()
+    assert recebidos[-1] == ("ganho", {"auto": False, "valor": 39.0, "ganho": 80.0})
+    assert leitor.exposicao == {"auto": False, "valor": 39.0, "ganho": 80.0}
+
+
+def test_leitor_de_url_nao_tem_ganho():
+    leitor = LeitorCamera("http://x/video", {}, abridor(quadros=1), plataforma="linux")
+    assert leitor.pedir_ganho(50.0) is False
+    leitor.fechar()
 
 
 # ---- registro na captura ----
