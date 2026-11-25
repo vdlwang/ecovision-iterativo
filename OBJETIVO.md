@@ -384,6 +384,30 @@ Decisão 17: o trio é Grounding DINO, OWLv2 e o `best.pt` (YOLOv8s do TACO com 
 
 Fontes: [SAM 3 — Ultralytics](https://docs.ultralytics.com/models/sam-3), [Ultralytics 8.3.237](https://newreleases.io/project/pypi/ultralytics/release/8.3.237), [SAM 3 — Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), [Grounding DINO vs YOLOE — Roboflow](https://playground.roboflow.com/models/compare/grounding-dino-vs-yoloe), [Open-vocabulary detection — Fora Soft](https://www.forasoft.com/learn/ai-for-video-engineering/articles-ai/open-vocabulary-detection-grounding-dino-florence-2-rtdetr-rfdetr). [Instalação do SAM 3](https://www.mintlify.com/facebookresearch/sam3/installation), [RF-DETR — ICLR 2026](https://mlanthology.org/iclr/2026/robinson2026iclr-rfdetr/), [RF-DETR vs. alternativas — Roboflow](https://blog.roboflow.com/rf-detr-vs-alternatives/). Levantamento de 2026-10-27, revisto em 2026-11-12 (SAM 3 e RF-DETR); custos e cabimento na GPU são estimativas, não medidos, salvo onde dito.
 
+### Plano: classes da esteira no anotador (2026-11-25)
+
+**Por quê.** Os três anotadores procuram só as 8 classes de `classes` no `classes.yaml`, mas a maioria dos objetos do primeiro lote da esteira (`1-treino` e `1-teste`, 73 imagens de 2026-11-25) está fora delas: marmita e pedaços de isopor, sacolas, filme plástico, lenços, embalagens de salgadinho, tampas plásticas. O Grounding DINO e o OWLv2 escolhem a mais parecida das 8 ou deixam a confiança baixa, e o anotador `yolo` descarta as colunas das outras classes. Medido nas 64 imagens com objeto (confiança ≥ 0,20, centro na lona):
+
+| Modelo | Com alguma detecção, 60 classes TACO | Só com as 8 classes | Classes mais frequentes (60) |
+|---|---|---|---|
+| `yolov8s.pt` (só TACO) | 56 | 14 | Foam food container, Styrofoam piece, Plastic bottle cap, Single-use carrier bag, Drink can, Tissues, Plastic lid, Pizza box |
+| `yolov8m.pt` (só TACO) | 7 | 5 | Plastic bottle cap, Plastic lid, Food Can |
+| `best.pt` | 46 | 25 | Other plastic bottle (22), Normal paper, Plastic bottle cap |
+
+Como terceiro anotador do voto (uma caixa por imagem, região da lona), o `yolov8s` aprovou 0 de 56 imagens de treino, o `yolov8m` 2 e o `best.pt` 6; em todos, a falta de caixa visível (`quantidade`) foi o motivo principal. Isso responde à pendência de [Mais classes no anotador](#mais-classes-no-anotador-2026-11-10) ("nenhuma até haver fotos da esteira"): agora há, e elas pedem classes além das 8.
+
+**Risco.** Em 2026-11-10, as 60 classes TACO de uma vez no prompt derrubaram o acerto de classe do Grounding DINO de 51% para 10%: as classes novas absorviam os objetos. A ampliação tem de ser pequena e medida.
+
+**Passos.**
+
+1. **Verdade do lote 1**: revisar `1-treino` e `1-teste` (a fila atual), dando a cada objeto a classe TACO certa entre os `nomes` (as 60), mesmo fora das 8; descartar as imagens vazias, com a mão e os pares quase duplicados.
+2. **Lista candidata**: as classes TACO que aparecem nos rótulos revisados, confrontadas com as detecções do `yolov8s` (acima). Para cada uma, o material (nível 1) e um ou mais prompts em inglês; conferir que o material bate com o mapa TACO → material do backend (`taco_to_material`, `backend/deteccao.py`), que decide o servo.
+3. **Medir sem tocar no banco de trabalho**: exportar os rótulos revisados do lote 1 como base de verdade (no formato que o `avaliar.py --verdade` lê) e importar as mesmas imagens numa saída à parte. Anotar ali com o `classes.yaml` atual e com o ampliado, e comparar com o `avaliar.py` (classe, material, cobertura) e com `--voto` (aprovação e acerto das aprovadas). Repetir a medida nas 88 fotos de `legado/database` (`--max-caixas 0`), para ver quanto a ampliação custa nas 8 classes de antes.
+4. **Variantes a medir**: as 8 mais as candidatas, todas concorrendo; as 8 mais as candidatas como `reserva: true` (só vencem se nenhuma das 8 chega ao limiar); e o `Unlabeled litter` de reserva, só para dar caixa (sem classe útil) ao que fica fora.
+5. **Decidir** pela variante que mais sobe o material e a aprovação do voto nas fotos da esteira sem perder mais que uns poucos pontos de classe nas de `legado/`; registrar como decisão (revisando a 8, se mudar o vidro). Com a lista nova, rodar o pipeline de novo nos lotes ainda não revisados (o `classes.yaml` só aceita classes novas no fim, para os ids não mudarem).
+
+**Relação com outras tarefas**: o T11 (classes novas pela página) é o caminho para o revisor acrescentar uma classe no meio da revisão; este plano escolhe a lista inicial. O voto 2oo3 e a preferência pelo objeto inteiro sobre a parte, na caixa única do Grounding DINO (ambos discutidos em 2026-11-25), ficam para depois desta medida, porque a ampliação muda a cobertura de todos os anotadores.
+
 ## 6. Pipeline de anotação (planejado em 2026-11-11)
 
 O fluxo do diagrama v3, do lado da anotação, em passos separados que se podem rodar um de cada vez ou encadeados por um `pipeline.py`:
@@ -459,6 +483,7 @@ Na GTX 1650, um anotador por vez, no mesmo processo (carregar, anotar o lote, li
 | T13 | [ ] | **Avaliação do YOLO** com a base de teste e uma base externa (o teste pode repetir objetos físicos do treino, decisão 19: métricas otimistas, a externa pesa mais): `best.pt`, o YOLO retreinado e o RF-DETR lado a lado, mais a taxa de quadros na máquina da esteira | T9, T12 | métricas por classe e material; FPS |
 | T15 | [x] | **Rastreamento no acionamento** (backend operacional, à parte do T4): trocar `model(..., stream=True)` por `model.track(..., persist=True, tracker="bytetrack.yaml")` (fixar `lap` no `requirements.txt`) e disparar o servo uma vez por ID que cruza a faixa de acionamento, no lugar do `DETECTION_COOLDOWN` fixo; abre caminho para estimar quando o objeto chega ao servo (limitação conhecida do deslocamento). Os IDs também vão ao log da captura (T4), só como evidência. Feito (2026-11-16): `DisparosPorTrilha` em `deteccao.py` dispara uma vez por trilha que está na faixa ou a atravessou entre dois quadros, com o material votado na trilha; trilha que cruza com o servo ocupado gera aviso; ID trocado herda o disparo; `lap` fixado; o Monitor mostra o ID. Detalhes no `backend/README.md` | — | pytest da decisão de disparo com trilhas sintéticas (`deteccao.py`); vídeo sintético da esteira; falta o teste com a esteira |
 | T14 | [x] | **`pipeline.py` e `anotadores.yaml`** (seção 6): importar, anotar com os N anotadores configurados, votar ou unir conforme o conjunto, com unidade de trabalho (imagem, anotador) retomável. Feito (2026-11-15): o `anotadores.yaml` traz o trio (decisão 17) com as opções do `anotar.py` de cada um e o IoU do voto; a pipeline confere tudo antes de importar ou carregar modelo, roda um anotador por vez liberando a memória entre eles, e a votação grava a configuração (RNF07). Retomável porque o `anotar.py` pula as imagens já anotadas pelo anotador e o voto as já votadas. Conferido com os três modelos em duas fotos de `tcc-0CF` (42 s na GTX 1650; a segunda rodada, sem nada a fazer, em 1 s) | T5, T6 | pytest com anotadores sintéticos |
+| T16 | [ ] | **Classes da esteira no anotador**: ampliar o `classes.yaml` com as classes TACO que aparecem nos lotes da esteira (isopor, sacolas, filme plástico, lenços, tampas plásticas...), medindo o custo nas 8 de antes. Plano: [classes da esteira no anotador](#plano-classes-da-esteira-no-anotador-2026-11-25) | revisão do lote 1 (T1) | `avaliar.py` com o lote 1 revisado como verdade e nas 88 fotos de `legado/database` |
 
 ### Resolução e origem das imagens
 
