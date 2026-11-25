@@ -12,7 +12,7 @@ from captura import (
 )
 
 CFG = {**PADROES_CAPTURA, "intervalo_s": 10.0, "travessia_s": 5.0, "atraso_s": 1.0,
-       "diferenca_minima": 10.0}
+       "diferenca_minima": 10.0, "aprendizado_s": 5.0, "margem_teto": 20.0}
 HORARIO = datetime(2026, 11, 15, 23, 29, 3, 146000, tzinfo=timezone.utc)
 
 
@@ -169,11 +169,58 @@ def test_lona_vazia_nao_grava():
     assert rodar(cap, [(0, 60, VAZIA)]) == []
 
 
-def test_exposicao_automatica_nao_e_objeto():
+def test_variacao_de_brilho_dentro_da_margem_nao_e_objeto():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    mais_clara = cena(60).astype(np.uint8)
-    assert rodar(cap, [(0, 5, VAZIA), (5, 10, mais_clara), (10, 15, VAZIA)]) == []
+    mais_clara = cena(55).astype(np.uint8)  # 15 acima do teto; margem 20
+    assert rodar(cap, [(0, 6, VAZIA), (6, 10, mais_clara), (10, 15, VAZIA)]) == []
+
+
+def test_aprendizado_nao_grava():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    # nos primeiros aprendizado_s (5 s) nada é objeto; depois, é
+    assert rodar(cap, [(0, 2, VAZIA), (2, 4, OBJETO), (4, 8, VAZIA)]) == []
+    assert cap.lona.aprendida
+
+
+def test_aprendizado_so_conta_com_motor_ligado():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    cap.cfg = {**cap.cfg, "diferenca_minima": 1e9}  # só a lona importa
+    rodar(cap, [(0, 10, VAZIA)], ligado_desde=None)
+    assert not cap.lona.aprendida and cap.lona.teto is None
+    rodar(cap, [(10, 16, VAZIA)], ligado_desde=10.0)
+    assert cap.lona.aprendida
+
+
+def lona_andando(t, objeto=False, velocidade=160):
+    """
+    Lona não uniforme (textura, emenda escura, mancha clara) que anda para a
+    direita, sob uma luz fixa mais forte no centro; volta em 640/160 = 4 s.
+    """
+    rng = np.random.default_rng(7)
+    faixa = rng.uniform(25, 60, 640)
+    faixa[100:120] = 8     # emenda
+    faixa[400:430] = 95    # mancha
+    luz = 0.7 + 0.6 * np.exp(-((np.arange(640) - 320) / 200) ** 2)
+    linha = np.roll(faixa, int(round(t * velocidade))) * luz
+    q = np.repeat(linha[None, :, None], 480, axis=0).repeat(3, axis=2)
+    if objeto:
+        q[150:330, 250:400] = 200
+    return np.clip(q, 0, 255).astype(np.uint8)
+
+
+def test_lona_irregular_andando_so_grava_objeto():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    gravados = []
+    for t in np.arange(0, 40, 0.1):
+        t = round(float(t), 3)
+        q = lona_andando(t, objeto=20 <= t < 23)
+        if cap.quadro(q, t, HORARIO + timedelta(seconds=t), ligado_desde=0.0):
+            gravados.append(t)
+    assert gravados == [21.0]
 
 
 def test_objeto_dentro_do_intervalo_nao_grava():
@@ -196,25 +243,42 @@ def test_objeto_parado_ao_ligar_nao_e_novo():
     cap._gravar = lambda *a: True
     # posto com o motor desligado (o ramo da diferença é desligado aqui: só a lona importa)
     cap.cfg = {**cap.cfg, "diferenca_minima": 1e9}
-    rodar(cap, [(0, 5, VAZIA), (5, 10, OBJETO)], ligado_desde=None)
+    rodar(cap, [(0, 6, VAZIA)], ligado_desde=0.0)
+    rodar(cap, [(6, 8, VAZIA), (8, 10, OBJETO)], ligado_desde=None)
     assert rodar(cap, [(10, 12, OBJETO), (12, 20, VAZIA)], ligado_desde=10.0) == []
 
 
-def test_referencia_presa_e_refeita():
+def test_teto_baixo_e_aprendido_de_novo():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    # primeiro quadro com objeto: a lona vazia parece ocupada (sem foto: a
-    # referência ainda é provisória) até ser refeita (3 × travessia_s = 15 s) e
-    # confirmada (travessia_s vazia); o objeto seguinte é capturado
-    gravados = rodar(cap, [(0, 1, OBJETO), (1, 30, VAZIA), (30, 33, OBJETO)])
-    assert gravados == [31.0]
+    # a luz sobe depois do aprendizado: a lona vazia passa do teto, fica
+    # "ocupada" por mais de 3 × travessia_s (15 s, até 21 s), o teto é aprendido
+    # de novo (5 s) e o objeto seguinte é capturado
+    clara, objeto = cena(80).astype(np.uint8), cena(80, objeto=200).astype(np.uint8)
+    gravados = rodar(cap, [(0, 6, VAZIA), (6, 30, clara), (30, 33, objeto)])
+    assert gravados == [7.0, 31.0]  # 7,0: a luz subindo em 6 s parece objeto entrando
 
 
-def test_referencia_provisoria_nao_dispara():
+def test_objeto_no_aprendizado_sobe_o_teto():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    # objeto entra antes de a lona vazia ficar travessia_s igual à referência
-    assert rodar(cap, [(0, 3, VAZIA), (3, 6, OBJETO), (6, 15, VAZIA), (15, 18, OBJETO)]) == [16.0]
+    # o objeto do aprendizado (200) esconde outro igual no mesmo lugar, não um mais claro
+    roteiro = [(0, 2, VAZIA), (2, 4, OBJETO), (4, 15, VAZIA), (15, 18, OBJETO),
+               (18, 30, VAZIA), (30, 33, cena(40, objeto=250).astype(np.uint8))]
+    assert rodar(cap, roteiro) == [31.0]
+
+
+def test_ligar_automatica_e_mudar_camera_aprendem_de_novo():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    rodar(cap, [(0, 6, VAZIA)])
+    assert cap.lona.aprendida
+    cap.reaprender_lona("exposicao da câmera mudou")
+    assert not cap.lona.aprendida
+    rodar(cap, [(6, 12, VAZIA)])
+    cap.definir_automatica(False)
+    cap.definir_automatica(True)
+    assert not cap.lona.aprendida
 
 
 def test_desligar_automatica_cancela_pendente():
@@ -225,7 +289,7 @@ def test_desligar_automatica_cancela_pendente():
     cap.definir_automatica(False)
     rodar(cap, [(8.5, 9.0, OBJETO)])
     cap.definir_automatica(True)
-    # o mesmo objeto, ainda na lona, não é novo
+    # religada, aprende a lona de novo: o objeto que ficou não é gravado
     assert rodar(cap, [(9.0, 11, OBJETO)]) == []
 
 

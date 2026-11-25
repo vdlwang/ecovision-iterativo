@@ -6,8 +6,8 @@ hardware.
 Quando gravar (deve_capturar): nunca a menos de intervalo_s (Δ) da captura
 anterior. Com o motor ligado, por objeto novo (OcupacaoLona): quando um
 objeto entra na lona vazia, a captura sai atraso_s depois, com ele mais
-perto do centro do quadro; sem objeto, nada é gravado. O objeto novo vem da
-diferença para a lona vazia, não do YOLO, para a base não ficar só com o que
+perto do centro do quadro; sem objeto, nada é gravado. O objeto novo vem do
+teto aprendido da lona vazia, não do YOLO, para a base não ficar só com o que
 o modelo já detecta (OBJETIVO.md, "Captura sem duplicatas e vazamento").
 Com Δ acima do tempo de travessia do campo da câmera, um objeto não aparece
 em duas capturas. Com o motor desligado (ou em modo demonstração), só se o
@@ -46,11 +46,14 @@ PADROES_CAPTURA = {
     # motor ligado: a captura sai este tempo depois de um objeto entrar na lona
     # (do bordo ao centro do quadro: ~metade de travessia_s)
     "atraso_s": 1.5,
-    # fração da miniatura diferente da lona vazia para haver objeto (lona vazia
-    # deu 0-1,8%, com objeto 5,3-96%, na sessão de 2026-11-18)
+    # fração dos blocos da miniatura acima do teto da lona para haver objeto
+    # (quadros de 2026-11-24, margem 20: lona vazia andando até 0,3%, lata 10%)
     "ocupacao_minima": 0.03,
-    # diferença de um bloco da miniatura (0-255, brilho igualado) para contar como ocupado
-    "limiar_bloco": 40.0,
+    # brilho (0-255, sem igualar) acima do teto de um bloco para contar como ocupado
+    "margem_teto": 20.0,
+    # motor ligado e lona vazia por este tempo para aprender o teto: mais que
+    # uma volta da lona (~15 s em 2026-11-24), para todo trecho passar por todo bloco
+    "aprendizado_s": 20.0,
     # diferença média (0-255, em cinza, na miniatura) para gravar com o motor desligado
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95,
@@ -111,74 +114,76 @@ def diferenca_quadros(a, b):
     return float(np.abs(normalizar_brilho(a) - normalizar_brilho(b)).mean())
 
 
-def fracao_ocupada(mini, referencia, limiar_bloco):
-    """Fração dos blocos da miniatura que diferem da lona vazia (brilho igualado)."""
-    if referencia is None or mini.shape != referencia.shape:
+def fracao_acima_do_teto(mini, teto, margem):
+    """Fração dos blocos da miniatura mais claros que o teto da lona mais a margem."""
+    if teto is None or mini.shape != teto.shape:
         return 0.0
-    d = np.abs(normalizar_brilho(mini) - normalizar_brilho(referencia))
-    return float((d > limiar_bloco).mean())
+    return float((mini > teto + margem).mean())
 
 
-# Lona vazia: a referência acompanha mudanças lentas (luz) pela média móvel
-ALFA_REFERENCIA = 0.05
 # Ocupada por mais que isto × travessia_s com o motor ligado: nenhum objeto
-# fica tanto no campo andando; a referência é que ficou errada (câmera mexida,
-# primeiro quadro com objeto) e é refeita pelo quadro atual
+# fica tanto no campo andando; o teto é que ficou baixo (luz, câmera mexida)
+# e é aprendido de novo
 TRAVESSIAS_REFERENCIA_PRESA = 3
 
 
 class OcupacaoLona:
     """
-    Objeto novo na esteira pela diferença para a lona vazia, sem o YOLO.
-    A referência é o primeiro quadro e depois a média dos quadros vazios. Ela
-    começa provisória (o primeiro quadro pode ter um objeto parado no campo):
-    só dispara depois de o quadro ficar igual a ela por travessia_s com o motor
-    ligado, o que um objeto andando na esteira não faz.
+    Objeto novo na esteira pelo teto da lona, sem o YOLO. A lona não é
+    uniforme (emenda, manchas) e anda, mas a luz e a câmera são fixas: em
+    uma volta, todo trecho dela passa por todo bloco do quadro. O teto é o
+    maior brilho que cada bloco da miniatura teve com a lona vazia andando
+    por aprendizado_s; depois, um bloco mais claro que o teto mais
+    margem_teto está ocupado. Sem igualar o brilho: pede a exposição
+    travada. Só objetos mais claros que a lona são vistos, e um objeto que
+    passe durante o aprendizado sobe o teto onde passou (aprenda com a lona
+    vazia; ligar a automática ou mudar a câmera aprende de novo).
     """
 
     def __init__(self, cfg):
         self.cfg = cfg
-        self.referencia = None
-        self.ocupada = False
-        self.ocupada_desde = None  # só conta com o motor ligado
-        self.vazia_desde = None  # idem
-        self.confirmada = False
-        self.ocupacao = 0.0
+        self.reaprender()
 
-    def _refazer(self, mini):
-        self.referencia = mini.copy()
-        self.ocupada, self.ocupada_desde, self.vazia_desde = False, None, None
-        self.confirmada, self.ocupacao = False, 0.0
+    def reaprender(self):
+        self.teto = None
+        self.aprendendo_desde = None
+        self.aprendida = False
+        self.ocupada, self.ocupada_desde, self.ocupacao = False, None, 0.0
 
     def quadro(self, mini, agora, motor_ligado):
         """Atualiza com a miniatura do quadro; True se um objeto acabou de entrar."""
-        if self.referencia is None or self.referencia.shape != mini.shape:
-            self._refazer(mini)
-            return False
-        self.ocupacao = fracao_ocupada(mini, self.referencia, self.cfg["limiar_bloco"])
-        ocupada = self.ocupacao >= self.cfg["ocupacao_minima"]
-        entrou = ocupada and not self.ocupada and self.confirmada
-        if not ocupada:
-            self.ocupada_desde = None
-            self.referencia = (1 - ALFA_REFERENCIA) * self.referencia + ALFA_REFERENCIA * mini
+        if self.teto is not None and self.teto.shape != mini.shape:
+            self.reaprender()
+        if not self.aprendida:
+            # Só com a lona andando: parada, um trecho só passaria pelos blocos
             if not motor_ligado:
-                self.vazia_desde = None
-            elif self.vazia_desde is None:
-                self.vazia_desde = agora
-            elif not self.confirmada and agora - self.vazia_desde >= self.cfg["travessia_s"]:
-                self.confirmada = True
-                log.debug("Captura: referência da lona vazia confirmada")
-        else:
-            self.vazia_desde = None
-            if not motor_ligado:
-                self.ocupada_desde = None
-            elif self.ocupada_desde is None:
-                self.ocupada_desde = agora
-            elif agora - self.ocupada_desde > TRAVESSIAS_REFERENCIA_PRESA * self.cfg["travessia_s"]:
-                log.info("Captura: lona ocupada há %.0f s com a esteira andando; referência refeita",
-                         agora - self.ocupada_desde)
-                self._refazer(mini)
+                self.aprendendo_desde = None
                 return False
+            if self.teto is None:
+                self.teto = mini.copy()
+                log.info("Captura: aprendendo a lona (%.0f s com o motor ligado e a lona vazia)",
+                         self.cfg["aprendizado_s"])
+            else:
+                np.maximum(self.teto, mini, out=self.teto)
+            if self.aprendendo_desde is None:
+                self.aprendendo_desde = agora
+            elif agora - self.aprendendo_desde >= self.cfg["aprendizado_s"]:
+                self.aprendida = True
+                log.info("Captura: lona aprendida")
+            return False
+
+        self.ocupacao = fracao_acima_do_teto(mini, self.teto, self.cfg["margem_teto"])
+        ocupada = self.ocupacao >= self.cfg["ocupacao_minima"]
+        entrou = ocupada and not self.ocupada
+        if not ocupada or not motor_ligado:
+            self.ocupada_desde = None
+        elif self.ocupada_desde is None:
+            self.ocupada_desde = agora
+        elif agora - self.ocupada_desde > TRAVESSIAS_REFERENCIA_PRESA * self.cfg["travessia_s"]:
+            log.info("Captura: lona ocupada há %.0f s com a esteira andando; aprendendo de novo",
+                     agora - self.ocupada_desde)
+            self.reaprender()
+            return False
         self.ocupada = ocupada
         return entrou
 
@@ -313,10 +318,22 @@ class Capturador:
                 return
             self.automatica = ativa
             log.info("Captura automática %s", "ligada" if ativa else "desligada")
+            if ativa:
+                # Ligar com a lona vazia aprende o teto de novo (um objeto que
+                # passou no aprendizado anterior deixou o teto alto ali)
+                self.lona.reaprender()
             if self.sessao is not None:
                 horario = horario or datetime.now(timezone.utc)
                 self.sessao.registrar({"tipo": "automatica", "ativa": ativa,
                                              "horario": horario.astimezone(timezone.utc).isoformat()})
+
+    def reaprender_lona(self, motivo):
+        """Esquece o teto da lona (foco, exposição ou ganho mudaram o brilho)."""
+        with self._trava:
+            if self.lona.teto is not None:
+                log.info("Captura: %s; a lona será aprendida de novo", motivo)
+            self.lona.reaprender()
+            self.pendente_em = None
 
     def _abrir_sessao(self, horario):
         if self.sessao is None:
@@ -353,8 +370,8 @@ class Capturador:
         motor_ligado = ligado_desde is not None
         with self._trava:
             diferenca = None if motor_ligado else diferenca_quadros(mini, self.ultima_miniatura)
-            # A lona é acompanhada com o motor desligado também (referência vazia
-            # atualizada; objeto parado no campo não conta como novo ao ligar)
+            # A lona é acompanhada com o motor desligado também (objeto posto
+            # com a esteira parada não conta como novo ao ligar)
             if self.lona.quadro(mini, agora, motor_ligado) and motor_ligado \
                     and self.pendente_em is None:
                 self.pendente_em = agora + self.cfg["atraso_s"]

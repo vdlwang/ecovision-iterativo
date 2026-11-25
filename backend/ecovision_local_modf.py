@@ -279,6 +279,8 @@ def ajuste_mudou(controle, estado):
     """
     if 'erro' in estado:
         return
+    if capturador is not None:
+        capturador.reaprender_lona(f"{controle} da câmera mudou")
     camera = config['camera']
     if controle == 'ganho':
         camera['ganho'] = estado['ganho']
