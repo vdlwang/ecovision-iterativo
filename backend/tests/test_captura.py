@@ -12,7 +12,8 @@ from captura import (
 )
 
 CFG = {**PADROES_CAPTURA, "intervalo_s": 10.0, "travessia_s": 5.0, "atraso_s": 1.0,
-       "diferenca_minima": 10.0, "aprendizado_s": 5.0, "margem_teto": 20.0}
+       "diferenca_minima": 10.0, "volta_s": 2.5, "voltas_aprendizado": 2,
+       "margem_teto": 20.0}  # aprende em 2 janelas de 2,5 s: pronto em ~5,1 s
 HORARIO = datetime(2026, 11, 15, 23, 29, 3, 146000, tzinfo=timezone.utc)
 
 
@@ -192,7 +193,7 @@ def test_variacao_de_brilho_dentro_da_margem_nao_e_objeto():
 def test_aprendizado_nao_grava():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    # nos primeiros aprendizado_s (5 s) nada é objeto; depois, é
+    # no aprendizado (2 × volta_s, ~5 s) nada é objeto; depois, é
     assert rodar(cap, [(0, 2, VAZIA), (2, 4, OBJETO), (4, 8, VAZIA)]) == []
     assert cap.lona.aprendida
 
@@ -225,7 +226,7 @@ def lona_andando(t, objeto=False, velocidade=160):
 
 
 def test_lona_irregular_andando_so_grava_objeto():
-    cap = Capturador("/nao/usado", CFG)
+    cap = Capturador("/nao/usado", {**CFG, "volta_s": 4.5})  # a volta (4 s) cabe na janela
     cap._gravar = lambda *a: True
     gravados = []
     for t in np.arange(0, 40, 0.1):
@@ -285,10 +286,18 @@ def test_teto_baixo_e_aprendido_de_novo():
     assert gravados == [7.0, 31.0]  # 7,0: a luz subindo em 6 s parece objeto entrando
 
 
-def test_objeto_no_aprendizado_sobe_o_teto():
+def test_objeto_numa_janela_do_aprendizado_nao_sobe_o_teto():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    # o objeto do aprendizado (200) esconde outro igual no mesmo lugar, não um mais claro
+    # só na 1ª janela (0-2,5 s): o mínimo dos máximos o descarta
+    roteiro = [(0, 0.5, VAZIA), (0.5, 2, OBJETO), (2, 15, VAZIA), (15, 18, OBJETO)]
+    assert rodar(cap, roteiro) == [16.0]
+
+
+def test_objeto_nas_duas_janelas_do_aprendizado_sobe_o_teto():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    # nas duas janelas (2-4 s): esconde outro igual no mesmo lugar, não um mais claro
     roteiro = [(0, 2, VAZIA), (2, 4, OBJETO), (4, 15, VAZIA), (15, 18, OBJETO),
                (18, 30, VAZIA), (30, 33, cena(40, objeto=250).astype(np.uint8))]
     assert rodar(cap, roteiro) == [31.0]
@@ -319,6 +328,26 @@ def test_desligar_automatica_cancela_pendente():
     assert rodar(cap, [(9.0, 11, OBJETO)]) == []
 
 
+def test_objetos_em_sequencia_nao_reaprendem():
+    cap = Capturador("/nao/usado", {**CFG, "intervalo_s": 4.0})
+    cap._gravar = lambda *a: (setattr(cap, "ultima_captura", a[1]) or True)
+    # objetos (um quarto do quadro, < 30%) um atrás do outro por 30 s: a lona
+    # fica ocupada mais que 3 × travessia_s, mas o teto não é refeito
+    roteiro = [(0, 6, VAZIA), (6, 36, OBJETO), (36, 40, VAZIA), (40, 43, OBJETO)]
+    rodar(cap, roteiro)
+    assert cap.lona.aprendida and not cap.lona.eventos
+
+
+def test_eventos_da_lona_vao_ao_jsonl(tmp_path):
+    cap = Capturador(tmp_path, CFG)
+    rodar(cap, [(0, 1, VAZIA)], ligado_desde=None)  # motor desligado: abre a sessão
+    rodar(cap, [(1, 8, VAZIA)])
+    cap.fechar()
+    [sessao] = list(tmp_path.iterdir())
+    eventos = [l["evento"] for l in ler_jsonl(sessao) if l["tipo"] == "lona"]
+    assert eventos == ["aprendendo", "aprendida"]
+
+
 # ==== reserva: trilhas do YOLO que a lona não viu ====
 
 def test_yolo_grava_objeto_que_a_lona_nao_ve():
@@ -342,14 +371,15 @@ def test_objeto_da_lona_nao_dispara_de_novo_pelo_yolo():
 def test_deteccao_solta_do_yolo_nao_dispara():
     cap = Capturador("/nao/usado", CFG)
     cap._gravar = lambda *a: True
-    # 2 quadros < quadros_trilha_yolo (3)
-    assert rodar(cap, [(0, 20, VAZIA), (20, 20.2, VAZIA, [7]), (20.2, 30, VAZIA)]) == []
+    # 7 quadros < quadros_trilha_yolo (8)
+    assert rodar(cap, [(0, 20, VAZIA), (20, 20.7, VAZIA, [7]), (20.7, 30, VAZIA)]) == []
 
 
 def test_trilha_que_some_antes_do_atraso_nao_grava():
-    cap = Capturador("/nao/usado", CFG)
+    cap = Capturador("/nao/usado", {**CFG, "atraso_s": 2.0})
     cap._gravar = lambda *a: True
-    assert rodar(cap, [(0, 20, VAZIA), (20, 20.4, VAZIA, [7]), (20.4, 30, VAZIA)]) == []
+    # conta em 20,7 s (8 quadros), some em 20,9; a captura seria em 22,0
+    assert rodar(cap, [(0, 20, VAZIA), (20, 20.9, VAZIA, [7]), (20.9, 30, VAZIA)]) == []
 
 
 def test_trilha_parada_ao_ligar_o_motor_nao_e_nova():

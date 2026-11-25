@@ -21,9 +21,10 @@
     "atraso_s": 1.0,
     "blocos_minimos": 6,
     "margem_teto": 20.0,
-    "aprendizado_s": 20.0,
+    "volta_s": 18.0,
+    "voltas_aprendizado": 2,
     "backup_yolo": true,
-    "quadros_trilha_yolo": 3,
+    "quadros_trilha_yolo": 8,
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95
   },

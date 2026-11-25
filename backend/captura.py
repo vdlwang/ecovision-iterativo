@@ -58,11 +58,15 @@ PADROES_CAPTURA = {
     # reserva: uma trilha nova do YOLO (acima da confiança do config.json) que a
     # lona não viu dispara a captura, como a lona; o gatilho vai ao captura.jsonl
     "backup_yolo": True,
-    # quadros com a trilha para ela contar (uma detecção solta não dispara)
-    "quadros_trilha_yolo": 3,
-    # motor ligado e lona vazia por este tempo para aprender o teto: mais que
-    # uma volta da lona (~15 s em 2026-11-24), para todo trecho passar por todo bloco
-    "aprendizado_s": 20.0,
+    # quadros com a trilha para ela contar: com 3, trilhas falsas na lona vazia
+    # dispararam 2 de 9 capturas em 2026-11-25
+    "quadros_trilha_yolo": 8,
+    # tempo de uma volta da lona com o motor ligado (~15 s em 2026-11-24, com
+    # folga): numa volta, todo trecho dela passa por todo bloco do quadro
+    "volta_s": 18.0,
+    # o teto é aprendido em tantas voltas: o máximo de cada uma, e o menor
+    # deles. A lona aparece em todas; um objeto que passou numa só, não
+    "voltas_aprendizado": 2,
     # diferença média (0-255, em cinza, na miniatura) para gravar com o motor desligado
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95,
@@ -133,20 +137,26 @@ def maior_regiao(mascara):
 # fica tanto no campo andando; o teto é que ficou baixo (luz, câmera mexida)
 # e é aprendido de novo
 TRAVESSIAS_REFERENCIA_PRESA = 3
+# ... e com pelo menos esta fração dos blocos acima do teto (objetos em
+# sequência ocupam bem menos; a luz subindo ou a câmera mexida, quase tudo)
+FRACAO_REFERENCIA_PRESA = 0.3
 
 
 class OcupacaoLona:
     """
     Objeto novo na esteira pelo teto da lona, sem o YOLO. A lona não é
     uniforme (emenda, manchas) e anda, mas a luz e a câmera são fixas: em
-    uma volta, todo trecho dela passa por todo bloco do quadro. O teto é o
-    maior brilho que cada bloco da miniatura teve com a lona vazia andando
-    por aprendizado_s; depois, um bloco mais claro que o teto mais
-    margem_teto está ocupado, e há objeto quando o maior grupo de blocos
-    ocupados vizinhos tem blocos_minimos (o ruído sai solto). Sem igualar o brilho: pede a exposição
-    travada. Só objetos mais claros que a lona são vistos, e um objeto que
-    passe durante o aprendizado sobe o teto onde passou (aprenda com a lona
-    vazia; ligar a automática ou mudar a câmera aprende de novo).
+    uma volta, todo trecho dela passa por todo bloco do quadro. O teto de
+    cada bloco da miniatura é aprendido com o motor ligado em
+    voltas_aprendizado janelas de volta_s: o maior brilho de cada janela, e
+    o menor desses máximos. A emenda e as manchas da lona aparecem em toda
+    janela e ficam no teto; um objeto que passou numa janela só, não (com o
+    máximo de uma janela só, como antes, um objeto no aprendizado subia o
+    teto na faixa inteira por onde passou, e a lona deixava de ver os
+    objetos ali). Depois, um bloco mais claro que o teto mais margem_teto
+    está ocupado, e há objeto quando o maior grupo de blocos ocupados
+    vizinhos tem blocos_minimos (o ruído sai solto). Sem igualar o brilho:
+    pede a exposição travada. Só objetos mais claros que a lona são vistos.
     """
 
     def __init__(self, cfg):
@@ -155,31 +165,42 @@ class OcupacaoLona:
 
     def reaprender(self):
         self.teto = None
-        self.aprendendo_desde = None
+        self.maximos = []  # o máximo de cada janela de volta_s já completa
+        self.janela = None  # máximo da janela em curso
+        self.janela_desde = None
         self.aprendida = False
+        self.eventos = []  # "aprendendo", "aprendida", "presa": vão ao captura.jsonl
         self.ocupada, self.ocupada_desde = False, None
         self.ocupacao, self.regiao = 0.0, 0  # fração de blocos ocupados; maior grupo
 
     def quadro(self, mini, agora, motor_ligado):
         """Atualiza com a miniatura do quadro; True se um objeto acabou de entrar."""
-        if self.teto is not None and self.teto.shape != mini.shape:
+        anterior = self.teto if self.aprendida else self.janela
+        if anterior is not None and anterior.shape != mini.shape:
             self.reaprender()
         if not self.aprendida:
-            # Só com a lona andando: parada, um trecho só passaria pelos blocos
+            # Só com a lona andando: parada, um trecho só passaria pelos
+            # blocos; a janela em curso recomeça
             if not motor_ligado:
-                self.aprendendo_desde = None
+                self.janela, self.janela_desde = None, None
                 return False
-            if self.teto is None:
-                self.teto = mini.copy()
-                log.info("Captura: aprendendo a lona (%.0f s com o motor ligado e a lona vazia)",
-                         self.cfg["aprendizado_s"])
+            if self.janela is None:
+                if not self.maximos:
+                    self.eventos.append("aprendendo")
+                    log.info("Captura: aprendendo a lona (%d voltas de %.0f s com o motor ligado)",
+                             self.cfg["voltas_aprendizado"], self.cfg["volta_s"])
+                self.janela, self.janela_desde = mini.copy(), agora
             else:
-                np.maximum(self.teto, mini, out=self.teto)
-            if self.aprendendo_desde is None:
-                self.aprendendo_desde = agora
-            elif agora - self.aprendendo_desde >= self.cfg["aprendizado_s"]:
-                self.aprendida = True
-                log.info("Captura: lona aprendida")
+                np.maximum(self.janela, mini, out=self.janela)
+            if agora - self.janela_desde >= self.cfg["volta_s"]:
+                self.maximos.append(self.janela)
+                self.janela, self.janela_desde = None, None
+                if len(self.maximos) >= self.cfg["voltas_aprendizado"]:
+                    self.teto = np.minimum.reduce(self.maximos)
+                    self.maximos = []
+                    self.aprendida = True
+                    self.eventos.append("aprendida")
+                    log.info("Captura: lona aprendida")
             return False
 
         acima = mini > self.teto + self.cfg["margem_teto"]
@@ -191,10 +212,15 @@ class OcupacaoLona:
             self.ocupada_desde = None
         elif self.ocupada_desde is None:
             self.ocupada_desde = agora
+        elif self.ocupacao < FRACAO_REFERENCIA_PRESA:
+            # Objetos passando em sequência mantêm a lona ocupada sem o teto
+            # estar errado: só o quadro todo acima do teto (luz, câmera) conta
+            self.ocupada_desde = agora
         elif agora - self.ocupada_desde > TRAVESSIAS_REFERENCIA_PRESA * self.cfg["travessia_s"]:
-            log.info("Captura: lona ocupada há %.0f s com a esteira andando; aprendendo de novo",
-                     agora - self.ocupada_desde)
+            log.info("Captura: %.0f%% da lona acima do teto há %.0f s com a esteira andando; "
+                     "aprendendo de novo", 100 * self.ocupacao, agora - self.ocupada_desde)
             self.reaprender()
+            self.eventos.append("presa")
             return False
         self.ocupada = ocupada
         return entrou
@@ -438,8 +464,13 @@ class Capturador:
             diferenca = None if motor_ligado else diferenca_quadros(mini, self.ultima_miniatura)
             # A lona é acompanhada com o motor desligado também (objeto posto
             # com a esteira parada não conta como novo ao ligar)
-            if self.lona.quadro(mini, agora, motor_ligado) and motor_ligado \
-                    and self.pendente_em is None:
+            entrou = self.lona.quadro(mini, agora, motor_ligado)
+            for evento in self.lona.eventos:
+                if self.sessao is not None:
+                    self.sessao.registrar({"tipo": "lona", "evento": evento,
+                                           "horario": horario.astimezone(timezone.utc).isoformat()})
+            self.lona.eventos.clear()
+            if entrou and motor_ligado and self.pendente_em is None:
                 self._agendar(agora + self.cfg["atraso_s"], "lona")
                 log.debug("Captura: objeto entrou na lona (%d blocos, %.1f%%)",
                           self.lona.regiao, 100 * self.lona.ocupacao)
