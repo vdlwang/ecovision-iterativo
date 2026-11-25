@@ -136,7 +136,8 @@ def test_grava_quadro_com_exif_e_registro(tmp_path):
     assert linha == {"tipo": "quadro", "arquivo": "20261115T232903.146Z.jpg",
                      "horario": "2026-11-15T23:29:03.146000+00:00", "largura": 640,
                      "altura": 480, "origem": "automatica", "motor_ligado": False,
-                     "diferenca": None, "ocupacao": None, "fps": 12}
+                     "diferenca": None, "ocupacao": None, "regiao": None,
+                     "fps": 12}
 
 
 # ==== motor ligado: captura por objeto novo na lona ====
@@ -246,6 +247,19 @@ def test_objeto_parado_ao_ligar_nao_e_novo():
     rodar(cap, [(0, 6, VAZIA)], ligado_desde=0.0)
     rodar(cap, [(6, 8, VAZIA), (8, 10, OBJETO)], ligado_desde=None)
     assert rodar(cap, [(10, 12, OBJETO), (12, 20, VAZIA)], ligado_desde=10.0) == []
+
+
+def test_objeto_pequeno_grava_e_ruido_solto_nao():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    # miniatura 64×48 de um quadro 640×480: blocos de 10×10 px
+    tampa = cena(40).astype(np.uint8)
+    tampa[200:230, 300:330] = 200  # 3×3 blocos: 9 ≥ blocos_minimos (6), 0,3% do quadro
+    ruido = cena(40).astype(np.uint8)
+    for y, x in [(20, 20), (100, 400), (300, 100), (420, 600), (240, 500)]:
+        ruido[y:y + 20, x:x + 10] = 200  # 5 grupos soltos de 2 blocos
+    roteiro = [(0, 6, VAZIA), (6, 9, ruido), (9, 20, VAZIA), (20, 23, tampa), (23, 30, VAZIA)]
+    assert rodar(cap, roteiro) == [21.0]
 
 
 def test_teto_baixo_e_aprendido_de_novo():

@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock, Thread
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -46,9 +47,11 @@ PADROES_CAPTURA = {
     # motor ligado: a captura sai este tempo depois de um objeto entrar na lona
     # (do bordo ao centro do quadro: ~metade de travessia_s)
     "atraso_s": 1.5,
-    # fração dos blocos da miniatura acima do teto da lona para haver objeto
-    # (quadros de 2026-11-24, margem 20: lona vazia andando até 0,3%, lata 10%)
-    "ocupacao_minima": 0.03,
+    # blocos vizinhos da miniatura (~20×20 px em 1280×720) acima do teto da
+    # lona para haver objeto: o ruído da lona vazia sai em blocos soltos (maior
+    # grupo de 3 nos quadros de 2026-11-24, margem 20; a lata deu 220), e um
+    # objeto pequeno como uma tampa dá ~10-25. Antes, 3% do quadro (~69 blocos)
+    "blocos_minimos": 6,
     # brilho (0-255, sem igualar) acima do teto de um bloco para contar como ocupado
     "margem_teto": 20.0,
     # motor ligado e lona vazia por este tempo para aprender o teto: mais que
@@ -114,11 +117,10 @@ def diferenca_quadros(a, b):
     return float(np.abs(normalizar_brilho(a) - normalizar_brilho(b)).mean())
 
 
-def fracao_acima_do_teto(mini, teto, margem):
-    """Fração dos blocos da miniatura mais claros que o teto da lona mais a margem."""
-    if teto is None or mini.shape != teto.shape:
-        return 0.0
-    return float((mini > teto + margem).mean())
+def maior_regiao(mascara):
+    """Tamanho, em blocos, do maior grupo de blocos vizinhos (8-conexo) da máscara."""
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mascara.astype(np.uint8), connectivity=8)
+    return int(stats[1:, cv2.CC_STAT_AREA].max()) if n > 1 else 0
 
 
 # Ocupada por mais que isto × travessia_s com o motor ligado: nenhum objeto
@@ -134,7 +136,8 @@ class OcupacaoLona:
     uma volta, todo trecho dela passa por todo bloco do quadro. O teto é o
     maior brilho que cada bloco da miniatura teve com a lona vazia andando
     por aprendizado_s; depois, um bloco mais claro que o teto mais
-    margem_teto está ocupado. Sem igualar o brilho: pede a exposição
+    margem_teto está ocupado, e há objeto quando o maior grupo de blocos
+    ocupados vizinhos tem blocos_minimos (o ruído sai solto). Sem igualar o brilho: pede a exposição
     travada. Só objetos mais claros que a lona são vistos, e um objeto que
     passe durante o aprendizado sobe o teto onde passou (aprenda com a lona
     vazia; ligar a automática ou mudar a câmera aprende de novo).
@@ -148,7 +151,8 @@ class OcupacaoLona:
         self.teto = None
         self.aprendendo_desde = None
         self.aprendida = False
-        self.ocupada, self.ocupada_desde, self.ocupacao = False, None, 0.0
+        self.ocupada, self.ocupada_desde = False, None
+        self.ocupacao, self.regiao = 0.0, 0  # fração de blocos ocupados; maior grupo
 
     def quadro(self, mini, agora, motor_ligado):
         """Atualiza com a miniatura do quadro; True se um objeto acabou de entrar."""
@@ -172,8 +176,10 @@ class OcupacaoLona:
                 log.info("Captura: lona aprendida")
             return False
 
-        self.ocupacao = fracao_acima_do_teto(mini, self.teto, self.cfg["margem_teto"])
-        ocupada = self.ocupacao >= self.cfg["ocupacao_minima"]
+        acima = mini > self.teto + self.cfg["margem_teto"]
+        self.ocupacao = float(acima.mean())
+        self.regiao = maior_regiao(acima)
+        ocupada = self.regiao >= self.cfg["blocos_minimos"]
         entrou = ocupada and not self.ocupada
         if not ocupada or not motor_ligado:
             self.ocupada_desde = None
@@ -375,7 +381,8 @@ class Capturador:
             if self.lona.quadro(mini, agora, motor_ligado) and motor_ligado \
                     and self.pendente_em is None:
                 self.pendente_em = agora + self.cfg["atraso_s"]
-                log.debug("Captura: objeto entrou na lona (%.1f%%)", 100 * self.lona.ocupacao)
+                log.debug("Captura: objeto entrou na lona (%d blocos, %.1f%%)",
+                          self.lona.regiao, 100 * self.lona.ocupacao)
             if not motor_ligado:
                 self.pendente_em = None
             objeto_pronto = False
@@ -389,6 +396,7 @@ class Capturador:
                 "origem": "automatica", "motor_ligado": motor_ligado,
                 "diferenca": diferenca,
                 "ocupacao": round(self.lona.ocupacao, 4) if motor_ligado else None,
+                "regiao": self.lona.regiao if motor_ligado else None,
                 **(info or {})})
 
     def manual(self, quadro_bgr, agora, horario, ligado_desde, info=None):

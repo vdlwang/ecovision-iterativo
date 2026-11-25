@@ -19,7 +19,7 @@
     "intervalo_s": 10.0,
     "travessia_s": 5.0,
     "atraso_s": 1.0,
-    "ocupacao_minima": 0.03,
+    "blocos_minimos": 6,
     "margem_teto": 20.0,
     "aprendizado_s": 20.0,
     "diferenca_minima": 10.0,
