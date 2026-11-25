@@ -136,7 +136,7 @@ def test_grava_quadro_com_exif_e_registro(tmp_path):
     assert linha == {"tipo": "quadro", "arquivo": "20261115T232903.146Z.jpg",
                      "horario": "2026-11-15T23:29:03.146000+00:00", "largura": 640,
                      "altura": 480, "origem": "automatica", "motor_ligado": False,
-                     "diferenca": None, "ocupacao": None, "regiao": None,
+                     "gatilho": "diferenca", "diferenca": None, "ocupacao": None, "regiao": None,
                      "fps": 12}
 
 
@@ -147,14 +147,26 @@ OBJETO = cena(40, objeto=200).astype(np.uint8)  # ocupa um quarto do quadro
 
 
 def rodar(cap, roteiro, ligado_desde=0.0, passo=0.1):
-    """roteiro: [(início, fim, quadro)] em segundos; devolve os instantes gravados."""
+    """
+    roteiro: [(início, fim, quadro)] ou [(início, fim, quadro, ids das trilhas do
+    YOLO)] em segundos; devolve os instantes gravados.
+    """
     gravados = []
-    for inicio, fim, q in roteiro:
+    for inicio, fim, q, *ids in roteiro:
+        info = {"detections": [{"id": i} for i in (ids[0] if ids else [])]}
         for t in np.arange(inicio, fim - 1e-9, passo):
             t = round(float(t), 3)
-            if cap.quadro(q, t, HORARIO + timedelta(seconds=t), ligado_desde=ligado_desde):
+            if cap.quadro(q, t, HORARIO + timedelta(seconds=t), ligado_desde=ligado_desde,
+                          info=info):
                 gravados.append(t)
     return gravados
+
+
+def registrando(cap):
+    """Troca a gravação por uma lista dos dados de cada captura."""
+    dados = []
+    cap._gravar = lambda q, agora, horario, mini, d: dados.append(d) or True
+    return dados
 
 
 def test_objeto_novo_grava_atraso_depois():
@@ -305,6 +317,54 @@ def test_desligar_automatica_cancela_pendente():
     cap.definir_automatica(True)
     # religada, aprende a lona de novo: o objeto que ficou não é gravado
     assert rodar(cap, [(9.0, 11, OBJETO)]) == []
+
+
+# ==== reserva: trilhas do YOLO que a lona não viu ====
+
+def test_yolo_grava_objeto_que_a_lona_nao_ve():
+    cap = Capturador("/nao/usado", CFG)
+    dados = registrando(cap)
+    # objeto escuro: o quadro é a lona vazia, só o YOLO o vê
+    assert rodar(cap, [(0, 20, VAZIA), (20, 23, VAZIA, [7]), (23, 30, VAZIA)]) == [21.0]
+    assert dados[0]["gatilho"] == "yolo" and dados[0]["trilha"] == 7
+
+
+def test_objeto_da_lona_nao_dispara_de_novo_pelo_yolo():
+    cap = Capturador("/nao/usado", CFG)
+    dados = registrando(cap)
+    # o YOLO acha o objeto 0,5 s depois e continua com ele depois que a lona o perde
+    roteiro = [(0, 20, VAZIA), (20, 20.5, OBJETO), (20.5, 23, OBJETO, [7]),
+               (23, 25, VAZIA, [7]), (25, 40, VAZIA)]
+    assert rodar(cap, roteiro) == [21.0]
+    assert dados[0]["gatilho"] == "lona" and "trilha" not in dados[0]
+
+
+def test_deteccao_solta_do_yolo_nao_dispara():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    # 2 quadros < quadros_trilha_yolo (3)
+    assert rodar(cap, [(0, 20, VAZIA), (20, 20.2, VAZIA, [7]), (20.2, 30, VAZIA)]) == []
+
+
+def test_trilha_que_some_antes_do_atraso_nao_grava():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    assert rodar(cap, [(0, 20, VAZIA), (20, 20.4, VAZIA, [7]), (20.4, 30, VAZIA)]) == []
+
+
+def test_trilha_parada_ao_ligar_o_motor_nao_e_nova():
+    cap = Capturador("/nao/usado", CFG)
+    cap._gravar = lambda *a: True
+    cap.cfg = {**cap.cfg, "diferenca_minima": 1e9}  # só os gatilhos do motor ligado
+    rodar(cap, [(0, 6, VAZIA)], ligado_desde=0.0)
+    rodar(cap, [(6, 10, VAZIA, [7])], ligado_desde=None)
+    assert rodar(cap, [(10, 13, VAZIA, [7]), (13, 20, VAZIA)], ligado_desde=10.0) == []
+
+
+def test_backup_yolo_desligado():
+    cap = Capturador("/nao/usado", {**CFG, "backup_yolo": False})
+    cap._gravar = lambda *a: True
+    assert rodar(cap, [(0, 20, VAZIA), (20, 23, VAZIA, [7]), (23, 30, VAZIA)]) == []
 
 
 # ==== motor desligado ====

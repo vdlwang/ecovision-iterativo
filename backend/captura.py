@@ -8,7 +8,8 @@ anterior. Com o motor ligado, por objeto novo (OcupacaoLona): quando um
 objeto entra na lona vazia, a captura sai atraso_s depois, com ele mais
 perto do centro do quadro; sem objeto, nada é gravado. O objeto novo vem do
 teto aprendido da lona vazia, não do YOLO, para a base não ficar só com o que
-o modelo já detecta (OBJETIVO.md, "Captura sem duplicatas e vazamento").
+o modelo já detecta; o YOLO é só reserva (BackupYolo), para o que o teto não
+vê (objetos escuros), e cada captura registra o gatilho (OBJETIVO.md, "Captura sem duplicatas e vazamento").
 Com Δ acima do tempo de travessia do campo da câmera, um objeto não aparece
 em duas capturas. Com o motor desligado (ou em modo demonstração), só se o
 quadro difere do último gravado (objetos postos à mão, esteira parada).
@@ -54,6 +55,11 @@ PADROES_CAPTURA = {
     "blocos_minimos": 6,
     # brilho (0-255, sem igualar) acima do teto de um bloco para contar como ocupado
     "margem_teto": 20.0,
+    # reserva: uma trilha nova do YOLO (acima da confiança do config.json) que a
+    # lona não viu dispara a captura, como a lona; o gatilho vai ao captura.jsonl
+    "backup_yolo": True,
+    # quadros com a trilha para ela contar (uma detecção solta não dispara)
+    "quadros_trilha_yolo": 3,
     # motor ligado e lona vazia por este tempo para aprender o teto: mais que
     # uma volta da lona (~15 s em 2026-11-24), para todo trecho passar por todo bloco
     "aprendizado_s": 20.0,
@@ -194,6 +200,55 @@ class OcupacaoLona:
         return entrou
 
 
+# Trilha do YOLO ainda presente se vista há no máximo isto (o rastreador perde
+# quadros); esquecida depois de TRAVESSIAS_REFERENCIA_PRESA × travessia_s sem ela
+TRILHA_PRESENTE_S = 0.5
+
+
+class BackupYolo:
+    """
+    Reserva da OcupacaoLona: trilhas do rastreador que a lona não viu. Cada
+    trilha dispara no máximo uma vez, depois de quadros_trilha_yolo quadros;
+    uma trilha vista com a lona ocupada (a lona já cuida do objeto) ou com o
+    motor desligado (objeto parado no campo) fica coberta e não dispara.
+    Traz de volta o viés de amostragem (só o que o modelo vê), por isso só
+    como reserva e com o gatilho registrado (OBJETIVO.md, revista 2026-11-24).
+    """
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.vistas = {}  # id → [primeira vez, última vez, quadros]
+        self.cobertas = set()
+
+    def cobrir_todas(self):
+        self.cobertas.update(self.vistas)
+
+    def primeira_vez(self, trilha):
+        return self.vistas[trilha][0]
+
+    def presente(self, trilha, agora):
+        v = self.vistas.get(trilha)
+        return v is not None and agora - v[1] <= TRILHA_PRESENTE_S
+
+    def quadro(self, trilhas, agora, cobrir):
+        """Atualiza com os ids do quadro; devolve o id de uma trilha que acabou de contar, ou None."""
+        for t in trilhas:
+            v = self.vistas.setdefault(t, [agora, agora, 0])
+            v[1] = agora
+            v[2] += 1
+            if cobrir:
+                self.cobertas.add(t)
+        esquecer = TRAVESSIAS_REFERENCIA_PRESA * self.cfg["travessia_s"]
+        for t in [t for t, v in self.vistas.items() if agora - v[1] > esquecer]:
+            del self.vistas[t]
+            self.cobertas.discard(t)
+        for t in trilhas:
+            if t not in self.cobertas and self.vistas[t][2] >= self.cfg["quadros_trilha_yolo"]:
+                self.cobertas.add(t)
+                return t
+        return None
+
+
 def deve_capturar(agora, ultima_captura, ligado_desde, diferenca, cfg, objeto_pronto=False):
     """
     Decide se o quadro atual é gravado. Tempos em segundos de time.monotonic().
@@ -310,7 +365,10 @@ class Capturador:
         # Desligada, só a manual grava.
         self.automatica = automatica
         self.lona = OcupacaoLona(self.cfg)
+        self.yolo = BackupYolo(self.cfg)
         self.pendente_em = None  # motor ligado: instante da captura de um objeto que entrou
+        self.pendente_gatilho = None  # "lona" ou "yolo"
+        self.pendente_trilha = None
         self._trava = Lock()  # quadro() roda na thread do YOLO; manual(), na do WebSocket
 
     @property
@@ -326,8 +384,10 @@ class Capturador:
             log.info("Captura automática %s", "ligada" if ativa else "desligada")
             if ativa:
                 # Ligar com a lona vazia aprende o teto de novo (um objeto que
-                # passou no aprendizado anterior deixou o teto alto ali)
+                # passou no aprendizado anterior deixou o teto alto ali); as
+                # trilhas que já estavam no campo não são novas
                 self.lona.reaprender()
+                self.yolo.cobrir_todas()
             if self.sessao is not None:
                 horario = horario or datetime.now(timezone.utc)
                 self.sessao.registrar({"tipo": "automatica", "ativa": ativa,
@@ -339,7 +399,7 @@ class Capturador:
             if self.lona.teto is not None:
                 log.info("Captura: %s; a lona será aprendida de novo", motivo)
             self.lona.reaprender()
-            self.pendente_em = None
+            self._agendar(None, None)
 
     def _abrir_sessao(self, horario):
         if self.sessao is None:
@@ -370,7 +430,7 @@ class Capturador:
         o quadro foi para a fila. agora: time.monotonic(); horario: datetime com fuso.
         """
         if not self.automatica:
-            self.pendente_em = None
+            self._agendar(None, None)
             return False
         mini = miniatura(quadro_bgr)
         motor_ligado = ligado_desde is not None
@@ -380,24 +440,39 @@ class Capturador:
             # com a esteira parada não conta como novo ao ligar)
             if self.lona.quadro(mini, agora, motor_ligado) and motor_ligado \
                     and self.pendente_em is None:
-                self.pendente_em = agora + self.cfg["atraso_s"]
+                self._agendar(agora + self.cfg["atraso_s"], "lona")
                 log.debug("Captura: objeto entrou na lona (%d blocos, %.1f%%)",
                           self.lona.regiao, 100 * self.lona.ocupacao)
+            if self.cfg["backup_yolo"]:
+                trilhas = [d["id"] for d in (info or {}).get("detections", [])
+                           if d.get("id") is not None]
+                trilha = self.yolo.quadro(trilhas, agora, self.lona.ocupada or not motor_ligado)
+                if trilha is not None and self.pendente_em is None:
+                    self._agendar(self.yolo.primeira_vez(trilha) + self.cfg["atraso_s"],
+                                  "yolo", trilha)
+                    log.debug("Captura: trilha #%d do YOLO que a lona não viu", trilha)
             if not motor_ligado:
-                self.pendente_em = None
-            objeto_pronto = False
+                self._agendar(None, None)
+            objeto_pronto, gatilho, trilha = False, None, None
             if self.pendente_em is not None and agora >= self.pendente_em:
-                self.pendente_em = None
-                objeto_pronto = self.lona.ocupada
+                gatilho, trilha = self.pendente_gatilho, self.pendente_trilha
+                objeto_pronto = (self.lona.ocupada if gatilho == "lona"
+                                 else self.yolo.presente(trilha, agora))
+                self._agendar(None, None)
             if not self.automatica or not deve_capturar(agora, self.ultima_captura, ligado_desde,
                                                         diferenca, self.cfg, objeto_pronto):
                 return False
             return self._gravar(quadro_bgr, agora, horario, mini, {
                 "origem": "automatica", "motor_ligado": motor_ligado,
+                "gatilho": gatilho if motor_ligado else "diferenca",
+                **({"trilha": trilha} if gatilho == "yolo" else {}),
                 "diferenca": diferenca,
                 "ocupacao": round(self.lona.ocupacao, 4) if motor_ligado else None,
                 "regiao": self.lona.regiao if motor_ligado else None,
                 **(info or {})})
+
+    def _agendar(self, instante, gatilho, trilha=None):
+        self.pendente_em, self.pendente_gatilho, self.pendente_trilha = instante, gatilho, trilha
 
     def manual(self, quadro_bgr, agora, horario, ligado_desde, info=None):
         """

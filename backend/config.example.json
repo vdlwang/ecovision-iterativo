@@ -22,6 +22,8 @@
     "blocos_minimos": 6,
     "margem_teto": 20.0,
     "aprendizado_s": 20.0,
+    "backup_yolo": true,
+    "quadros_trilha_yolo": 3,
     "diferenca_minima": 10.0,
     "qualidade_jpeg": 95
   },
