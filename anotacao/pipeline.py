@@ -113,8 +113,11 @@ def carregar_config(caminho):
             "voto": {"iou": float(iou), "auditoria": float(auditoria)}}
 
 
-def argv_anotador(anotador, saida, classes, dispositivo=None, previa=False):
-    """A linha de comando do anotar.py para um anotador da configuração."""
+def argv_anotador(anotador, saida, classes, dispositivo=None, previa=False, max_caixas=None):
+    """
+    A linha de comando do anotar.py para um anotador da configuração;
+    max_caixas, se dado, vale sobre o das opções dele.
+    """
     argv = ["-o", str(saida), "--anotador", anotador["tipo"], "--nome", anotador["nome"],
             "--classes", str(classes)]
     if dispositivo:
@@ -123,6 +126,8 @@ def argv_anotador(anotador, saida, classes, dispositivo=None, previa=False):
         argv.append("--previa")
     for chave, valor in anotador["opcoes"].items():
         argv += [f"--{chave}", str(valor)]
+    if max_caixas is not None:
+        argv += ["--max-caixas", str(max_caixas)]  # o último vale
     return argv
 
 
@@ -160,6 +165,10 @@ def main(argv=None):
                                               "(padrão: cuda se houver)")
     parser.add_argument("--previa", action="store_true",
                         help="grava também previa/<anotador>/<nome>.jpg")
+    parser.add_argument("--max-caixas", type=int,
+                        help="caixas guardadas por imagem por cada anotador, as mais "
+                             "confiantes; 0 guarda todas (padrão: o do anotar.py, "
+                             f"{anotar.MAX_CAIXAS_PADRAO}: um objeto por captura)")
     grupo = parser.add_argument_group("importação", "como no importar.py; só com entradas")
     grupo.add_argument("--lote", help="nome do lote de captura")
     grupo.add_argument("--conjunto", choices=importar.CONJUNTOS,
@@ -183,10 +192,13 @@ def main(argv=None):
         parser.error("--lado-maximo pequeno demais")
     if args.janela is not None and args.janela < 0:
         parser.error("--janela não pode ser negativa")
+    if args.max_caixas is not None and args.max_caixas < 0:
+        parser.error("--max-caixas não pode ser negativo")
 
     # Tudo conferido antes de mexer na saída ou carregar modelo
     config = carregar_config(args.config)
-    argvs = [argv_anotador(a, args.saida, args.classes, args.dispositivo, args.previa)
+    argvs = [argv_anotador(a, args.saida, args.classes, args.dispositivo, args.previa,
+                           args.max_caixas)
              for a in config["anotadores"]]
     conferir_argumentos(config, argvs)
     nomes_classes = anotar.carregar_nomes(args.classes)

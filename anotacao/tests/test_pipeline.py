@@ -55,6 +55,7 @@ def fabricar(tipo):
 @pytest.fixture
 def ambiente(tmp_path, monkeypatch):
     falsos = {t: fabricar(t) for t in ("falso-1", "falso-2")}
+    monkeypatch.setattr(anotar, "MAX_CAIXAS_PADRAO", 0)  # várias caixas por imagem
     for tipo, classe in falsos.items():
         monkeypatch.setitem(anotar.ANOTADORES, tipo, classe)
     original = anotar.abrir_imagem
@@ -204,6 +205,15 @@ def test_opcoes_de_importacao_so_com_entradas(ambiente):
         pipeline.main([str(e["fotos"])] + e["base"])        # entradas sem --lote
     with pytest.raises(SystemExit):
         pipeline.main(e["base"])                            # saída sem importação
+
+
+def test_max_caixas_vai_a_todos_os_anotadores():
+    anotador = {"nome": "a", "tipo": "grounding-dino", "opcoes": {"max-caixas": 3}}
+    argv = pipeline.argv_anotador(anotador, "saida", "classes.yaml", max_caixas=0)
+    _, args = anotar.ler_argumentos(argv)
+    assert args.max_caixas == 0
+    _, args = anotar.ler_argumentos(pipeline.argv_anotador(anotador, "saida", "classes.yaml"))
+    assert args.max_caixas == 3
 
 
 def test_anotadores_yaml_do_repositorio_e_valido():

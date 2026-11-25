@@ -270,6 +270,8 @@ class AnotadorFalso:
 @pytest.fixture
 def ambiente(tmp_path, monkeypatch):
     monkeypatch.setitem(anotar.ANOTADORES, "falso", AnotadorFalso)
+    # os testes abaixo têm várias caixas por imagem; o padrão (1) tem os seus
+    monkeypatch.setattr(anotar, "MAX_CAIXAS_PADRAO", 0)
     original = anotar.abrir_imagem
 
     def abrir(caminho):  # deixa o anotador falso saber qual imagem recebeu
@@ -358,6 +360,28 @@ def test_main_regiao_de_interesse_pelo_centro(tmp_path, ambiente):
     assert [c[0] for c in proposta_de(saida, "l2_a.jpg")["caixas"]] == ["Lata"]
 
 
+def test_main_max_caixas_guarda_as_mais_confiantes_depois_da_regiao(tmp_path, ambiente):
+    fotos, saida, base = ambiente
+    classes = base[base.index("--classes") + 1]
+    anotar.main(base + ["--max-caixas", "1"])
+    [caixa] = proposta_de(saida, "l1_a.jpg")["caixas"]
+    assert caixa[1] == max(conf for _, conf, _ in DETECCOES["a"])
+    assert proposta_de(saida, "l1_a.jpg")["parametros"]["max_caixas"] == 1
+    # a região vem antes: fora dela, a mais confiante não conta
+    importar.main([str(fotos / "a.jpg"), "-o", str(saida), "--lote", "l2", "--regiao",
+                   "0", "0", "0.3", "1", "--classes", classes])
+    anotar.main(["l2_a.jpg"] + base + ["--max-caixas", "1"])
+    assert [c[0] for c in proposta_de(saida, "l2_a.jpg")["caixas"]] == ["Lata"]
+
+
+def test_max_caixas_padrao_e_uma(monkeypatch):
+    monkeypatch.undo()
+    _, args = anotar.ler_argumentos(["--anotador", "grounding-dino"])
+    assert args.max_caixas == anotar.MAX_CAIXAS_PADRAO == 1
+    with pytest.raises(SystemExit):
+        anotar.ler_argumentos(["--max-caixas", "-1"])
+
+
 def test_main_votado_reproduz_os_rotulos_de_antes(ambiente):
     _, saida, base = ambiente
     anotar.main(base)
@@ -384,7 +408,7 @@ def test_main_grava_tudo_e_os_limiares_de_leitura(ambiente):
     # A proposta guarda todas as caixas, com a classe; os limiares vão em parametros
     assert [(c[0], c[1]) for c in proposta["caixas"]] == [
         ("Lata", 0.91), ("Garrafa", 0.42)]
-    assert proposta["parametros"] == {"confianca": 0.5, "confianca_classe": 0.95}
+    assert proposta["parametros"] == {"confianca": 0.5, "confianca_classe": 0.95, "max_caixas": 0}
     visiveis, candidatas = formato.separar(proposta)
     assert list(visiveis) == [0] and visiveis[0][3] is False  # 0,91 < 0,95: sem classe
     assert [k for k, _, _ in candidatas] == [1]

@@ -48,6 +48,10 @@ CONFIANCA_CLASSE_PADRAO = 0.35  # viés de automação (2026-11-11)
 IOU_PADRAO = 0.5
 AREA_MAXIMA_PADRAO = 0.5      # o Grounding DINO costuma propor a esteira inteira
 CONTENCAO_PADRAO = 0.9        # caixa contida numa maior e mais confiante sai (2026-11-11)
+# Caixas guardadas por imagem, as mais confiantes, depois da região de
+# interesse; 0 = todas. As capturas da esteira têm um objeto por imagem
+# (2026-11-25: o Grounding DINO propunha ~25 por imagem, ~8 visíveis)
+MAX_CAIXAS_PADRAO = 1
 MATERIAIS = {"plastic", "metal", "glass", "paper", "other"}
 TAG_ORIENTACAO_EXIF = 0x0112
 
@@ -652,6 +656,10 @@ def criar_parser():
     deteccao.add_argument("--contencao", type=float, default=CONTENCAO_PADRAO,
                           help="remove a caixa contida nessa fração numa maior e mais "
                                f"confiante; acima de 1 desliga (padrão: {CONTENCAO_PADRAO})")
+    deteccao.add_argument("--max-caixas", type=int, default=MAX_CAIXAS_PADRAO,
+                          help="guarda só as N caixas mais confiantes de cada imagem, depois "
+                               "da região de interesse do lote; 0 guarda todas (fotos com "
+                               f"vários objetos, como a validação) (padrão: {MAX_CAIXAS_PADRAO})")
     for anotador in ANOTADORES.values():
         anotador.opcoes(parser)
     return parser
@@ -667,6 +675,8 @@ def ler_argumentos(argv=None):
     args = parser.parse_args(argv)
     if not 0 <= args.piso <= args.confianca <= 1:
         parser.error("os limiares têm de valer 0 <= --piso <= --confianca <= 1")
+    if args.max_caixas < 0:
+        parser.error("--max-caixas não pode ser negativo")
     if args.nome is not None and not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", args.nome):
         parser.error("--nome só com minúsculas, dígitos, '.', '_' e '-'")
     args.pasta = args.nome or args.anotador
@@ -696,7 +706,7 @@ def main(argv=None):
         # Os limiares de leitura vão na execução; um anotador que não os define
         # recebe os da linha de comando
         parametros = {"confianca": args.confianca, "confianca_classe": args.confianca_classe,
-                      **anotador.parametros}
+                      **anotador.parametros, "max_caixas": args.max_caixas}
         formato.copia_seguranca(args.saida)
         execucao = formato.nova_execucao(args.saida, args.pasta, anotador.nome, anotador.versao,
                                          parametros, formato.hash_classes(classes))
@@ -707,6 +717,8 @@ def main(argv=None):
         # Região de interesse do lote: fora dela (pelo centro da caixa), é fundo fixo
         regiao = lotes.get(linhas[nome].get("lote"), {}).get("regiao")
         deteccoes = [d for d in deteccoes if formato.dentro_da_regiao(d[2], regiao)]
+        if args.max_caixas:
+            deteccoes = sorted(deteccoes, key=lambda d: -d[1])[:args.max_caixas]
 
         formato.gravar_proposta(args.saida, execucao, nome,
                                 [(classes[c]["nome"], conf, caixa) for c, conf, caixa in deteccoes])

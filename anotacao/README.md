@@ -75,6 +75,7 @@ Opções de detecção, comuns a todo detector. A proposta guarda **todas** as c
 | `--confianca-classe` | `0.35` | Abaixo dessa, a página mostra a caixa **sem classe**: o revisor tem de dar a classe ou remover a caixa. A classe do anotador fica gravada, só não chega à página. `0` desliga |
 | `--iou` | `0.5` | Caixas que se sobrepõem mais que isso viram uma só, qualquer que seja a classe |
 | `--area-maxima` | `0.5` | Descarta caixas maiores que essa fração da imagem (o modelo costuma propor uma caixa para a esteira inteira) |
+| `--max-caixas` | `1` | Guarda só as N caixas mais confiantes de cada imagem, depois da região de interesse do lote; `0` guarda todas. O padrão é 1 porque as capturas da esteira têm um objeto por imagem: no lote de 2026-11-25, o Grounding DINO propunha ~25 caixas por imagem (~8 visíveis), a maioria na estrutura fixa (a placa de madeira, os parafusos e o trilho) ou na lona. Para fotos com vários objetos, como a validação, use `0` |
 | `--contencao` | `0.9` | Remove a caixa que tem ao menos essa fração dentro de outra maior e mais confiante (partes do objeto, como o topo da lata proposto como tampa, e duplicatas menores, que o NMS não pega). A caixa grande que envolve uma menor mais confiante fica: em geral é o objeto inteiro. Acima de `1` desliga |
 
 Opções de um anotador só:
@@ -127,6 +128,7 @@ O `anotadores.yaml` lista os anotadores (`nome`, `tipo` e `opcoes`, as opções 
 | `--classes` | `anotacao/classes.yaml` | Lista de classes |
 | `--dispositivo` | `cuda` se houver | Para todos os anotadores |
 | `--previa` | — | Grava também `previa/<anotador>/<nome>.jpg` |
+| `--max-caixas` | `1` | Caixas guardadas por imagem por cada anotador (vale sobre o `max-caixas` das opções do `anotadores.yaml`); `0` guarda todas |
 | `--lote`, `--conjunto`, `--regiao`, `--lado-maximo`, `--link`, `--janela` | — | Como no `importar.py`; só com entradas |
 
 ## Google Colab
@@ -295,7 +297,7 @@ for c in 0CF 0SF 45CF 45SF; do
   python anotacao/importar.py legado/database/tcc-$c/YOLO_dataset/validation/images \
     -o validacao --lote tcc-$c --link
 done
-python anotacao/anotar.py -o validacao --anotador grounding-dino          # GPU, ~2 min
+python anotacao/anotar.py -o validacao --anotador grounding-dino --max-caixas 0   # GPU, ~2 min; vários objetos por foto
 python anotacao/avaliar.py validacao --anotador grounding-dino --json gdino.json
 ```
 
